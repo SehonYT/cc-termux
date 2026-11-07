@@ -457,6 +457,20 @@ cc-termux logs
 
 ## Troubleshooting
 
+### `Cross-session messaging is off` warning
+
+Some devices run Claude Code inside a user namespace without a uid map (for example some
+proot/Termux setups). Claude Code then refuses its shared socket directory because it cannot
+verify file ownership. This only disables cross-session messaging; Claude itself works normally.
+
+The launcher now passes an explicit `CLAUDE_CODE_MESSAGING_SOCKET` pointing at
+`~/.cache/cc-termux/messaging/messaging.sock` (directory mode 0700), which fixes the socket
+directory setup on those devices. If the warning still appears, the process really has no uid
+mapping, and no userspace workaround can enable the feature; it can be ignored safely. Running
+under a mapped namespace (`unshare -Ur`, where supported) restores it.
+
+## Troubleshooting (continued)
+
  | Symptom | Cause / fix |
 |---|---|
 | `Prompt is too long` | context window of the active model is small; `cc-termux use <id>` refreshes it |

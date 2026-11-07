@@ -150,6 +150,17 @@ async function envForChild() {
   const env = { ...process.env };
   env.ANTHROPIC_BASE_URL = base;
   env.ANTHROPIC_AUTH_TOKEN = GATEWAY_TOKEN;
+  // Claude Code refuses its default cross-session messaging socket under a user
+  // namespace without a uid map (some Termux/proot devices). Give it an explicit
+  // socket path inside our private cache directory instead; the directory is 0700.
+  if (!env.CLAUDE_CODE_MESSAGING_SOCKET) {
+    try {
+      const messagingDir = path.join(CACHE, "messaging");
+      fs.mkdirSync(messagingDir, { recursive: true, mode: 0o700 });
+      try { fs.chmodSync(messagingDir, 0o700); } catch (e) { }
+      env.CLAUDE_CODE_MESSAGING_SOCKET = path.join(messagingDir, "messaging.sock");
+    } catch (e) { }
+  }
   env.CC_TERMUX_GATEWAY_TOKEN = GATEWAY_TOKEN;
   delete env.ANTHROPIC_API_KEY;
   const p = (cfg.providers || {})[cfg.active] || {};
