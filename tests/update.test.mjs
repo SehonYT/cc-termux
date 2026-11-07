@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { isNewer, semverNewer, check, localInfo } from "../bin/cc-update.mjs";
+import { isNewer, semverNewer, check, localInfo, findInstaller } from "../bin/cc-update.mjs";
 
 function tmpRoot(version, sha) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cc-upd-"));
@@ -47,4 +47,14 @@ test("localInfo falls back safely when the stamp is missing", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cc-upd-"));
   try { assert.deepEqual(localInfo(root), { version: "0.0.0", sha: null }); }
   finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+test("findInstaller handles GitHub-style archives with a top-level folder", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cc-upd-arc-"));
+  try {
+    const nested = path.join(tmp, "cc-termux-main");
+    fs.mkdirSync(nested, { recursive: true });
+    fs.writeFileSync(path.join(nested, "install.mjs"), "// installer");
+    assert.equal(findInstaller(tmp), path.join(nested, "install.mjs"));
+    assert.equal(findInstaller(path.join(tmp, "empty")), null);
+  } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
 });

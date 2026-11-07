@@ -73,6 +73,19 @@ export async function check({ root = DEFAULT_ROOT, repo = DEFAULT_REPO, fetchImp
   return { local, remote, available, cached: false };
 }
 
+export function findInstaller(dir, depth = 0) {
+  if (depth > 3) return null;
+  try {
+    if (fs.existsSync(path.join(dir, "install.mjs"))) return path.join(dir, "install.mjs");
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const found = findInstaller(path.join(dir, entry.name), depth + 1);
+      if (found) return found;
+    }
+  } catch (e) { }
+  return null;
+}
+
 export async function selfUpdate({ root = DEFAULT_ROOT, repo = DEFAULT_REPO } = {}) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cc-update-"));
   const tgz = path.join(tmp, "src.tgz");
@@ -83,13 +96,14 @@ export async function selfUpdate({ root = DEFAULT_ROOT, repo = DEFAULT_REPO } = 
     const src = path.join(tmp, "src");
     fs.mkdirSync(src, { recursive: true });
     extractTgz(tgz, src);
-    const installer = [path.join(src, "install.mjs"), ...fs.readdirSync(src).filter((d) => fs.existsSync(path.join(src, d, "install.mjs"))).map((d) => path.join(src, d, "install.mjs"))][0];
-    if (!fs.existsSync(installer)) throw new Error("install.mjs missing in archive");
+    const installer = findInstaller(src);
+    if (!installer) throw new Error("install.mjs missing in archive (contents: " + fs.readdirSync(src).join(", ") + ")");
     const res = spawnSync(process.execPath, [installer, "--root", root], { stdio: "inherit" });
     if (res.status !== 0) throw new Error("installer exited with " + res.status);
     let sha = null;
     try { sha = (await remoteInfo({ repo })).sha; } catch (e) { }
-    const pkg = JSON.parse(fs.readFileSync(path.join(path.dirname(installer), "package.json"), "utf8"));
+    const pkgPath = path.join(path.dirname(installer), "package.json");
+    const pkg = fs.existsSync(pkgPath) ? JSON.parse(fs.readFileSync(pkgPath, "utf8")) : { version: "unknown" };
     fs.writeFileSync(path.join(root, "cc-termux.json"), JSON.stringify({ version: pkg.version, sha, installedAt: new Date().toISOString() }, null, 2) + "\n");
     console.log("cc-termux: updated to " + pkg.version + (sha ? " (" + sha.slice(0, 7) + ")" : ""));
     return true;
