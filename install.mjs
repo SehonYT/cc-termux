@@ -120,6 +120,7 @@ function installShims(t) {
   }
   const prefix = process.env.PREFIX || (t.termux ? "/data/data/com.termux/files/usr" : "/usr/local");
   const binDir = path.join(prefix, "bin");
+  const homeBin = path.join(os.homedir(), ".local", "bin");
   const writeShim = (dir, name, target) => {
     const p = path.join(dir, name);
     fs.mkdirSync(dir, { recursive: true });
@@ -129,14 +130,44 @@ function installShims(t) {
     return p;
   };
   try {
-    for (const [name, argv] of Object.entries(scripts)) writeShim(binDir, name, argv[0]);
-    log("linked " + binDir + "/{claude,cc-termux,ccp}");
+    let ver = "cc-termux";
+    try { ver = fs.readFileSync(path.join(ROOT, "VERSION"), "utf8").trim().split("-")[0] || "cc-termux"; } catch (e) { }
+    const versionsDir = path.join(os.homedir(), ".local", "share", "claude", "versions");
+    fs.mkdirSync(versionsDir, { recursive: true });
+    const targetFile = path.join(versionsDir, ver);
+    writeShim(path.dirname(targetFile), path.basename(targetFile), scripts.claude[0]);
+    fs.mkdirSync(homeBin, { recursive: true });
+    const link = path.join(homeBin, "claude");
+    try { if (fs.existsSync(link) && !fs.lstatSync(link).isSymbolicLink()) fs.renameSync(link, link + ".official-backup." + Date.now()); } catch (e) { }
+    try { fs.rmSync(link, { force: true }); } catch (e) { }
+    fs.symlinkSync(targetFile, link);
+    writeShim(binDir, "cc-termux", scripts["cc-termux"][0]);
+    writeShim(binDir, "ccp", scripts.ccp[0]);
+    log("linked " + path.join(homeBin, "claude") + " and " + binDir + "/{cc-termux,ccp}");
   } catch (e) {
-    for (const [name, argv] of Object.entries(scripts)) writeShim(path.join(ROOT, "bin"), name, argv[0]);
-    console.log("  could not write to " + binDir + "; shims are in " + path.join(ROOT, "bin") + ", add it to PATH");
+    try {
+      for (const [name, argv] of Object.entries(scripts)) writeShim(path.join(ROOT, "bin"), name, argv[0]);
+      console.log("  could not write shims; they are in " + path.join(ROOT, "bin") + ", add it to PATH");
+    } catch (e2) { }
+  }
+  // remove the old prefix claude so Claude Code does not report an npm leftover
+  const oldClaude = path.join(binDir, "claude");
+  try { if (fs.existsSync(oldClaude)) { let dst = oldClaude + ".official-backup"; if (fs.existsSync(dst)) dst += "." + Date.now(); fs.renameSync(oldClaude, dst); } } catch (e) { }
+  // mark native install + make ~/.local/bin visible to login shells
+  try {
+    const cj = path.join(os.homedir(), ".claude.json");
+    let cfg = {};
+    try { cfg = JSON.parse(fs.readFileSync(cj, "utf8")); } catch (e) { cfg = {}; }
+    if (cfg.installMethod !== "native") { cfg.installMethod = "native"; fs.writeFileSync(cj, JSON.stringify(cfg, null, 2) + "\n"); }
+  } catch (e) { }
+  for (const rc of [path.join(os.homedir(), ".bashrc"), path.join(os.homedir(), ".profile")]) {
+    try {
+      if (!fs.existsSync(rc)) continue;
+      const text = fs.readFileSync(rc, "utf8");
+      if (!text.includes("# cc-termux PATH")) fs.appendFileSync(rc, "\n# cc-termux PATH\nexport PATH=\"$HOME/.local/bin:$PATH\"\n");
+    } catch (e) { }
   }
 }
-
 (async () => {
   if (!nodeVersionOk(process.versions.node)) fail("Node.js 18+ is required (found " + process.versions.node + ")");
   const t = detectHostTarget();

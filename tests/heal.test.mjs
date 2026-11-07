@@ -8,12 +8,13 @@ import { healEnvironment } from "../bin/cc-heal.mjs";
 test("heal repairs settings, foreign claude binaries and sample configs", () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cc-heal-"));
   const home = path.join(tmp, "home");
-  const root = path.join(tmp, "root");
+  const root = path.join(home, ".local", "share", "cc-termux");
   const bin = path.join(tmp, "bin");
   const prefix = path.join(tmp, "prefix");
   fs.mkdirSync(path.join(home, ".claude"), { recursive: true });
   fs.mkdirSync(path.join(home, ".config", "cc-termux"), { recursive: true });
   fs.mkdirSync(path.join(root, "bin"), { recursive: true });
+  fs.writeFileSync(path.join(home, ".bashrc"), "# shell\n");
   fs.mkdirSync(bin, { recursive: true });
 
   const settingsPath = path.join(home, ".claude", "settings.json");
@@ -55,7 +56,12 @@ test("heal repairs settings, foreign claude binaries and sample configs", () => 
   assert.ok(cfg.routing["prov/tokens/deepseek/deepseek-v4.1-flash"], "routing must be rebuilt");
   const s2 = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
   assert.ok(Array.isArray(s2.modelPicker.options) && s2.modelPicker.options.length >= 2, "picker must be rebuilt");
-  assert.ok(fs.existsSync(path.join(prefix, "bin", "cc-termux")), "shim installed into the isolated prefix");
+  assert.ok(fs.existsSync(path.join(prefix, "bin", "cc-termux")), "cc-termux shim installed into the isolated prefix");
+  const link = path.join(home, ".local", "bin", "claude");
+  assert.ok(fs.lstatSync(link).isSymbolicLink(), "native ~/.local/bin/claude symlink created");
+  assert.match(fs.readFileSync(link, "utf8"), /cc-launcher\.mjs/);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(home, ".claude.json"), "utf8")).installMethod, "native");
+  assert.match(fs.readFileSync(path.join(home, ".bashrc"), "utf8"), /# cc-termux PATH/);
 
   const again = healEnvironment({ root, home, prefix });
   assert.equal(again.length, 0, "heal must be idempotent");

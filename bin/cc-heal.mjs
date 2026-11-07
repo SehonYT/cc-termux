@@ -16,6 +16,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { spawnSync } from "node:child_process";
 
 const SHIM_MARK = "cc-launcher.mjs";
 
@@ -153,32 +154,91 @@ export function healEnvironment({ root = process.env.CC_TERMUX_ROOT, home = os.h
     catch (e) { changes.push("claude binary: could not replace " + p + " (" + e.code + ")"); }
   }
 
-  // 4. launcher shims in the prefix bin dir (never for temp/foreign roots)
+  // 4. launcher layout: native-style ~/.local/bin/claude + cc-termux/ccp in the prefix
   const canonicalRoot = path.join(home, ".local", "share", "cc-termux");
   const isCanonical = path.resolve(root) === path.resolve(canonicalRoot);
-  const effectivePrefix = prefix || (isCanonical ? (process.env.PREFIX || (process.platform === "android" ? "/data/data/com.termux/files/usr" : "/usr/local")) : null);
-  if (effectivePrefix && installPrefix !== false) {
-  const binDir = path.join(effectivePrefix, "bin");
-  for (const name of ["claude", "cc-termux", "ccp"]) {
-    const target = path.join(binDir, name);
-    if (!fs.existsSync(target) || !isOurShim(target)) {
+  if (isCanonical && installPrefix !== false && process.platform !== "win32") {
+    const homeBin = path.join(home, ".local", "bin");
+    fs.mkdirSync(homeBin, { recursive: true });
+    const prefixBin = path.join(prefix || process.env.PREFIX || (process.platform === "android" ? "/data/data/com.termux/files/usr" : "/usr/local"), "bin");
+    const node = process.execPath;
+    const shimBody = (target) => "#!/bin/sh\nexec \"" + node + "\" \"" + target + "\" \"$@\"\n";
+    const writeLauncherShim = (file, target) => {
+      const body = shimBody(target);
+      try { if (fs.existsSync(file) && fs.readFileSync(file, "utf8") === body) return false; } catch (e) { }
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      if (fs.existsSync(file) && !isOurShim(file)) backup(file);
+      try { fs.rmSync(file, { force: true }); } catch (e) { }
+      fs.writeFileSync(file, body);
+      fs.chmodSync(file, 0o755);
+      return true;
+    };
+    try {
+      // Native-style layout: ~/.local/bin/claude -> ~/.local/share/claude/versions/<version>
+      let ver = "cc-termux";
+      try { ver = fs.readFileSync(path.join(root, "VERSION"), "utf8").trim().split("-")[0] || "cc-termux"; } catch (e) { }
+      const versionsDir = path.join(home, ".local", "share", "claude", "versions");
+      fs.mkdirSync(versionsDir, { recursive: true });
+      const targetFile = path.join(versionsDir, ver);
+      if (writeLauncherShim(targetFile, path.join(root, "bin", "cc-launcher.mjs"))) changes.push("shim: " + targetFile);
+      const link = path.join(homeBin, "claude");
+      let linkOk = false;
+      try { linkOk = fs.lstatSync(link).isSymbolicLink() && fs.readlinkSync(link) === targetFile; } catch (e) { }
+      if (!linkOk) {
+        try { if (fs.existsSync(link) && !fs.lstatSync(link).isSymbolicLink()) backup(link); } catch (e) { }
+        try { fs.rmSync(link, { force: true }); } catch (e) { }
+        fs.symlinkSync(targetFile, link);
+        changes.push("shim: " + link + " -> " + targetFile);
+      }
+    } catch (e) { changes.push("shim: could not write ~/.local/bin/claude (" + e.code + ")"); }
+    fs.mkdirSync(prefixBin, { recursive: true });
+    for (const name of ["cc-termux", "ccp"]) {
+      const target = path.join(prefixBin, name);
+      const script = path.join(root, "bin", name === "ccp" ? "ccp.mjs" : "cc-termux");
       try {
-        if (fs.existsSync(target)) backup(target);
-        const launcher = name === "claude" ? "cc-launcher.mjs" : name === "ccp" ? "ccp.mjs" : "cc-termux";
-        writeShim(target, root);
-        if (name !== "claude") {
-          const node = process.execPath;
-          const script = path.join(root, "bin", launcher);
-          fs.writeFileSync(target, "#!/bin/sh\nexec \"" + node + "\" \"" + script + "\" \"$@\"\n");
+        const body = shimBody(script);
+        let same = false;
+        try { same = fs.existsSync(target) && fs.readFileSync(target, "utf8") === body; } catch (e) { }
+        if (!same) {
+          if (fs.existsSync(target) && !isOurShim(target)) backup(target);
+          try { fs.rmSync(target, { force: true }); } catch (e) { }
+          fs.writeFileSync(target, body);
           fs.chmodSync(target, 0o755);
+          changes.push("shim: " + target);
         }
-        changes.push("shim: installed " + target);
       } catch (e) { changes.push("shim: could not write " + target + " (" + e.code + ")"); }
     }
+    // remove the old prefix claude so Claude Code does not report an npm leftover
+    const oldClaude = path.join(prefixBin, "claude");
+    if (fs.existsSync(oldClaude)) {
+      try { backup(oldClaude); changes.push("shim: moved " + oldClaude + " aside"); } catch (e) { }
+    }
+    // make sure login shells find ~/.local/bin
+    for (const rc of [path.join(home, ".bashrc"), path.join(home, ".profile")]) {
+      try {
+        if (!fs.existsSync(rc)) continue;
+        const text = fs.readFileSync(rc, "utf8");
+        if (text.includes("# cc-termux PATH")) continue;
+        fs.appendFileSync(rc, "\n# cc-termux PATH\nexport PATH=\"$HOME/.local/bin:$PATH\"\n");
+        changes.push("path: added ~/.local/bin to " + path.basename(rc));
+      } catch (e) { }
+    }
+    // mark the install as native for Claude Code diagnostics
+    try {
+      const cj = path.join(home, ".claude.json");
+      let cfg = {};
+      try { cfg = JSON.parse(fs.readFileSync(cj, "utf8")); } catch (e) { cfg = {}; }
+      if (cfg.installMethod !== "native") { cfg.installMethod = "native"; saveJson(cj, cfg); changes.push("config: installMethod=native"); }
+    } catch (e) { }
+    // remove a leftover npm global package if present
+    try {
+      const npmPkg = path.join(process.env.PREFIX || (process.platform === "android" ? "/data/data/com.termux/files/usr" : "/usr/local"), "lib", "node_modules", "@anthropic-ai", "claude-code");
+      if (fs.existsSync(npmPkg)) {
+        const r = spawnSync("npm", ["-g", "uninstall", "@anthropic-ai/claude-code"], { stdio: "ignore" });
+        if (r.status === 0) changes.push("npm: removed leftover global claude-code package");
+      }
+    } catch (e) { }
   }
-
-  }
-
   // 5. sessions, duplicate gateways, log size
   try {
     const sessions = path.join(cache, "sessions");

@@ -85,6 +85,23 @@ When Claude Code is launched interactively, the launcher checks at most once per
 silent on failure) and prints a one-line notice if a newer commit is available. Installed state is kept
 in `~/.local/share/cc-termux/cc-termux.json` (`version`, commit `sha`, `installedAt`).
 
+## Native install layout
+
+Claude Code's `/status` diagnostics expect the native layout, so cc-termux installs it:
+
+```
+~/.local/bin/claude                        -> ~/.local/share/claude/versions/<version>
+~/.local/share/claude/versions/<version>   the cc-termux launcher
+$PREFIX/bin/cc-termux, $PREFIX/bin/ccp     CLI shims
+~/.claude.json                             {"installMethod":"native"}
+```
+
+`heal` (also run on install/update) also:
+- moves a legacy `$PREFIX/bin/claude` to `claude.official-backup` (no more "leftover npm global" warning)
+- uninstalls a leftover npm `@anthropic-ai/claude-code` package
+- appends `~/.local/bin` to `~/.bashrc` and `~/.profile` when missing
+- makes `~/.local/bin/claude` a symlink into `claude/versions/` so the diagnostics stay clean
+
 ## First run
 
 Non-interactive setup is available too:
