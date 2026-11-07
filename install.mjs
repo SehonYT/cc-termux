@@ -9,6 +9,8 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { detectTarget, nodeVersionOk, glibcTooOld } from "./bin/cc-platform.mjs";
+import { extractTgz } from "./bin/cc-tar.mjs";
 
 const SRC = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -26,35 +28,20 @@ const VERSION_ARG = argVal("--version", "");
 const log = (m) => console.log("\x1b[36mcc-termux\x1b[0m " + m);
 const fail = (m) => { console.error("\x1b[31merror\x1b[0m " + m); process.exit(1); };
 
-function arm64Capable() {
-  try {
-    const cpu = fs.readFileSync("/proc/cpuinfo", "utf8");
-    const m = cpu.match(/CPU architecture:\s*(\d+)/i);
-    if (m && Number(m[1]) >= 8) return true;
-    if (/aarch64/i.test(cpu)) return true;
-  } catch (e) { }
-  return false;
-}
-
-function target() {
-  const p = process.platform, a = process.arch;
-  if (p === "android") {
-    if (a === "x64") return { pkg: "linux-x64-musl", loader: "x86_64", bin: "claude.bin", termux: true };
-    // 32-bit Termux on an ARMv8/aarch64 kernel can still exec the official arm64 binary.
-    if (a === "arm64" || arm64Capable()) return { pkg: "linux-arm64-musl", loader: "aarch64", bin: "claude.bin", termux: true };
-    return { js: true, pkg: null, bin: "claude.bin", termux: true };
+function detectHostTarget() {
+  let cpuinfo = "";
+  try { cpuinfo = fs.readFileSync("/proc/cpuinfo", "utf8"); } catch (e) { }
+  let t = detectTarget({
+    platform: process.platform, arch: process.arch, cpuinfo,
+    hasFile: (p) => fs.existsSync(p),
+    forceJs: has("--force-js") || process.env.CC_TERMUX_FORCE_JS === "1",
+  });
+  if (process.platform === "linux" && t.pkg && !/-musl$/.test(t.pkg)) {
+    const ldd = spawnSync("ldd", ["--version"], { encoding: "utf8" }).stdout || "";
+    if (glibcTooOld(ldd)) t = { ...t, pkg: t.pkg + "-musl" };
   }
-  if (p === "linux") {
-    const musl = fs.existsSync("/lib/ld-musl-x86_64.so.1") || fs.existsSync("/lib/ld-musl-aarch64.so.1");
-    if (a === "x64") return { pkg: musl ? "linux-x64-musl" : "linux-x64", bin: "claude.bin" };
-    if (a === "arm64") return { pkg: musl ? "linux-arm64-musl" : "linux-arm64", bin: "claude.bin" };
-    return { js: true, pkg: null, bin: "claude.bin" };
-  }
-  if (p === "darwin") return { pkg: a === "arm64" ? "darwin-arm64" : "darwin-x64", bin: "claude.bin" };
-  if (p === "win32") return { pkg: a === "arm64" ? "win32-arm64" : "win32-x64", bin: "claude.exe", win: true };
-  return { js: true, pkg: null, bin: "claude.bin" };
+  return t;
 }
-
 async function latestVersion() {
   const r = await fetch("https://registry.npmjs.org/@anthropic-ai/claude-code/latest");
   if (!r.ok) throw new Error("registry HTTP " + r.status);
@@ -68,15 +55,30 @@ function run(cmd, argv, opts) {
 
 function extract(tgz, dest) {
   fs.mkdirSync(dest, { recursive: true });
-  return run("tar", ["-xzf", tgz, "-C", dest]);
+  const tarOk = spawnSync("tar", ["--version"], { stdio: "ignore" }).status === 0;
+  if (tarOk) return spawnSync("tar", ["-xzf", tgz, "-C", dest], { stdio: "inherit" }).status === 0;
+  try { extractTgz(tgz, dest); return true; } catch (e) { fail("extraction failed: " + e.message); }
 }
 
 async function download(url, file) {
-  const r = await fetch(url);
-  if (!r.ok) throw new Error("download HTTP " + r.status + " " + url);
-  const buf = Buffer.from(await r.arrayBuffer());
-  fs.writeFileSync(file, buf);
-  return buf.length;
+  let lastErr;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const r = await fetch(url, { signal: AbortSignal.timeout(180000) });
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      const buf = Buffer.from(await r.arrayBuffer());
+      fs.writeFileSync(file, buf);
+      return buf.length;
+    } catch (e) {
+      lastErr = e;
+      if (attempt < 3) {
+        const wait = 1000 * attempt;
+        log("download attempt " + attempt + " failed (" + (e.name || e.message) + "), retrying in " + wait + "ms");
+        await new Promise((r) => setTimeout(r, wait));
+      }
+    }
+  }
+  throw new Error("download failed: " + (lastErr && (lastErr.message || lastErr.name)) + " - " + url);
 }
 
 function pkgTarballUrl(pkg, ver) {
@@ -85,12 +87,12 @@ function pkgTarballUrl(pkg, ver) {
 }
 
 function copyAssets() {
-  const files = ["proxy/server.mjs", "bin/cc-launcher.mjs", "bin/cc-setup.mjs", "bin/cc-termux", "bin/cc-env.mjs", "bin/cc-patch.mjs", "bin/ccp.mjs", "bin/cc-heal.mjs", "presets.json", "config.example.json"];
+  const files = ["proxy/server.mjs", "bin/cc-launcher.mjs", "bin/cc-setup.mjs", "bin/cc-termux", "bin/cc-env.mjs", "bin/cc-patch.mjs", "bin/ccp.mjs", "bin/cc-heal.mjs", "bin/cc-platform.mjs", "bin/cc-tar.mjs", "patches.json", "presets.json", "config.example.json", "install.mjs", "install.sh", "install.ps1", "get.sh", "get.ps1", "README.md", "LICENSE", "NOTICE"];
   for (const f of files) {
     const from = path.join(SRC, f);
     const to = path.join(ROOT, f);
     fs.mkdirSync(path.dirname(to), { recursive: true });
-    if (fs.existsSync(from)) { fs.copyFileSync(from, to); if (!f.endsWith(".json") && !f.endsWith(".mjs")) fs.chmodSync(to, 0o755); }
+    if (fs.existsSync(from)) { fs.copyFileSync(from, to); if (!f.endsWith(".json")) fs.chmodSync(to, 0o755); }
   }
   try { fs.chmodSync(path.join(ROOT, "bin", "cc-launcher.mjs"), 0o755); } catch {}
   const cmds = path.join(SRC, "commands");
@@ -135,13 +137,15 @@ function installShims(t) {
 }
 
 (async () => {
-  const t = target();
+  if (!nodeVersionOk(process.versions.node)) fail("Node.js 18+ is required (found " + process.versions.node + ")");
+  const t = detectHostTarget();
   if (CHECK) {
     console.log("cc-termux install plan");
     console.log("  platform : " + process.platform + " " + process.arch);
     console.log("  termux   : " + (t.termux ? "yes" : "no"));
     console.log("  mode     : " + (t.js ? "JS fallback (2.1.112)" : "native " + t.pkg));
     if (t.loader) console.log("  loader   : alpine " + t.loader + " musl (android bionic)");
+    if (t.js && t.reason) console.log("  fallback : " + t.reason);
     console.log("  root     : " + ROOT);
     console.log("  config   : " + CFG);
     console.log("  shims    : " + (t.win ? ROOT + "\\bin\\*.cmd" : (process.env.PREFIX || (t.termux ? "/data/data/com.termux/files/usr" : "/usr/local")) + "/bin/{claude,cc-termux,ccp}"));

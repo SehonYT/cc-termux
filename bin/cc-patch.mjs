@@ -1,103 +1,85 @@
 #!/usr/bin/env node
-// Optional byte patches for the installed Claude Code binary (terminal UI strings).
-// Patches are equal-length replacements, anchored to known release strings; missing
-// anchors are skipped rather than corrupting the binary.
-
+// Optional equal-length byte patches for the installed Claude Code binary.
+//
+// Patch definitions live in patches.json next to the install root, so a new Claude Code
+// release can be supported by editing JSON instead of this script. Each `find`/`start`
+// entry may be a list of alternatives; the first one present wins. Missing anchors are
+// reported and skipped, never forced, and the original binary is kept as claude.bin.orig.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
 const ROOT = process.env.CC_TERMUX_ROOT || path.join(os.homedir(), ".local", "share", "cc-termux");
-const BIN = path.join(ROOT, "bin", "claude.bin");
+const BIN = path.join(ROOT, "bin", process.platform === "win32" ? "claude.exe" : "claude.bin");
 const BACKUP = BIN + ".orig";
+const DEFS = path.join(ROOT, "patches.json");
 
-const TEXT_PATCHES = [
-  {
-    id: "provider-command",
-    description: "Turn the removed /agents command into /provider",
-    find: 'name:"agents",description:"(removed) Ask Claude to create/manage subagents, or edit .claude/agents/"',
-    replace: 'name:"provider",description:"Switch the active LLM provider with a picker"',
-  },
-  {
-    id: "picker-title",
-    description: "Rename the /model picker title to a provider-aware one",
-    find: "Switch between Claude models",
-    replace: "Switch between AI providers ",
-  },
-  {
-    id: "picker-hint",
-    description: "Explain provider rows vs model rows in the picker hint",
-    find: "For other/previous model names, specify with --model.",
-    replace: "Provider rows switch provider, model rows apply now.    ",
-  },
-];
-
-const REGION_PATCHES = [
-  {
-    id: "provider-handler",
-    description: "Route the provider command to the cc-termux picker (ccp)",
-    start: "var Ukr=async()=>",
-    end: ',jkr={type:"local",name:',
-    replace: 'var Ukr=async()=>{try{Bun.spawnSync(["ccp"],{stdio:"inherit"})}catch(e){}return{type:"text",value:"provider picker closed"}}',
-  },
-];
-
-const read = () => fs.readFileSync(BIN);
+function loadDefs() {
+  try { return JSON.parse(fs.readFileSync(DEFS, "utf8")); }
+  catch (e) { return { text: [], regions: [] }; }
+}
 const padTo = (s, n) => (s.length >= n ? s.slice(0, n) : s + " ".repeat(n - s.length));
+const asList = (v) => (Array.isArray(v) ? v : [v]);
 
-function applyText(buf, applied, skipped) {
+function applyText(buf, patches, applied, skipped) {
   let changed = 0;
-  for (const p of TEXT_PATCHES) {
-    const find = Buffer.from(p.find);
-    const repl = Buffer.from(padTo(p.replace, p.find.length));
-    const hits = [];
-    let i = buf.indexOf(find);
-    while (i >= 0) { hits.push(i); i = buf.indexOf(find, i + 1); }
-    if (!hits.length) {
-      if (buf.indexOf(repl) >= 0) skipped.push(p.id + " (already patched)");
-      else skipped.push(p.id + " (anchor missing)");
-      continue;
+  for (const p of patches) {
+    let hit = null;
+    let already = false;
+    for (const find of asList(p.find)) {
+      const idx = buf.indexOf(Buffer.from(find));
+      if (idx >= 0) { hit = find; break; }
+      if (buf.indexOf(Buffer.from(padTo(p.replace, find.length))) >= 0) { already = true; break; }
     }
-    for (const at of hits) repl.copy(buf, at);
-    changed += hits.length;
-    applied.push(p.id + (hits.length > 1 ? " x" + hits.length : ""));
+    if (!hit) { skipped.push(p.id + (already ? " (already patched)" : " (anchor missing)")); continue; }
+    const find = Buffer.from(hit);
+    const repl = Buffer.from(padTo(p.replace, hit.length));
+    let pos = buf.indexOf(find);
+    let n = 0;
+    while (pos >= 0) { repl.copy(buf, pos); n++; pos = buf.indexOf(find, pos + find.length); }
+    changed += n;
+    applied.push(p.id + (n > 1 ? " x" + n : ""));
   }
   return changed;
 }
 
-function applyRegions(buf, applied, skipped) {
+function applyRegions(buf, patches, applied, skipped) {
   let changed = 0;
-  for (const p of REGION_PATCHES) {
-    const startBuf = Buffer.from(p.start);
-    const endBuf = Buffer.from(p.end);
+  for (const p of patches) {
+    let start = null;
+    for (const s of asList(p.start)) { if (buf.indexOf(Buffer.from(s)) >= 0) { start = s; break; } }
+    if (!start) { skipped.push(p.id + " (start anchor missing)"); continue; }
+    let end = null;
+    for (const e of asList(p.end)) { if (buf.indexOf(Buffer.from(e)) >= 0) { end = e; break; } }
+    if (!end) { skipped.push(p.id + " (end anchor missing)"); continue; }
+    const startBuf = Buffer.from(start);
+    const endBuf = Buffer.from(end);
     let at = buf.indexOf(startBuf);
-    if (at < 0) { skipped.push(p.id + " (start anchor missing)"); continue; }
     let n = 0;
     while (at >= 0) {
       const endAt = buf.indexOf(endBuf, at);
-      if (endAt < 0) { skipped.push(p.id + " (end anchor missing)"); break; }
+      if (endAt < 0) break;
       const len = endAt - at;
-      if (p.replace.length > len) { skipped.push(p.id + " (replacement too long)"); break; }
+      if (p.replace.length > len) { skipped.push(p.id + " (replacement longer than region)"); break; }
       Buffer.from(padTo(p.replace, len)).copy(buf, at);
       n++;
       at = buf.indexOf(startBuf, at + len);
     }
     if (n) { changed += n; applied.push(p.id + (n > 1 ? " x" + n : "")); }
+    else skipped.push(p.id + " (no region matched)");
   }
   return changed;
 }
 
 function apply() {
   let buf;
-  try { buf = read(); } catch { console.error("cc-patch: binary not found: " + BIN); process.exit(1); }
+  try { buf = fs.readFileSync(BIN); } catch (e) { console.error("cc-patch: binary not found: " + BIN); process.exit(1); }
+  if (!fs.existsSync(BACKUP)) fs.writeFileSync(BACKUP, Buffer.from(buf), { mode: 0o755 });
+  const defs = loadDefs();
   const applied = [], skipped = [];
-  let changed = applyRegions(buf, applied, skipped);
-  changed += applyText(buf, applied, skipped);
-  if (!changed) {
-    console.log("cc-patch: nothing to do" + (skipped.length ? "  [" + skipped.join(", ") + "]" : ""));
-    return 0;
-  }
-  if (!fs.existsSync(BACKUP)) fs.writeFileSync(BACKUP, buf, { mode: 0o755 });
+  let changed = applyRegions(buf, defs.regions || [], applied, skipped);
+  changed += applyText(buf, defs.text || [], applied, skipped);
+  if (!changed) { console.log("cc-patch: nothing to do" + (skipped.length ? " [" + skipped.join(", ") + "]" : "")); return 0; }
   try { fs.writeFileSync(BIN, buf, { mode: 0o755 }); }
   catch (e) { console.error("cc-patch: cannot write binary (" + e.code + "). Quit Claude sessions and retry."); process.exit(1); }
   console.log("cc-patch: applied " + applied.join(", ") + (skipped.length ? "  (skipped: " + skipped.join(", ") + ")" : ""));
@@ -106,16 +88,14 @@ function apply() {
 
 function status() {
   let buf;
-  try { buf = read(); } catch (e) { console.error("cc-patch: cannot read binary (" + e.code + ")"); process.exit(1); }
-  for (const p of REGION_PATCHES) {
-    const done = buf.indexOf(Buffer.from("Bun.spawnSync")) >= 0;
-    const pending = buf.indexOf(Buffer.from(p.start)) >= 0;
-    console.log("  " + (done ? "applied " : pending ? "pending " : "n/a     ") + p.id + "  - " + p.description);
-  }
-  for (const p of TEXT_PATCHES) {
-    const done = buf.indexOf(Buffer.from(p.replace.trim())) >= 0;
-    const pending = buf.indexOf(Buffer.from(p.find)) >= 0;
-    console.log("  " + (done ? "applied " : pending ? "pending " : "n/a     ") + p.id + "  - " + p.description);
+  try { buf = fs.readFileSync(BIN); } catch (e) { console.error("cc-patch: cannot read binary (" + e.code + ")"); process.exit(1); }
+  const defs = loadDefs();
+  for (const p of [...(defs.regions || []), ...(defs.text || [])]) {
+    const appliedMarker = p.replace.trim().slice(0, 24);
+    const applied = buf.indexOf(Buffer.from(appliedMarker)) >= 0;
+    const anchor = asList(p.find || p.start)[0];
+    const pending = buf.indexOf(Buffer.from(anchor)) >= 0;
+    console.log("  " + (applied ? "applied " : pending ? "pending " : "n/a     ") + p.id + "  - " + (p.description || ""));
   }
 }
 

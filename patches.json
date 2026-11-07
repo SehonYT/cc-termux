@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "note": "Equal-length byte patches for the installed Claude Code binary. Find lists are alternatives: the first one present is used. Missing anchors are skipped, never forced.",
+  "text": [
+    {
+      "id": "provider-command",
+      "description": "Expose the provider command instead of the removed /agents entry",
+      "find": [
+        "name:\"agents\",description:\"(removed) Ask Claude to create/manage subagents, or edit .claude/agents/\""
+      ],
+      "replace": "name:\"provider\",description:\"Switch the active LLM provider with a picker\""
+    },
+    {
+      "id": "picker-title",
+      "description": "Rename the model picker title to a provider-aware one",
+      "find": [
+        "Switch between Claude models"
+      ],
+      "replace": "Switch between AI providers "
+    },
+    {
+      "id": "picker-hint",
+      "description": "Explain provider rows vs model rows in the picker hint",
+      "find": [
+        "For other/previous model names, specify with --model."
+      ],
+      "replace": "Provider rows switch provider, model rows apply now.    "
+    }
+  ],
+  "regions": [
+    {
+      "id": "provider-handler",
+      "description": "Route the provider command to the cc-termux picker",
+      "start": [
+        "var Ukr=async()=>"
+      ],
+      "end": [
+        ",jkr={type:\"local\",name:"
+      ],
+      "replace": "var Ukr=async()=>{try{Bun.spawnSync([\"ccp\"],{stdio:\"inherit\"})}catch(e){}return{type:\"text\",value:\"provider picker closed\"}}"
+    }
+  ]
+}

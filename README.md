@@ -222,6 +222,37 @@ CC_TERMUX_NO_UI_PATCH=1 bash install.sh   # skip on install
 
 See `NOTICE` for the caveats.
 
+## Platform support
+
+| Host | Build used |
+|---|---|
+| Termux aarch64, or 32-bit Termux on an AArch64 kernel | official `linux-arm64-musl` + Alpine musl loader |
+| Termux x86_64 | official `linux-x64-musl` + musl loader |
+| Linux x64 / arm64 (glibc) | official `linux-x64` / `linux-arm64` |
+| Linux musl distros | official `*-musl` builds (auto-detected) |
+| macOS arm64 / x64 | official `darwin-arm64` / `darwin-x64` |
+| Windows x64 / arm64 | official `win32-x64` / `win32-arm64` |
+| Everything else (ARMv7, i686, riscv64, ppc64, FreeBSD, …) | JS build 2.1.112 (feature-frozen fallback) |
+
+The installer additionally:
+
+- refuses to run on Node < 18 with a clear message
+- retries downloads three times with backoff
+- falls back to a built-in gzip+tar extractor when the system `tar` is missing
+- switches to the musl build on glibc older than 2.27
+- supports `--force-js` / `CC_TERMUX_FORCE_JS=1` to test the fallback path
+
+## UI patches (data-driven)
+
+Patch definitions are in `patches.json`, not code. Each anchor may be a list of alternatives,
+so a new Claude Code release can be supported by editing JSON. Install/update re-applies them,
+missing anchors are skipped with a message, and the unpatched binary stays in `claude.bin.orig`.
+
+```bash
+cc-termux patch status
+cc-termux patch revert
+```
+
 ## Automatic repair on install
 
 `install.mjs` runs a self-heal step after every install/update (`bin/cc-heal.mjs`), so no manual
