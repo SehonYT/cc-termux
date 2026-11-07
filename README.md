@@ -123,7 +123,7 @@ gateway configuration. Re-run it any time with `cc-termux setup`, or pick a buil
 
 ```
 cc-termux presets
-cc-termux setup        # choose "6" for free/online presets
+cc-termux setup        # choose "3" for free/online presets (tokens.bd is "6", last)
 ```
 
 ### Provider presets
@@ -133,21 +133,16 @@ cc-termux setup        # choose "6" for free/online presets
 | `openrouter` | OpenRouter (free models) | `https://openrouter.ai/api/v1` | yes  Free models end with :free |
 | `gemini` | Google Gemini (AI Studio) | `https://generativelanguage.googleapis.com/v1beta/openai` | yes  Free tier is per-key; quota is detected from 429 responses |
 | `groq` | Groq | `https://api.groq.com/openai/v1` | yes |
-| `cerebras` | Cerebras | `https://api.cerebras.ai/v1` | yes |
-| `mistral` | Mistral | `https://api.mistral.ai/v1` | yes |
-| `nvidia` | NVIDIA NIM | `https://integrate.api.nvidia.com/v1` | yes |
-| `sambanova` | SambaNova | `https://api.sambanova.ai/v1` | yes |
-| `huggingface` | HuggingFace Router | `https://router.huggingface.co/v1` | yes |
-| `github-models` | GitHub Models | `https://models.github.ai/inference` | yes |
-| `together` | Together AI | `https://api.together.xyz/v1` | yes |
-| `ollama` | Ollama (local) | `http://127.0.0.1:11434/v1` | no (local)  Install Ollama, run a model, then pick it here |
-| `lmstudio` | LM Studio (local) | `http://127.0.0.1:1234/v1` | no (local)  Start the LM Studio local server first |
-| `llamacpp` | llama.cpp server (local) | `http://127.0.0.1:8080/v1` | no (local)  Run llama-server --port 8080 |
-| `tokens` | tokens.bd | `https://tokens.bd` | yes  Anthropic-compatible endpoint also available |
-| `agentrouter` | AgentRouter | `https://agentrouter.org/v1` | yes  new-api gateway: sign in, create a key, then paste it here |
 | `deepseek` | DeepSeek | `https://api.deepseek.com/v1` | yes |
 | `xai` | xAI (Grok) | `https://api.x.ai/v1` | yes |
+| `mistral` | Mistral | `https://api.mistral.ai/v1` | yes |
+| `cerebras` | Cerebras | `https://api.cerebras.ai/v1` | yes |
+| `nvidia` | NVIDIA NIM | `https://integrate.api.nvidia.com/v1` | yes |
+| `together` | Together AI | `https://api.together.xyz/v1` | yes |
 | `fireworks` | Fireworks AI | `https://api.fireworks.ai/inference/v1` | yes |
+| `huggingface` | HuggingFace Router | `https://router.huggingface.co/v1` | yes |
+| `github-models` | GitHub Models | `https://models.github.ai/inference` | yes |
+| `sambanova` | SambaNova | `https://api.sambanova.ai/v1` | yes |
 | `novita` | Novita AI | `https://api.novita.ai/v3/openai` | yes |
 | `nebius` | Nebius AI Studio | `https://api.studio.nebius.ai/v1` | yes |
 | `chutes` | Chutes | `https://llm.chutes.ai/v1` | yes |
@@ -164,6 +159,11 @@ cc-termux setup        # choose "6" for free/online presets
 | `cohere` | Cohere (compatibility API) | `https://api.cohere.ai/compatibility/v1` | yes |
 | `requesty` | Requesty Router | `https://router.requesty.ai/v1` | yes |
 | `featherless` | Featherless AI | `https://api.featherless.ai/v1` | yes |
+| `agentrouter` | AgentRouter | `https://agentrouter.org/v1` | yes  new-api gateway: sign in, create a key, then paste it here |
+| `ollama` | Ollama (local) | `http://127.0.0.1:11434/v1` | no (local)  Install Ollama, run a model, then pick it here |
+| `lmstudio` | LM Studio (local) | `http://127.0.0.1:1234/v1` | no (local)  Start the LM Studio local server first |
+| `llamacpp` | llama.cpp server (local) | `http://127.0.0.1:8080/v1` | no (local)  Run llama-server --port 8080 |
+| `tokens` | tokens.bd | `https://tokens.bd` | yes  Anthropic-compatible endpoint also available |
 
 Custom OpenAI-compatible and Anthropic-compatible endpoints can be added by URL.
 

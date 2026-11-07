@@ -13,7 +13,7 @@ Individual suite: `node --test tests/<name>.test.mjs`.
 
 | File | Covers |
 |---|---|
-| `presets.test.mjs` | provider preset schema, unique ids, 20 new provider endpoints (incl. AgentRouter), static model fallbacks |
+| `presets.test.mjs` | provider preset schema, unique ids, 20 new provider endpoints (incl. AgentRouter), static model fallbacks, ordering (popular first, tokens.bd last) |
 | `platform.test.mjs` | CPU/OS matrix: native targets, Android musl loader, ARMv7/i686/riscv fallbacks, Node/glibc guards |
 | `installer.test.mjs` | `install.mjs --check` plan output |
 | `installer-codeonly.test.mjs` | `--code-only` keeps the installed Claude Code binary untouched and refreshes assets |

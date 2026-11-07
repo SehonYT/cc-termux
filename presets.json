@@ -29,12 +29,20 @@
       "keyUrl": "https://console.groq.com/keys"
     },
     {
-      "id": "cerebras",
-      "name": "Cerebras",
+      "id": "deepseek",
+      "name": "DeepSeek",
       "kind": "openai",
-      "baseUrl": "https://api.cerebras.ai/v1",
+      "baseUrl": "https://api.deepseek.com/v1",
       "path": "/chat/completions",
-      "keyUrl": "https://cloud.cerebras.ai"
+      "keyUrl": "https://platform.deepseek.com/api_keys"
+    },
+    {
+      "id": "xai",
+      "name": "xAI (Grok)",
+      "kind": "openai",
+      "baseUrl": "https://api.x.ai/v1",
+      "path": "/chat/completions",
+      "keyUrl": "https://console.x.ai"
     },
     {
       "id": "mistral",
@@ -45,6 +53,14 @@
       "keyUrl": "https://console.mistral.ai/api-keys"
     },
     {
+      "id": "cerebras",
+      "name": "Cerebras",
+      "kind": "openai",
+      "baseUrl": "https://api.cerebras.ai/v1",
+      "path": "/chat/completions",
+      "keyUrl": "https://cloud.cerebras.ai"
+    },
+    {
       "id": "nvidia",
       "name": "NVIDIA NIM",
       "kind": "openai",
@@ -53,12 +69,20 @@
       "keyUrl": "https://build.nvidia.com"
     },
     {
-      "id": "sambanova",
-      "name": "SambaNova",
+      "id": "together",
+      "name": "Together AI",
       "kind": "openai",
-      "baseUrl": "https://api.sambanova.ai/v1",
+      "baseUrl": "https://api.together.xyz/v1",
       "path": "/chat/completions",
-      "keyUrl": "https://cloud.sambanova.ai"
+      "keyUrl": "https://api.together.xyz/settings/api-keys"
+    },
+    {
+      "id": "fireworks",
+      "name": "Fireworks AI",
+      "kind": "openai",
+      "baseUrl": "https://api.fireworks.ai/inference/v1",
+      "path": "/chat/completions",
+      "keyUrl": "https://fireworks.ai/account/api-keys"
     },
     {
       "id": "huggingface",
@@ -77,84 +101,12 @@
       "keyUrl": "https://github.com/settings/tokens"
     },
     {
-      "id": "together",
-      "name": "Together AI",
+      "id": "sambanova",
+      "name": "SambaNova",
       "kind": "openai",
-      "baseUrl": "https://api.together.xyz/v1",
+      "baseUrl": "https://api.sambanova.ai/v1",
       "path": "/chat/completions",
-      "keyUrl": "https://api.together.xyz/settings/api-keys"
-    },
-    {
-      "id": "ollama",
-      "name": "Ollama (local)",
-      "kind": "openai",
-      "baseUrl": "http://127.0.0.1:11434/v1",
-      "path": "/chat/completions",
-      "local": true,
-      "noKey": true,
-      "notes": "Install Ollama, run a model, then pick it here"
-    },
-    {
-      "id": "lmstudio",
-      "name": "LM Studio (local)",
-      "kind": "openai",
-      "baseUrl": "http://127.0.0.1:1234/v1",
-      "path": "/chat/completions",
-      "local": true,
-      "noKey": true,
-      "notes": "Start the LM Studio local server first"
-    },
-    {
-      "id": "llamacpp",
-      "name": "llama.cpp server (local)",
-      "kind": "openai",
-      "baseUrl": "http://127.0.0.1:8080/v1",
-      "path": "/chat/completions",
-      "local": true,
-      "noKey": true,
-      "notes": "Run llama-server --port 8080"
-    },
-    {
-      "id": "tokens",
-      "name": "tokens.bd",
-      "kind": "openai",
-      "baseUrl": "https://tokens.bd",
-      "path": "/v1/chat/completions",
-      "keyUrl": "https://tokens.bd/dashboard/keys",
-      "notes": "Anthropic-compatible endpoint also available"
-    },
-    {
-      "id": "agentrouter",
-      "name": "AgentRouter",
-      "kind": "openai",
-      "baseUrl": "https://agentrouter.org/v1",
-      "path": "/chat/completions",
-      "keyUrl": "https://agentrouter.org",
-      "notes": "new-api gateway: sign in, create a key, then paste it here"
-    },
-    {
-      "id": "deepseek",
-      "name": "DeepSeek",
-      "kind": "openai",
-      "baseUrl": "https://api.deepseek.com/v1",
-      "path": "/chat/completions",
-      "keyUrl": "https://platform.deepseek.com/api_keys"
-    },
-    {
-      "id": "xai",
-      "name": "xAI (Grok)",
-      "kind": "openai",
-      "baseUrl": "https://api.x.ai/v1",
-      "path": "/chat/completions",
-      "keyUrl": "https://console.x.ai"
-    },
-    {
-      "id": "fireworks",
-      "name": "Fireworks AI",
-      "kind": "openai",
-      "baseUrl": "https://api.fireworks.ai/inference/v1",
-      "path": "/chat/completions",
-      "keyUrl": "https://fireworks.ai/account/api-keys"
+      "keyUrl": "https://cloud.sambanova.ai"
     },
     {
       "id": "novita",
@@ -292,6 +244,54 @@
       "baseUrl": "https://api.featherless.ai/v1",
       "path": "/chat/completions",
       "keyUrl": "https://featherless.ai/account/api-keys"
+    },
+    {
+      "id": "agentrouter",
+      "name": "AgentRouter",
+      "kind": "openai",
+      "baseUrl": "https://agentrouter.org/v1",
+      "path": "/chat/completions",
+      "keyUrl": "https://agentrouter.org",
+      "notes": "new-api gateway: sign in, create a key, then paste it here"
+    },
+    {
+      "id": "ollama",
+      "name": "Ollama (local)",
+      "kind": "openai",
+      "baseUrl": "http://127.0.0.1:11434/v1",
+      "path": "/chat/completions",
+      "local": true,
+      "noKey": true,
+      "notes": "Install Ollama, run a model, then pick it here"
+    },
+    {
+      "id": "lmstudio",
+      "name": "LM Studio (local)",
+      "kind": "openai",
+      "baseUrl": "http://127.0.0.1:1234/v1",
+      "path": "/chat/completions",
+      "local": true,
+      "noKey": true,
+      "notes": "Start the LM Studio local server first"
+    },
+    {
+      "id": "llamacpp",
+      "name": "llama.cpp server (local)",
+      "kind": "openai",
+      "baseUrl": "http://127.0.0.1:8080/v1",
+      "path": "/chat/completions",
+      "local": true,
+      "noKey": true,
+      "notes": "Run llama-server --port 8080"
+    },
+    {
+      "id": "tokens",
+      "name": "tokens.bd",
+      "kind": "openai",
+      "baseUrl": "https://tokens.bd",
+      "path": "/v1/chat/completions",
+      "keyUrl": "https://tokens.bd/dashboard/keys",
+      "notes": "Anthropic-compatible endpoint also available"
     }
   ]
 }

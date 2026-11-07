@@ -75,3 +75,13 @@ test("static model lists contain usable ids", () => {
   }
   assert.ok(byId.perplexity.models.includes("sonar-pro"));
 });
+test("popular providers come first and tokens.bd is last", () => {
+  const ids = presets.map((p) => p.id);
+  assert.equal(ids[0], "openrouter");
+  assert.equal(ids[1], "gemini");
+  assert.equal(ids[ids.length - 1], "tokens", "tokens.bd must be the last preset");
+  for (const popular of ["openrouter", "gemini", "groq", "deepseek", "xai", "mistral", "cerebras", "nvidia"]) {
+    assert.ok(ids.indexOf(popular) < 20, popular + " should be among the first 20 presets");
+  }
+  assert.ok(ids.indexOf("tokens") > ids.indexOf("agentrouter"));
+});

@@ -394,7 +394,7 @@ function parseFlags() {
   const a = process.argv.slice(2);
   const val = (n) => { const i = a.indexOf(n); return i >= 0 && a[i + 1] && !a[i + 1].startsWith("-") ? a[i + 1] : ""; };
   if (a.includes("--help") || a.includes("-h")) {
-    console.log("usage: cc-termux setup [--preset id] [--provider tokens|openrouter|gemini|custom]");
+    console.log("usage: cc-termux setup [--preset id] [--provider openrouter|gemini|tokens|custom]");
     console.log("                         [--key KEY] [--model ID] [--base-url URL] [--type openai|anthropic]");
     console.log("                         [--name NAME] [--test]");
     process.exit(0);
@@ -435,7 +435,7 @@ async function envMode() {
     if (opts.test) await runSmokeTest();
     return;
   }
-  const kind = process.env.CC_SETUP_PROVIDER || "tokens";
+  const kind = process.env.CC_SETUP_PROVIDER || "openrouter";
   const key = process.env.CC_SETUP_KEY || process.env.TOKENS_BD_KEY || "";
   const base = process.env.CC_SETUP_BASE_URL || "";
   const f = await fetchFor(kind, key, base);
@@ -457,17 +457,17 @@ async function envMode() {
 
 async function addFlow(c) {
   console.log();
-  console.log("  1. tokens.bd        (recommended, many models, cheap)");
-  console.log("  2. OpenRouter");
-  console.log("  3. Google Gemini    (AI Studio key)");
+  console.log("  1. OpenRouter          (popular, free models available)");
+  console.log("  2. Google Gemini       (AI Studio key)");
+  console.log("  3. Free / online provider presets  (Groq, DeepSeek, xAI, NVIDIA, local Ollama...)");
   console.log("  4. Custom OpenAI-compatible endpoint");
   console.log("  5. Custom Anthropic-compatible endpoint");
-  console.log("  6. Free / online provider presets  (OpenRouter, Groq, Gemini, NVIDIA, local Ollama...)");
+  console.log("  6. tokens.bd           (many models, cheap)");
   console.log();
   let kind = "";
   while (!kind) {
     const a = await ask("Provider [1] > ");
-    kind = ({ "": "tokens", "1": "tokens", "2": "openrouter", "3": "gemini", "4": "custom-openai", "5": "custom-anthropic", "6": "preset", "p": "preset" })[a] || "";
+    kind = ({ "": "openrouter", "1": "openrouter", "2": "gemini", "3": "preset", "p": "preset", "4": "custom-openai", "5": "custom-anthropic", "6": "tokens" })[a] || "";
     if (!kind) console.log(cyan("  enter 1-6"));
   }
   if (kind === "preset") { await presetFlow(loadCfg()); return; }
