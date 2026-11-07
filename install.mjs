@@ -335,11 +335,13 @@ function installShims(t) {
   try { spawnSync(process.execPath, [path.join(ROOT, "bin", "cc-heal.mjs"), "--root", ROOT], { stdio: "inherit" }); } catch (e) { }
   try {
     const pkg = JSON.parse(fs.readFileSync(path.join(SRC, "package.json"), "utf8"));
-    let sha = null;
-    try {
-      const { remoteInfo } = await import(path.join(ROOT, "bin", "cc-update.mjs"));
-      sha = (await remoteInfo({})).sha;
-    } catch (e) { }
+    let sha = process.env.CC_TERMUX_COMMIT_SHA || null;
+    if (!sha) {
+      try {
+        const { remoteInfo } = await import(path.join(ROOT, "bin", "cc-update.mjs"));
+        sha = (await remoteInfo({})).sha;
+      } catch (e) { }
+    }
     const short = sha ? String(sha).slice(0, 7) : "";
     const version = short ? pkg.version + "+" + short : pkg.version;
     fs.writeFileSync(path.join(ROOT, "cc-termux.json"), JSON.stringify({ version, baseVersion: pkg.version, sha, installedAt: new Date().toISOString() }, null, 2) + "\n");

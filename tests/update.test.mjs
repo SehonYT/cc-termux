@@ -104,3 +104,40 @@ test("claudeCodeUpToDate compares the installed version with the registry", asyn
     assert.match(keep.reason, /registry unreachable/);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
+test("selfUpdate pins the download to the resolved commit and stamps it", async () => {
+  const os = await import("node:os");
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cc-upd-pin-"));
+  const stage = path.join(tmp, "stage", "cc-termux-main");
+  fs.mkdirSync(stage, { recursive: true });
+  fs.writeFileSync(path.join(stage, "package.json"), JSON.stringify({ version: "9.9.9" }));
+  fs.writeFileSync(path.join(stage, "install.mjs"), [
+    "import fs from \"node:fs\";",
+    "const i = process.argv.indexOf(\"--root\");",
+    "const root = i > 0 ? process.argv[i + 1] : \".\";",
+    "fs.mkdirSync(root, { recursive: true });",
+    "fs.writeFileSync(root + \"/marker\", process.env.CC_TERMUX_COMMIT_SHA || \"none\");",
+  ].join("\n"));
+  const tgzPath = path.join(tmp, "src.tgz");
+  const tar = await import("node:child_process");
+  const packed = tar.spawnSync("tar", ["-czf", tgzPath, "-C", path.join(tmp, "stage"), "cc-termux-main"]);
+  if (packed.status !== 0) { fs.rmSync(tmp, { recursive: true, force: true }); return; }
+  const buf = fs.readFileSync(tgzPath);
+  const sha = "c".repeat(40);
+  const fetchImpl = async (url) => {
+    if (url.includes("commits/main.atom")) return { ok: true, text: async () => "<id>Grit::Commit/" + sha + "</id>", json: async () => ({}) };
+    if (url.includes("package.json")) return { ok: true, json: async () => ({ version: "9.9.9" }) };
+    if (url.includes("/tar.gz/" + sha)) return { ok: true, headers: { get: () => String(buf.length) }, body: (async function* () { yield buf; })() };
+    throw new Error("unexpected url " + url);
+  };
+  const root = path.join(tmp, "root");
+  fs.mkdirSync(root, { recursive: true });
+  fs.writeFileSync(path.join(root, "update-check.json"), "{}");
+  try {
+    await selfUpdate({ root, fetchImpl });
+    assert.equal(fs.readFileSync(path.join(root, "marker"), "utf8"), sha, "installer got the pinned sha");
+    const stamp = JSON.parse(fs.readFileSync(path.join(root, "cc-termux.json"), "utf8"));
+    assert.equal(stamp.sha, sha);
+    assert.equal(stamp.version, "9.9.9+" + sha.slice(0, 7));
+    assert.equal(fs.existsSync(path.join(root, "update-check.json")), false, "stale update cache cleared");
+  } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+});
