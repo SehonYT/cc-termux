@@ -28,12 +28,13 @@ test("version and sha comparison", () => {
 });
 
 test("check detects a newer commit and caches the result", async () => {
-  const root = tmpRoot("0.1.0", "oldsha");
+  const oldSha = "a".repeat(40), newSha = "b".repeat(40);
+  const root = tmpRoot("0.1.0", oldSha);
   try {
-    const first = await check({ root, fetchImpl: fakeFetch("newsha", "0.1.0"), cacheTtlMs: 0 });
+    const first = await check({ root, fetchImpl: fakeFetch(newSha, "0.1.0"), cacheTtlMs: 0 });
     assert.equal(first.available, true);
-    assert.equal(first.local.sha, "oldsha");
-    assert.equal(first.remote.sha, "newsha");
+    assert.equal(first.local.sha, oldSha);
+    assert.equal(first.remote.sha, newSha);
     assert.ok(fs.existsSync(path.join(root, "update-check.json")));
     const throwing = async () => { throw new Error("network down"); };
     const cached = await check({ root, fetchImpl: throwing });
