@@ -97,5 +97,10 @@ test("claudeCodeUpToDate compares the installed version with the registry", asyn
     fs.unlinkSync(path.join(root, "bin", "claude.bin"));
     const missing = await claudeCodeUpToDate({ root, fetchImpl: registry("2.1.319"), minBinaryBytes: 1 });
     assert.equal(missing.upToDate, false);
+    fs.writeFileSync(path.join(root, "bin", "claude.bin"), Buffer.alloc(64));
+    const offline = async () => { throw new Error("offline"); };
+    const keep = await claudeCodeUpToDate({ root, fetchImpl: offline, minBinaryBytes: 1 });
+    assert.equal(keep.upToDate, true);
+    assert.match(keep.reason, /registry unreachable/);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });

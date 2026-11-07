@@ -87,7 +87,7 @@ export function findInstaller(dir, depth = 0) {
 }
 
 export async function latestClaudeVersion({ fetchImpl = fetch } = {}) {
-  const r = await fetchImpl("https://registry.npmjs.org/@anthropic-ai/claude-code/latest", { signal: AbortSignal.timeout(5000) });
+  const r = await fetchImpl("https://registry.npmjs.org/@anthropic-ai/claude-code/latest", { signal: AbortSignal.timeout(15000) });
   if (!r.ok) throw new Error("registry HTTP " + r.status);
   return (await r.json()).version || null;
 }
@@ -104,7 +104,11 @@ export async function claudeCodeUpToDate({ root = DEFAULT_ROOT, fetchImpl = fetc
   if (!fs.existsSync(bin)) return { upToDate: false, localVersion, reason: "binary missing" };
   if (fs.statSync(bin).size < minBinaryBytes) return { upToDate: false, localVersion, reason: "binary too small" };
   let remoteVersion = null;
-  try { remoteVersion = await latestClaudeVersion({ fetchImpl }); } catch (e) { return { upToDate: false, localVersion, reason: "registry unreachable" }; }
+  try { remoteVersion = await latestClaudeVersion({ fetchImpl }); }
+  catch (e) {
+    // No metadata: keep the working binary instead of re-downloading 150 MB blindly.
+    return { upToDate: true, localVersion, reason: "registry unreachable - keeping installed binary" };
+  }
   if (!remoteVersion) return { upToDate: false, localVersion, reason: "no registry version" };
   return { upToDate: localVersion === remoteVersion, localVersion, remoteVersion, reason: localVersion === remoteVersion ? "up to date" : "new version available" };
 }
