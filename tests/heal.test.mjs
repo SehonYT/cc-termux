@@ -10,6 +10,7 @@ test("heal repairs settings, foreign claude binaries and sample configs", () => 
   const home = path.join(tmp, "home");
   const root = path.join(tmp, "root");
   const bin = path.join(tmp, "bin");
+  const prefix = path.join(tmp, "prefix");
   fs.mkdirSync(path.join(home, ".claude"), { recursive: true });
   fs.mkdirSync(path.join(home, ".config", "cc-termux"), { recursive: true });
   fs.mkdirSync(path.join(root, "bin"), { recursive: true });
@@ -37,7 +38,7 @@ test("heal repairs settings, foreign claude binaries and sample configs", () => 
   process.env.PATH = bin + path.delimiter + (prevPath || "");
   process.env.CC_TERMUX_CONFIG = cfgPath;
   try {
-    const changes = healEnvironment({ root, home });
+    const changes = healEnvironment({ root, home, prefix });
     assert.ok(changes.length >= 3, "expected settings, binary and config changes");
   } finally {
     process.env.PATH = prevPath;
@@ -54,8 +55,27 @@ test("heal repairs settings, foreign claude binaries and sample configs", () => 
   assert.ok(cfg.routing["prov/tokens/deepseek/deepseek-v4.1-flash"], "routing must be rebuilt");
   const s2 = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
   assert.ok(Array.isArray(s2.modelPicker.options) && s2.modelPicker.options.length >= 2, "picker must be rebuilt");
+  assert.ok(fs.existsSync(path.join(prefix, "bin", "cc-termux")), "shim installed into the isolated prefix");
 
-  const again = healEnvironment({ root, home });
+  const again = healEnvironment({ root, home, prefix });
   assert.equal(again.length, 0, "heal must be idempotent");
   fs.rmSync(tmp, { recursive: true, force: true });
+});
+test("heal never writes prefix shims for a non-canonical install root", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cc-heal-scope-"));
+  const home = path.join(tmp, "home");
+  const root = path.join(tmp, "root");
+  const prefix = path.join(tmp, "fake-prefix");
+  fs.mkdirSync(path.join(home, ".config", "cc-termux"), { recursive: true });
+  fs.mkdirSync(path.join(root, "bin"), { recursive: true });
+  fs.writeFileSync(path.join(home, ".config", "cc-termux", "config.json"), JSON.stringify({ active: "", providers: {} }));
+  const prevPrefix = process.env.PREFIX;
+  process.env.PREFIX = prefix;
+  try {
+    healEnvironment({ root, home });
+    assert.equal(fs.existsSync(path.join(prefix, "bin")), false, "must not touch the real prefix for temp roots");
+  } finally {
+    if (prevPrefix === undefined) delete process.env.PREFIX; else process.env.PREFIX = prevPrefix;
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });

@@ -58,7 +58,7 @@ function backup(file) {
 
 const composite = (p, id) => (id ? "prov/" + p + "/" + id : id);
 
-export function healEnvironment({ root = process.env.CC_TERMUX_ROOT, home = os.homedir(), prefix, killGateways = true } = {}) {
+export function healEnvironment({ root = process.env.CC_TERMUX_ROOT, home = os.homedir(), prefix, killGateways = true, installPrefix } = {}) {
   if (!root) throw new Error("install root is required");
   const changes = [];
   const cfgPath = process.env.CC_TERMUX_CONFIG || path.join(home, ".config", "cc-termux", "config.json");
@@ -153,8 +153,12 @@ export function healEnvironment({ root = process.env.CC_TERMUX_ROOT, home = os.h
     catch (e) { changes.push("claude binary: could not replace " + p + " (" + e.code + ")"); }
   }
 
-  // 4. launcher shims in the prefix bin dir
-  const binDir = path.join(prefix || process.env.PREFIX || (process.platform === "android" ? "/data/data/com.termux/files/usr" : "/usr/local"), "bin");
+  // 4. launcher shims in the prefix bin dir (never for temp/foreign roots)
+  const canonicalRoot = path.join(home, ".local", "share", "cc-termux");
+  const isCanonical = path.resolve(root) === path.resolve(canonicalRoot);
+  const effectivePrefix = prefix || (isCanonical ? (process.env.PREFIX || (process.platform === "android" ? "/data/data/com.termux/files/usr" : "/usr/local")) : null);
+  if (effectivePrefix && installPrefix !== false) {
+  const binDir = path.join(effectivePrefix, "bin");
   for (const name of ["claude", "cc-termux", "ccp"]) {
     const target = path.join(binDir, name);
     if (!fs.existsSync(target) || !isOurShim(target)) {
@@ -171,6 +175,8 @@ export function healEnvironment({ root = process.env.CC_TERMUX_ROOT, home = os.h
         changes.push("shim: installed " + target);
       } catch (e) { changes.push("shim: could not write " + target + " (" + e.code + ")"); }
     }
+  }
+
   }
 
   // 5. sessions, duplicate gateways, log size
