@@ -15,6 +15,14 @@ for (const dir of ["bin", "proxy", "scripts", "tests"]) {
 files.push(path.join(root, 'install.mjs'));
 
 let failed = 0;
+const shellFiles = ["get.sh", "install.sh", "scripts/ensure-node.sh"];
+for (const f of shellFiles) {
+  const p = path.join(root, f);
+  if (!fs.existsSync(p)) continue;
+  const r = spawnSync("bash", ["-n", p], { stdio: "inherit" });
+  if (r.status !== 0) { console.error("shell syntax error:", f); failed++; }
+}
+
 for (const f of files) {
   const r = spawnSync(process.execPath, ['--check', f], { stdio: 'inherit' });
   if (r.status !== 0) { console.error('syntax error:', f); failed++; }

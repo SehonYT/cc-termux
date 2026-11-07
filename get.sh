@@ -13,11 +13,6 @@ set -eu
 REPO="${CC_TERMUX_REPO:-SehonYT/cc-termux}"
 REF="${CC_TERMUX_REF:-main}"
 
-if ! command -v node >/dev/null 2>&1; then
-  echo "cc-termux: Node.js 18+ is required (https://nodejs.org, or pkg install nodejs on Termux)" >&2
-  exit 1
-fi
-
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT INT TERM
 
@@ -35,4 +30,7 @@ mkdir -p "$tmp/src"
 tar -xzf "$tmp/src.tar.gz" -C "$tmp/src"
 INSTALL=$(find "$tmp/src" -maxdepth 2 -name install.mjs | head -1)
 if [ -z "$INSTALL" ]; then echo "cc-termux: install.mjs not found in archive" >&2; exit 1; fi
-exec node "$INSTALL" "$@"
+ENSURE=$(find "$tmp/src" -maxdepth 3 -name ensure-node.sh | head -1)
+if [ -n "$ENSURE" ]; then . "$ENSURE"; else . "$(dirname "$INSTALL")/scripts/ensure-node.sh"; fi
+ensure_node || exit 1
+exec "$NODE" "$INSTALL" "$@"

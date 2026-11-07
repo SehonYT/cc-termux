@@ -87,7 +87,7 @@ function pkgTarballUrl(pkg, ver) {
 }
 
 function copyAssets() {
-  const files = ["proxy/server.mjs", "bin/cc-launcher.mjs", "bin/cc-setup.mjs", "bin/cc-termux", "bin/cc-env.mjs", "bin/cc-patch.mjs", "bin/ccp.mjs", "bin/cc-heal.mjs", "bin/cc-platform.mjs", "bin/cc-tar.mjs", "patches.json", "presets.json", "config.example.json", "install.mjs", "install.sh", "install.ps1", "get.sh", "get.ps1", "README.md", "LICENSE", "NOTICE"];
+  const files = ["proxy/server.mjs", "bin/cc-launcher.mjs", "bin/cc-setup.mjs", "bin/cc-termux", "bin/cc-env.mjs", "bin/cc-patch.mjs", "bin/ccp.mjs", "bin/cc-heal.mjs", "bin/cc-platform.mjs", "bin/cc-tar.mjs", "bin/cc-update.mjs", "patches.json", "presets.json", "config.example.json", "install.mjs", "install.sh", "install.ps1", "get.sh", "get.ps1", "README.md", "LICENSE", "NOTICE"];
   for (const f of files) {
     const from = path.join(SRC, f);
     const to = path.join(ROOT, f);
@@ -224,6 +224,15 @@ function installShims(t) {
 
   try { spawnSync(process.execPath, [path.join(ROOT, "bin", "cc-patch.mjs"), "--apply"], { stdio: "inherit", env: { ...process.env, CC_TERMUX_ROOT: ROOT } }); } catch {}
   try { spawnSync(process.execPath, [path.join(ROOT, "bin", "cc-heal.mjs"), "--root", ROOT], { stdio: "inherit" }); } catch (e) { }
+  try {
+    let sha = null;
+    try {
+      const r = await fetch("https://api.github.com/repos/" + (process.env.CC_TERMUX_REPO || "SehonYT/cc-termux") + "/commits/main", { headers: { "user-agent": "cc-termux" }, signal: AbortSignal.timeout(5000) });
+      if (r.ok) sha = (await r.json()).sha || null;
+    } catch (e) { }
+    const pkg = JSON.parse(fs.readFileSync(path.join(SRC, "package.json"), "utf8"));
+    fs.writeFileSync(path.join(ROOT, "cc-termux.json"), JSON.stringify({ version: pkg.version, sha, installedAt: new Date().toISOString() }, null, 2) + "\n");
+  } catch (e) { }
   if (!NO_SHIMS) installShims(t);
   try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
   log("installed into " + ROOT);

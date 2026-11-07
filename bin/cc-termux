@@ -341,7 +341,8 @@ const HELP = [
   "  cc-termux errors [n]             last gateway/provider failures (structured)",
   "  cc-termux usage [provider]       show quota/spend (tokens.bd) or quota links",
   "  cc-termux restart                stop the gateway (restarts on next run)",
-  "  cc-termux update                 reinstall the latest Claude Code binary",
+  "  cc-termux update [--check]      update cc-termux itself (+ Claude Code) from GitHub",
+  "  cc-termux update-claude         reinstall the latest Claude Code binary only",
   "  cc-termux path                   print install/config paths",
 ].join("\n");
 
@@ -550,7 +551,8 @@ switch (cmd) {
     break;
   }
   case "update": {
-    execFileSync("bash", [path.join(ROOT, "install.sh"), "--update"], { stdio: "inherit" });
+    const sub = args[0] === "--check" ? "--check" : "--self-update";
+    execFileSync(process.execPath, [path.join(ROOT, "bin", "cc-update.mjs"), sub], { stdio: "inherit" });
     break;
   }
   case "path": {

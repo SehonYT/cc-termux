@@ -181,6 +181,18 @@ function envForChild() {
   };
   process.on("exit", cleanup);
   for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"]) process.on(sig, () => { cleanup(); process.exit(130); });
+  if (!trivial && process.stderr.isTTY) {
+    try {
+      const mod = await import("file://" + path.join(ROOT, "bin", "cc-update.mjs"));
+      const info = await Promise.race([
+        mod.check({ root: ROOT, cacheTtlMs: 24 * 3600 * 1000 }),
+        new Promise((r) => setTimeout(() => r(null), 2500)),
+      ]);
+      if (info && info.available) {
+        console.error("cc-termux: update available (" + (info.local.version || "?") + " -> " + (info.remote.version || (info.remote.sha || "").slice(0, 7)) + ") - run: cc-termux update");
+      }
+    } catch (e) { }
+  }
   const child = spawn(cmd, args, { stdio: "inherit", env });
   child.on("exit", (code, signal) => { cleanup(); process.exit(signal ? 1 : code ?? 0); });
   child.on("error", (e) => { console.error("cc-launcher: " + e.message); cleanup(); process.exit(1); });

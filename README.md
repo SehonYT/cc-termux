@@ -36,7 +36,7 @@ Prefer a clone? See [Manual install](#manual-install).
 
 ## Requirements
 
-- Node.js 18 or newer (Termux: `pkg install nodejs`)
+- Node.js 18+ — **installed automatically if missing**: Termux uses `pkg install nodejs-lts`, Linux/macOS download the official Node tarball into `~/.local/share/cc-termux/runtime`, Windows downloads the official zip
 - `tar` (present on Linux, macOS, Termux and Windows 10+)
 - Termux only: optional `patchelf` (installed automatically when available)
 
@@ -69,6 +69,20 @@ configuration and keys, and re-applies the optional UI patches.
 
 Useful flags: `--root <dir>`, `--tarball <file>` (offline install), `--version <v>`,
 `--no-setup`, `--no-shims`.
+
+## Updates
+
+cc-termux updates itself, separately from the Claude Code binary:
+
+```bash
+cc-termux update --check   # is a newer cc-termux available?
+cc-termux update           # self-update (latest GitHub main) + Claude Code binary
+cc-termux update-claude    # only reinstall the Claude Code binary
+```
+
+When Claude Code is launched interactively, the launcher checks at most once per 24 hours (2.5 s timeout,
+silent on failure) and prints a one-line notice if a newer commit is available. Installed state is kept
+in `~/.local/share/cc-termux/cc-termux.json` (`version`, commit `sha`, `installedAt`).
 
 ## First run
 
