@@ -11,7 +11,6 @@ $ErrorActionPreference = "Stop"
 $Repo = if ($env:CC_TERMUX_REPO) { $env:CC_TERMUX_REPO } else { "SehonYT/cc-termux" }
 $Ref = if ($env:CC_TERMUX_REF) { $env:CC_TERMUX_REF } else { "main" }
 
-if (-not $env:CC_TERMUX_ARCHIVE -and $Repo -like "SehonYT/*") { throw "set CC_TERMUX_REPO=owner/repo (this copy still has the placeholder)" }
 if (-not (Get-Command node -ErrorAction SilentlyContinue)) { throw "Node.js 18+ is required (https://nodejs.org)" }
 
 $Tmp = Join-Path $env:TEMP ("cc-termux-" + [guid]::NewGuid().ToString("N"))
