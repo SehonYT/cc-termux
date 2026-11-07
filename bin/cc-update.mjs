@@ -86,13 +86,17 @@ export function findInstaller(dir, depth = 0) {
   return null;
 }
 
-export async function selfUpdate({ root = DEFAULT_ROOT, repo = DEFAULT_REPO } = {}) {
+export async function selfUpdate({ root = DEFAULT_ROOT, repo = DEFAULT_REPO, archivePath = null } = {}) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cc-update-"));
   const tgz = path.join(tmp, "src.tgz");
   try {
-    const r = await fetch("https://codeload.github.com/" + repo + "/tar.gz/refs/heads/main", { signal: AbortSignal.timeout(180000) });
-    if (!r.ok) throw new Error("download HTTP " + r.status);
-    fs.writeFileSync(tgz, Buffer.from(await r.arrayBuffer()));
+    if (archivePath) {
+      fs.copyFileSync(archivePath, tgz);
+    } else {
+      const r = await fetch("https://codeload.github.com/" + repo + "/tar.gz/refs/heads/main", { signal: AbortSignal.timeout(180000) });
+      if (!r.ok) throw new Error("download HTTP " + r.status);
+      fs.writeFileSync(tgz, Buffer.from(await r.arrayBuffer()));
+    }
     const src = path.join(tmp, "src");
     fs.mkdirSync(src, { recursive: true });
     extractTgz(tgz, src);

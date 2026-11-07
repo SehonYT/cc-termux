@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { isNewer, semverNewer, check, localInfo, findInstaller } from "../bin/cc-update.mjs";
+import { isNewer, semverNewer, check, localInfo, findInstaller, selfUpdate } from "../bin/cc-update.mjs";
+import zlib from "node:zlib";
 
 function tmpRoot(version, sha) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cc-upd-"));
@@ -56,5 +57,29 @@ test("findInstaller handles GitHub-style archives with a top-level folder", () =
     fs.writeFileSync(path.join(nested, "install.mjs"), "// installer");
     assert.equal(findInstaller(tmp), path.join(nested, "install.mjs"));
     assert.equal(findInstaller(path.join(tmp, "empty")), null);
+  } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+});
+test("selfUpdate runs an installer inside a GitHub-style archive", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cc-upd-run-"));
+  const tar = await import("node:child_process");
+  const stage = path.join(tmp, "stage", "cc-termux-main");
+  fs.mkdirSync(stage, { recursive: true });
+  const root = path.join(tmp, "root");
+  fs.writeFileSync(path.join(stage, "package.json"), JSON.stringify({ version: "9.9.9" }));
+  fs.writeFileSync(path.join(stage, "install.mjs"), [
+    "import fs from \"node:fs\";",
+    "const i = process.argv.indexOf(\"--root\");",
+    "const root = i > 0 ? process.argv[i + 1] : \".\";",
+    "fs.mkdirSync(root, { recursive: true });",
+    "fs.writeFileSync(root + \"/marker\", \"installed\");",
+  ].join("\n"));
+  const tgz = path.join(tmp, "src.tgz");
+  const r = tar.spawnSync("tar", ["-czf", tgz, "-C", path.join(tmp, "stage"), "cc-termux-main"]);
+  if (r.status !== 0) { fs.rmSync(tmp, { recursive: true, force: true }); return; }
+  try {
+    await selfUpdate({ root, archivePath: tgz });
+    assert.equal(fs.readFileSync(path.join(root, "marker"), "utf8"), "installed");
+    const stamp = JSON.parse(fs.readFileSync(path.join(root, "cc-termux.json"), "utf8"));
+    assert.equal(stamp.version, "9.9.9");
   } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
 });
