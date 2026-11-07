@@ -10,6 +10,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { extractTgz } from "./cc-tar.mjs";
 import { buildVersion, labelVersion } from "../scripts/version.mjs";
+import { createProgress, banner, step, info } from "./cc-ui.mjs";
 
 export const DEFAULT_REPO = process.env.CC_TERMUX_REPO || "SehonYT/cc-termux";
 export const DEFAULT_ROOT = path.join(os.homedir(), ".local", "share", "cc-termux");
@@ -115,6 +116,9 @@ export async function claudeCodeUpToDate({ root = DEFAULT_ROOT, fetchImpl = fetc
 }
 
 export async function selfUpdate({ root = DEFAULT_ROOT, repo = DEFAULT_REPO, archivePath = null, redownload = false } = {}) {
+  if (!process.env.CC_TERMUX_NO_BANNER) {
+    banner(["cc-termux updater", "Code is fetched from GitHub; Claude Code itself is installed", "from Anthropic's official npm registry when a new version is needed."]);
+  }
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cc-update-"));
   const tgz = path.join(tmp, "src.tgz");
   try {
@@ -123,7 +127,13 @@ export async function selfUpdate({ root = DEFAULT_ROOT, repo = DEFAULT_REPO, arc
     } else {
       const r = await fetch("https://codeload.github.com/" + repo + "/tar.gz/refs/heads/main", { signal: AbortSignal.timeout(180000) });
       if (!r.ok) throw new Error("download HTTP " + r.status);
-      fs.writeFileSync(tgz, Buffer.from(await r.arrayBuffer()));
+      const total = Number(r.headers.get("content-length")) || 0;
+      const prog = createProgress("cc-termux source archive from GitHub", { stream: process.stderr });
+      const chunks = [];
+      let received = 0;
+      for await (const chunk of r.body) { chunks.push(Buffer.from(chunk)); received += chunk.length; prog.update(received, total); }
+      fs.writeFileSync(tgz, Buffer.concat(chunks));
+      prog.done({ ok: true, message: (received / 1024).toFixed(1) + " kB" });
     }
     const src = path.join(tmp, "src");
     fs.mkdirSync(src, { recursive: true });
@@ -135,19 +145,21 @@ export async function selfUpdate({ root = DEFAULT_ROOT, repo = DEFAULT_REPO, arc
       try {
         const state = await claudeCodeUpToDate({ root });
         codeOnly = state.upToDate;
-        console.log("cc-termux: Claude Code " + (state.localVersion || "?") + " - " + state.reason + (codeOnly ? " (code only update)" : ""));
+        step("Claude Code " + (state.localVersion || "?") + " - " + state.reason);
+        if (codeOnly) info("Only cc-termux files and UI patches will be updated; the Claude Code binary stays as is.");
+        else info("A newer Claude Code will be downloaded from registry.npmjs.org.");
       } catch (e) { }
     }
-    const args = [installer, "--root", root];
+    const args = [installer, "--root", root, "--no-setup"];
     if (codeOnly) args.push("--code-only");
-    const res = spawnSync(process.execPath, args, { stdio: "inherit" });
+    const res = spawnSync(process.execPath, args, { stdio: "inherit", env: { ...process.env, CC_TERMUX_NO_BANNER: "1" } });
     if (res.status !== 0) throw new Error("installer exited with " + res.status);
     let sha = null;
     try { sha = (await remoteInfo({ repo })).sha; } catch (e) { }
     const pkgPath = path.join(path.dirname(installer), "package.json");
     const pkg = fs.existsSync(pkgPath) ? JSON.parse(fs.readFileSync(pkgPath, "utf8")) : { version: "unknown" };
     fs.writeFileSync(path.join(root, "cc-termux.json"), JSON.stringify({ version: buildVersion(pkg.version, sha || ""), baseVersion: pkg.version, sha, installedAt: new Date().toISOString() }, null, 2) + "\n");
-    console.log("cc-termux: updated to " + buildVersion(pkg.version, sha || "") + (codeOnly ? " [Claude Code binary kept]" : " [Claude Code binary reinstalled]"));
+    step("cc-termux updated to " + buildVersion(pkg.version, sha || "") + (codeOnly ? " (Claude Code binary kept)" : " (Claude Code binary reinstalled)"));
     return true;
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });

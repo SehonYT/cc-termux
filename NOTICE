@@ -12,3 +12,6 @@ disabled with CC_TERMUX_NO_UI_PATCH=1 and can be reverted with
 
 Nothing in this repository grants a license to Claude Code or any model provider.
 Users are responsible for complying with the terms of the services they connect.
+
+Claude Code binaries are downloaded at install time from Anthropic's official npm registry
+(registry.npmjs.org). cc-termux does not host or redistribute Claude Code.

@@ -59,7 +59,7 @@ ensure_node() {
 
   mkdir -p "$dir" || return 1
   tmp="$dir/.download.$$"
-  if command -v curl >/dev/null 2>&1; then curl -fsSL "$url" -o "$tmp.tar.gz" || return 1;
+  if command -v curl >/dev/null 2>&1; then if [ -t 2 ]; then curl -fL --progress-bar "$url" -o "$tmp.tar.gz" || return 1; else curl -fsSL "$url" -o "$tmp.tar.gz" || return 1; fi;
   elif command -v wget >/dev/null 2>&1; then wget -qO "$tmp.tar.gz" "$url" || return 1;
   else echo "cc-termux: curl or wget is required to download Node.js" >&2; return 1; fi
   if command -v tar >/dev/null 2>&1; then

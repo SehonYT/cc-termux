@@ -11,6 +11,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { detectTarget, nodeVersionOk, glibcTooOld } from "./bin/cc-platform.mjs";
 import { extractTgz } from "./bin/cc-tar.mjs";
+import { createProgress, banner, step, info, isTty } from "./bin/cc-ui.mjs";
 
 const SRC = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -61,20 +62,36 @@ function extract(tgz, dest) {
   try { extractTgz(tgz, dest); return true; } catch (e) { fail("extraction failed: " + e.message); }
 }
 
-async function download(url, file) {
+async function download(url, file, label) {
   let lastErr;
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
       const r = await fetch(url, { signal: AbortSignal.timeout(180000) });
       if (!r.ok) throw new Error("HTTP " + r.status);
-      const buf = Buffer.from(await r.arrayBuffer());
+      const total = Number(r.headers.get("content-length")) || 0;
+      const prog = createProgress(label || ("downloading " + path.basename(file)), { stream: process.stderr });
+      const chunks = [];
+      let received = 0;
+      if (r.body && typeof r.body[Symbol.asyncIterator] === "function") {
+        for await (const chunk of r.body) {
+          chunks.push(Buffer.from(chunk));
+          received += chunk.length;
+          prog.update(received, total);
+        }
+      } else {
+        chunks.push(Buffer.from(await r.arrayBuffer()));
+        received = chunks[0].length;
+        prog.update(received, total);
+      }
+      const buf = Buffer.concat(chunks);
       fs.writeFileSync(file, buf);
+      prog.done({ ok: true, message: buf.length + " bytes" });
       return buf.length;
     } catch (e) {
       lastErr = e;
       if (attempt < 3) {
         const wait = 1000 * attempt;
-        log("download attempt " + attempt + " failed (" + (e.name || e.message) + "), retrying in " + wait + "ms");
+        info("download attempt " + attempt + " failed (" + (e.name || e.message) + "), retrying in " + wait + "ms");
         await new Promise((r) => setTimeout(r, wait));
       }
     }
@@ -88,7 +105,7 @@ function pkgTarballUrl(pkg, ver) {
 }
 
 function copyAssets() {
-  const files = ["proxy/server.mjs", "bin/cc-launcher.mjs", "bin/cc-setup.mjs", "bin/cc-termux", "bin/cc-env.mjs", "bin/cc-patch.mjs", "bin/ccp.mjs", "bin/cc-heal.mjs", "bin/cc-platform.mjs", "bin/cc-tar.mjs", "bin/cc-update.mjs", "patches.json", "presets.json", "config.example.json", "install.mjs", "install.sh", "install.ps1", "get.sh", "get.ps1", "scripts/ensure-node.sh", "scripts/version.mjs", "package.json", "README.md", "LICENSE", "NOTICE"];
+  const files = ["proxy/server.mjs", "bin/cc-launcher.mjs", "bin/cc-setup.mjs", "bin/cc-termux", "bin/cc-env.mjs", "bin/cc-patch.mjs", "bin/ccp.mjs", "bin/cc-heal.mjs", "bin/cc-platform.mjs", "bin/cc-tar.mjs", "bin/cc-ui.mjs", "bin/cc-update.mjs", "patches.json", "presets.json", "config.example.json", "install.mjs", "install.sh", "install.ps1", "get.sh", "get.ps1", "scripts/ensure-node.sh", "scripts/version.mjs", "package.json", "README.md", "LICENSE", "NOTICE"];
   for (const f of files) {
     const from = path.join(SRC, f);
     const to = path.join(ROOT, f);
@@ -171,6 +188,13 @@ function installShims(t) {
 (async () => {
   if (!nodeVersionOk(process.versions.node)) fail("Node.js 18+ is required (found " + process.versions.node + ")");
   const t = detectHostTarget();
+  if (!CHECK && !process.env.CC_TERMUX_NO_BANNER) {
+    banner([
+      "cc-termux installer",
+      "Claude Code is downloaded from Anthropic's official npm registry",
+      "(registry.npmjs.org). cc-termux does not host or redistribute it.",
+    ]);
+  }
   if (CHECK) {
     console.log("cc-termux install plan");
     console.log("  platform : " + process.platform + " " + process.arch);
@@ -185,17 +209,19 @@ function installShims(t) {
   }
   fs.mkdirSync(ROOT, { recursive: true });
   copyAssets();
+  if (!CHECK) step("cc-termux files updated");
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cctermux-"));
 
   if (CODE_ONLY) {
     const existing = path.join(ROOT, "bin", t.bin);
     const existingJs = path.join(ROOT, "js", "cli.js");
     if (!fs.existsSync(existing) && !fs.existsSync(existingJs)) fail("no installed Claude Code build at " + ROOT + " - run: cc-termux update --redownload");
-    log("code-only update: keeping the installed Claude Code build");
+    step("Claude Code is already installed in " + ROOT + " - keeping the binary");
+    info("Updating cc-termux files, picker and UI patches...");
   } else if (t.js) {
     log("no native target for " + process.platform + "/" + process.arch + ": installing JS fallback 2.1.112");
     const tgz = path.join(tmp, "cc.tgz");
-    await download("https://registry.npmjs.org/@anthropic-ai/claude-code/-/claude-code-2.1.112.tgz", tgz);
+    await download("https://registry.npmjs.org/@anthropic-ai/claude-code/-/claude-code-2.1.112.tgz", tgz, "Claude Code JS fallback from the official Anthropic registry (registry.npmjs.org)");
     extract(tgz, path.join(tmp, "js"));
     const pkg = path.join(tmp, "js", "package");
     fs.mkdirSync(path.join(ROOT, "js"), { recursive: true });
@@ -209,7 +235,7 @@ function installShims(t) {
     if (!tgz) {
       log("downloading Claude Code " + ver + " (" + t.pkg + ")");
       tgz = path.join(tmp, "pkg.tgz");
-      const size = await download("https://registry.npmjs.org/@anthropic-ai/claude-code-" + t.pkg + "/-/" + "claude-code-" + t.pkg + "-" + ver + ".tgz", tgz);
+      const size = await download("https://registry.npmjs.org/@anthropic-ai/claude-code-" + t.pkg + "/-/" + "claude-code-" + t.pkg + "-" + ver + ".tgz", tgz, "Claude Code " + ver + " (" + t.pkg + ") from the official Anthropic registry (registry.npmjs.org)");
       log("downloaded " + (size / 1e6).toFixed(1) + " MB");
     } else log("using local tarball " + tgz);
     extract(tgz, path.join(tmp, "pkg"));
@@ -223,11 +249,12 @@ function installShims(t) {
     fs.copyFileSync(srcBin, dst);
     fs.chmodSync(dst, 0o755);
     fs.writeFileSync(path.join(ROOT, "VERSION"), ver + "\n");
-    log("installed binary " + dst);
+    step("Claude Code " + ver + " installed into your device (" + dst + ")");
+    log("source: registry.npmjs.org/@anthropic-ai/claude-code-" + t.pkg + " (official Anthropic package)");
     if (t.termux && t.loader) {
       log("installing musl loader (" + t.loader + ")");
       const alpine = path.join(tmp, "alpine.tgz");
-      await download("https://dl-cdn.alpinelinux.org/alpine/v3.20/releases/" + t.loader + "/alpine-minirootfs-3.20.3-" + t.loader + ".tar.gz", alpine);
+      await download("https://dl-cdn.alpinelinux.org/alpine/v3.20/releases/" + t.loader + "/alpine-minirootfs-3.20.3-" + t.loader + ".tar.gz", alpine, "Alpine musl loader (needed on Termux)");
       extract(alpine, path.join(tmp, "alpine"));
       const loaderName = "ld-musl-" + t.loader + ".so.1";
       fs.mkdirSync(path.join(ROOT, "lib"), { recursive: true });
@@ -259,6 +286,7 @@ function installShims(t) {
     log("created empty config " + cfgPath);
   }
 
+  if (!CHECK) info("Applying optional UI patches to the Claude Code binary...");
   try { spawnSync(process.execPath, [path.join(ROOT, "bin", "cc-patch.mjs"), "--apply"], { stdio: "inherit", env: { ...process.env, CC_TERMUX_ROOT: ROOT } }); } catch {}
   try { spawnSync(process.execPath, [path.join(ROOT, "bin", "cc-heal.mjs"), "--root", ROOT], { stdio: "inherit" }); } catch (e) { }
   try {

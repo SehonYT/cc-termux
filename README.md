@@ -254,6 +254,31 @@ CC_TERMUX_NO_UI_PATCH=1 bash install.sh   # skip on install
 
 See `NOTICE` for the caveats.
 
+## Downloads and transparency
+
+cc-termux does **not** host or redistribute Claude Code. Every install of the Claude Code
+binary downloads it directly from Anthropic's official npm registry:
+
+```
+https://registry.npmjs.org/@anthropic-ai/claude-code-<platform>/-/claude-code-<platform>-<version>.tgz
+```
+
+The installer shows this explicitly and displays a live progress bar:
+
+```
+  +----------------------------------------------------------------------+
+  | cc-termux installer                                                |
+  | Claude Code is downloaded from Anthropic's official npm registry   |
+  | (registry.npmjs.org). cc-termux does not host or redistribute it.  |
+  +----------------------------------------------------------------------+
+  Claude Code 2.1.319 (linux-arm64-musl) from the official Anthropic registry
+  [#################-----------]  62%  93.7 MB/151.0 MB  3.1 MB/s
+  OK Claude Code 2.1.319 installed into your device
+```
+
+`cc-termux update` shows the same styling and keeps the installed binary when Claude Code
+is already current (code-only update), so no unnecessary 150 MB re-download happens.
+
 ## Platform support
 
 | Host | Build used |
