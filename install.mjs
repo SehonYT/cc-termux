@@ -302,10 +302,12 @@ function installShims(t) {
   } catch (e) { }
   if (!NO_SHIMS) installShims(t);
   try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
-  log("installed into " + ROOT);
+  log((CODE_ONLY ? "updated " : "installed into ") + ROOT);
   if (!NO_SETUP && process.stdin.isTTY && process.stdout.isTTY) {
     console.log("starting provider setup...");
     spawnSync(process.execPath, [path.join(ROOT, "bin", "cc-setup.mjs")], { stdio: "inherit" });
+  } else if (CODE_ONLY || NO_SETUP) {
+    step("Update complete. Run \"claude\" when ready.");
   } else {
     console.log("next: run \"claude\" (or \"cc-termux setup\") to configure a provider");
   }
