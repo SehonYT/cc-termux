@@ -37,19 +37,20 @@ export async function remoteInfo({ repo = DEFAULT_REPO, fetchImpl = fetch } = {}
   const headers = { "user-agent": "cc-termux" };
   let sha = null;
   let version = null;
-  // Unauthenticated, rate-limit-free update marker: the archive ETag/Last-Modified on main.
+  // The commit atom feed is public, stable per commit and not API rate-limited.
   try {
-    const r = await fetchImpl("https://codeload.github.com/" + repo + "/tar.gz/refs/heads/main", { method: "HEAD", headers, signal: AbortSignal.timeout(5000) });
-    const etag = r.headers && typeof r.headers.get === "function" ? r.headers.get("etag") : null;
-    const modified = r.headers && typeof r.headers.get === "function" ? r.headers.get("last-modified") : null;
-    sha = (etag || modified || "").replace(/^W\//, "").replace(/"/g, "") || null;
+    const r = await fetchImpl("https://github.com/" + repo + "/commits/main.atom", { headers, signal: AbortSignal.timeout(5000) });
+    if (r.ok) {
+      const text = await r.text();
+      const m = /Grit::Commit\/([0-9a-f]{40})/.exec(text);
+      if (m) sha = m[1];
+    }
   } catch (e) { }
   try {
     const r = await fetchImpl("https://raw.githubusercontent.com/" + repo + "/main/package.json", { headers, signal: AbortSignal.timeout(5000) });
     if (r.ok) version = (await r.json()).version || null;
   } catch (e) { }
   if (!sha) {
-    // API fallback (subject to unauthenticated rate limits).
     try {
       const r = await fetchImpl("https://api.github.com/repos/" + repo + "/commits/main", { headers, signal: AbortSignal.timeout(5000) });
       if (r.ok) sha = (await r.json()).sha || null;
@@ -102,7 +103,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const rootIdx = process.argv.indexOf("--root");
   const root = rootIdx > 0 ? process.argv[rootIdx + 1] : DEFAULT_ROOT;
   if (arg === "--check") {
-    check({ root }).then((r) => {
+    check({ root, cacheTtlMs: 0 }).then((r) => {
       if (r.available) console.log("cc-termux update available: " + (r.local.version || "?") + " -> " + (r.remote.version || r.remote.sha.slice(0, 7)) + "  (run: cc-termux update)");
       else console.log("cc-termux is up to date (" + (r.local.version || "unknown") + ")");
     }).catch((e) => { console.error("cc-termux: update check failed: " + e.message); process.exit(1); });
