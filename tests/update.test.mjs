@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { isNewer, semverNewer, check, localInfo, findInstaller, selfUpdate } from "../bin/cc-update.mjs";
+import { isNewer, semverNewer, check, localInfo, findInstaller, selfUpdate, claudeCodeUpToDate } from "../bin/cc-update.mjs";
 import zlib from "node:zlib";
 
 function tmpRoot(version, sha) {
@@ -82,4 +82,20 @@ test("selfUpdate runs an installer inside a GitHub-style archive", async () => {
     const stamp = JSON.parse(fs.readFileSync(path.join(root, "cc-termux.json"), "utf8"));
     assert.equal(stamp.version, "9.9.9");
   } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+});
+test("claudeCodeUpToDate compares the installed version with the registry", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cc-upd-claude-"));
+  const registry = (version) => async () => ({ ok: true, json: async () => ({ version }) });
+  try {
+    fs.mkdirSync(path.join(root, "bin"), { recursive: true });
+    fs.writeFileSync(path.join(root, "VERSION"), "2.1.319\n");
+    fs.writeFileSync(path.join(root, "bin", "claude.bin"), Buffer.alloc(64));
+    const same = await claudeCodeUpToDate({ root, fetchImpl: registry("2.1.319"), minBinaryBytes: 1 });
+    assert.equal(same.upToDate, true);
+    const newer = await claudeCodeUpToDate({ root, fetchImpl: registry("2.1.320"), minBinaryBytes: 1 });
+    assert.equal(newer.upToDate, false);
+    fs.unlinkSync(path.join(root, "bin", "claude.bin"));
+    const missing = await claudeCodeUpToDate({ root, fetchImpl: registry("2.1.319"), minBinaryBytes: 1 });
+    assert.equal(missing.upToDate, false);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });

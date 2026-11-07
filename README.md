@@ -76,7 +76,8 @@ cc-termux updates itself, separately from the Claude Code binary:
 
 ```bash
 cc-termux update --check   # is a newer cc-termux available?
-cc-termux update           # self-update (latest GitHub main) + Claude Code binary
+cc-termux update           # self-update; skips the Claude Code binary download when it is current
+cc-termux update --redownload # force reinstall of the Claude Code binary + patches
 cc-termux update-claude    # only reinstall the Claude Code binary
 ```
 

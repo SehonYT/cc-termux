@@ -22,6 +22,7 @@ const CHECK = has("--check");
 const NO_SETUP = has("--no-setup");
 const NO_SHIMS = has("--no-shims");
 const RESET_CONFIG = has("--reset-config");
+const CODE_ONLY = has("--code-only");
 const TARBALL = argVal("--tarball", "");
 const VERSION_ARG = argVal("--version", "");
 
@@ -155,7 +156,12 @@ function installShims(t) {
   copyAssets();
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cctermux-"));
 
-  if (t.js) {
+  if (CODE_ONLY) {
+    const existing = path.join(ROOT, "bin", t.bin);
+    const existingJs = path.join(ROOT, "js", "cli.js");
+    if (!fs.existsSync(existing) && !fs.existsSync(existingJs)) fail("no installed Claude Code build at " + ROOT + " - run: cc-termux update --redownload");
+    log("code-only update: keeping the installed Claude Code build");
+  } else if (t.js) {
     log("no native target for " + process.platform + "/" + process.arch + ": installing JS fallback 2.1.112");
     const tgz = path.join(tmp, "cc.tgz");
     await download("https://registry.npmjs.org/@anthropic-ai/claude-code/-/claude-code-2.1.112.tgz", tgz);

@@ -86,7 +86,30 @@ export function findInstaller(dir, depth = 0) {
   return null;
 }
 
-export async function selfUpdate({ root = DEFAULT_ROOT, repo = DEFAULT_REPO, archivePath = null } = {}) {
+export async function latestClaudeVersion({ fetchImpl = fetch } = {}) {
+  const r = await fetchImpl("https://registry.npmjs.org/@anthropic-ai/claude-code/latest", { signal: AbortSignal.timeout(5000) });
+  if (!r.ok) throw new Error("registry HTTP " + r.status);
+  return (await r.json()).version || null;
+}
+
+export async function claudeCodeUpToDate({ root = DEFAULT_ROOT, fetchImpl = fetch, minBinaryBytes = 5 * 1024 * 1024 } = {}) {
+  const bin = path.join(root, "bin", process.platform === "win32" ? "claude.exe" : "claude.bin");
+  const js = path.join(root, "js", "cli.js");
+  let localVersion = "";
+  try { localVersion = fs.readFileSync(path.join(root, "VERSION"), "utf8").trim(); } catch (e) { }
+  if (!localVersion) return { upToDate: false, reason: "no installed version" };
+  if (localVersion.endsWith("-js")) {
+    return { upToDate: fs.existsSync(js), localVersion, reason: fs.existsSync(js) ? "js build present" : "js build missing" };
+  }
+  if (!fs.existsSync(bin)) return { upToDate: false, localVersion, reason: "binary missing" };
+  if (fs.statSync(bin).size < minBinaryBytes) return { upToDate: false, localVersion, reason: "binary too small" };
+  let remoteVersion = null;
+  try { remoteVersion = await latestClaudeVersion({ fetchImpl }); } catch (e) { return { upToDate: false, localVersion, reason: "registry unreachable" }; }
+  if (!remoteVersion) return { upToDate: false, localVersion, reason: "no registry version" };
+  return { upToDate: localVersion === remoteVersion, localVersion, remoteVersion, reason: localVersion === remoteVersion ? "up to date" : "new version available" };
+}
+
+export async function selfUpdate({ root = DEFAULT_ROOT, repo = DEFAULT_REPO, archivePath = null, redownload = false } = {}) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cc-update-"));
   const tgz = path.join(tmp, "src.tgz");
   try {
@@ -102,14 +125,24 @@ export async function selfUpdate({ root = DEFAULT_ROOT, repo = DEFAULT_REPO, arc
     extractTgz(tgz, src);
     const installer = findInstaller(src);
     if (!installer) throw new Error("install.mjs missing in archive (contents: " + fs.readdirSync(src).join(", ") + ")");
-    const res = spawnSync(process.execPath, [installer, "--root", root], { stdio: "inherit" });
+    let codeOnly = false;
+    if (!redownload) {
+      try {
+        const state = await claudeCodeUpToDate({ root });
+        codeOnly = state.upToDate;
+        console.log("cc-termux: Claude Code " + (state.localVersion || "?") + " - " + state.reason + (codeOnly ? " (code only update)" : ""));
+      } catch (e) { }
+    }
+    const args = [installer, "--root", root];
+    if (codeOnly) args.push("--code-only");
+    const res = spawnSync(process.execPath, args, { stdio: "inherit" });
     if (res.status !== 0) throw new Error("installer exited with " + res.status);
     let sha = null;
     try { sha = (await remoteInfo({ repo })).sha; } catch (e) { }
     const pkgPath = path.join(path.dirname(installer), "package.json");
     const pkg = fs.existsSync(pkgPath) ? JSON.parse(fs.readFileSync(pkgPath, "utf8")) : { version: "unknown" };
     fs.writeFileSync(path.join(root, "cc-termux.json"), JSON.stringify({ version: pkg.version, sha, installedAt: new Date().toISOString() }, null, 2) + "\n");
-    console.log("cc-termux: updated to " + pkg.version + (sha ? " (" + sha.slice(0, 7) + ")" : ""));
+    console.log("cc-termux: updated to " + pkg.version + (sha ? " (" + sha.slice(0, 7) + ")" : "") + (codeOnly ? " [Claude Code binary kept]" : " [Claude Code binary reinstalled]"));
     return true;
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
@@ -126,7 +159,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       else console.log("cc-termux is up to date (" + (r.local.version || "unknown") + ")");
     }).catch((e) => { console.error("cc-termux: update check failed: " + e.message); process.exit(1); });
   } else if (arg === "--self-update") {
-    selfUpdate({ root }).catch((e) => { console.error("cc-termux: update failed: " + e.message); process.exit(1); });
+    selfUpdate({ root, redownload: process.argv.includes("--redownload") }).catch((e) => { console.error("cc-termux: update failed: " + e.message); process.exit(1); });
   } else {
     console.log("usage: cc-update [--check|--self-update]");
   }
