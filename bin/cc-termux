@@ -5,7 +5,6 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { resolvePerf, PERF_ENV, setReducedMotion } from "./cc-perf.mjs";
 
 const ROOT = process.env.CC_TERMUX_ROOT || path.join(os.homedir(), ".local", "share", "cc-termux");
 const CFG = process.env.CC_TERMUX_CONFIG || path.join(os.homedir(), ".config", "cc-termux", "config.json");
@@ -521,7 +520,7 @@ switch (cmd) {
   }
   case "test": {
     const prompt = args.join(" ") || "Reply with exactly: GATEWAY OK";
-    const out = execFileSync(path.join(ROOT, "bin", "claude"), ["-p", "--output-format", "json", prompt], { encoding: "utf8", timeout: 180000 });
+    const out = execFileSync(process.execPath, [path.join(ROOT, "bin", "cc-launcher.mjs"), "-p", "--output-format", "json", prompt], { encoding: "utf8", timeout: 180000 });
     try { const j = JSON.parse(out); console.log(j.result || JSON.stringify(j)); } catch { console.log(out); }
     break;
   }
@@ -607,7 +606,7 @@ switch (cmd) {
     const list = p.free || [];
     if (args.includes("--json")) { console.log(JSON.stringify(list, null, 2)); break; }
     for (const x of list) console.log(x.id.padEnd(16) + x.name.padEnd(34) + (x.local ? "(local) " : "") + (x.noKey ? "(no key)" : "") + "  " + x.baseUrl);
-    console.log("\nadd one: cc-termux setup -> 6   (or CC_SETUP_PRESET=<id> for scripted)");
+    console.log("\nadd one: cc-termux setup -> 3   (or CC_SETUP_NONINTERACTIVE=1 CC_SETUP_PRESET=<id> for scripted)");
     break;
   }
   case "diagnose": {
@@ -636,14 +635,30 @@ switch (cmd) {
     const allowed = { on: "on", mobile: "on", off: "off", normal: "off", auto: "off", status: "status" };
     if (!(mode in allowed)) { console.log("usage: cc-termux tune [on|off|auto|status]"); break; }
     const c = load();
-    c.performance = { ...(c.performance || {}), mode: allowed[mode] };
+    const prevPerf = { ...(c.performance || {}) };
+    if (mode !== "status") c.performance = { ...prevPerf, mode: allowed[mode] };
+    let perfMod;
+    try { perfMod = await import("file://" + path.join(ROOT, "bin", "cc-perf.mjs")); }
+    catch (e) { console.log("performance module is missing - run: cc-termux update"); break; }
+    const r = perfMod.resolvePerf({ mode: (c.performance && c.performance.mode) || "off" });
+    const cjPath = path.join(os.homedir(), ".claude.json");
+    let cj = {};
+    try { cj = JSON.parse(fs.readFileSync(cjPath, "utf8")); } catch { cj = {}; }
+    if (mode !== "status") {
+      if (r.enabled) {
+        if (prevPerf.prevReducedMotion === undefined) c.performance.prevReducedMotion = cj.prefersReducedMotion === true;
+        perfMod.setReducedMotion(os.homedir(), true);
+      } else {
+        const restore = prevPerf.prevReducedMotion;
+        perfMod.setReducedMotion(os.homedir(), restore === true);
+        delete c.performance.prevReducedMotion;
+      }
+    }
     save(c);
-    const r = resolvePerf({ mode: c.performance.mode });
-    if (mode !== "status") { setReducedMotion(os.homedir(), r.enabled); }
     console.log("Performance mode: " + (r.enabled ? "ON" : "OFF") + (r.enabled ? "  (chosen by you)" : ""));
     if (r.enabled) {
       console.log("  reduced motion: on");
-      console.log("  flags: " + Object.keys(PERF_ENV).join(", "));
+      console.log("  flags: " + Object.keys(perfMod.PERF_ENV).join(", "));
     }
     if (mode !== "status") console.log("  restart running claude sessions to apply");
     break;

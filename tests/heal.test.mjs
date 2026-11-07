@@ -14,6 +14,7 @@ test("heal repairs settings, foreign claude binaries and sample configs", () => 
   fs.mkdirSync(path.join(home, ".claude"), { recursive: true });
   fs.mkdirSync(path.join(home, ".config", "cc-termux"), { recursive: true });
   fs.mkdirSync(path.join(root, "bin"), { recursive: true });
+  fs.writeFileSync(path.join(root, "bin", "claude.bin"), Buffer.from("fake"));
   fs.writeFileSync(path.join(home, ".bashrc"), "# shell\n");
   fs.mkdirSync(bin, { recursive: true });
 
@@ -29,7 +30,7 @@ test("heal repairs settings, foreign claude binaries and sample configs", () => 
   const cfgPath = path.join(home, ".config", "cc-termux", "config.json");
   fs.writeFileSync(cfgPath, JSON.stringify({
     active: "tokens",
-    providers: { tokens: { type: "openai", baseUrl: "https://tokens.bd", model: "deepseek/deepseek-v4.1-flash", modelsById: { "deepseek/deepseek-v4.1-flash": { name: "DeepSeek", contextTokens: 1000000 } } } },
+    providers: { tokens: { type: "openai", baseUrl: "https://tokens.bd", model: "deepseek/deepseek-v4.1-flash", modelsById: { "deepseek/deepseek-v4.1-flash": { name: "DeepSeek", contextTokens: 1000000 } } }, sample: { type: "openai", baseUrl: "https://example.invalid/v1", model: "m", modelsById: {} } },
     routing: {},
   }));
   fs.writeFileSync(path.join(home, ".config", "cc-termux", "keys.json"), JSON.stringify({ tokens: "test-key" }));
@@ -39,7 +40,7 @@ test("heal repairs settings, foreign claude binaries and sample configs", () => 
   process.env.PATH = bin + path.delimiter + (prevPath || "");
   process.env.CC_TERMUX_CONFIG = cfgPath;
   try {
-    const changes = healEnvironment({ root, home, prefix });
+    const changes = healEnvironment({ root, home, prefix, searchPath: bin });
     assert.ok(changes.length >= 3, "expected settings, binary and config changes");
   } finally {
     process.env.PATH = prevPath;
@@ -53,6 +54,7 @@ test("heal repairs settings, foreign claude binaries and sample configs", () => 
   assert.match(fs.readFileSync(foreign, "utf8"), /cc-launcher\.mjs/);
   const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
   assert.ok(cfg.providers.tokens, "configured provider must be preserved");
+  assert.equal(cfg.providers.sample, undefined, "sample provider must be removed");
   assert.ok(cfg.routing["prov/tokens/deepseek/deepseek-v4.1-flash"], "routing must be rebuilt");
   const s2 = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
   assert.ok(Array.isArray(s2.modelPicker.options) && s2.modelPicker.options.length >= 2, "picker must be rebuilt");
@@ -63,7 +65,7 @@ test("heal repairs settings, foreign claude binaries and sample configs", () => 
   assert.equal(JSON.parse(fs.readFileSync(path.join(home, ".claude.json"), "utf8")).installMethod, "native");
   assert.match(fs.readFileSync(path.join(home, ".bashrc"), "utf8"), /# cc-termux PATH/);
 
-  const again = healEnvironment({ root, home, prefix });
+  const again = healEnvironment({ root, home, prefix, searchPath: bin });
   assert.equal(again.length, 0, "heal must be idempotent");
   fs.rmSync(tmp, { recursive: true, force: true });
 });
@@ -78,7 +80,7 @@ test("heal never writes prefix shims for a non-canonical install root", () => {
   const prevPrefix = process.env.PREFIX;
   process.env.PREFIX = prefix;
   try {
-    healEnvironment({ root, home });
+    healEnvironment({ root, home, searchPath: "" });
     assert.equal(fs.existsSync(path.join(prefix, "bin")), false, "must not touch the real prefix for temp roots");
   } finally {
     if (prevPrefix === undefined) delete process.env.PREFIX; else process.env.PREFIX = prevPrefix;

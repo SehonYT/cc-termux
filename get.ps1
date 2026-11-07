@@ -38,14 +38,30 @@ try {
   if ($env:CC_TERMUX_ARCHIVE) {
     Copy-Item $env:CC_TERMUX_ARCHIVE $Archive
   } else {
-    Invoke-WebRequest "https://codeload.github.com/$Repo/tar.gz/refs/heads/$Ref" -OutFile $Archive -UseBasicParsing
+    $Sha = ""
+    $Date = ""
+    if ($Ref -eq "main") {
+      try {
+        $atom = (Invoke-WebRequest "https://github.com/$Repo/commits/main.atom" -UseBasicParsing).Content
+        $m = [regex]::Match($atom, "Grit::Commit/([0-9a-f]{40})")
+        if ($m.Success) {
+          $Sha = $m.Groups[1].Value
+          $d = [regex]::Match($atom, "<updated>([^<]+)</updated>")
+          if ($d.Success) { $Date = $d.Groups[1].Value }
+          $env:CC_TERMUX_COMMIT_SHA = $Sha
+          $env:CC_TERMUX_COMMIT_DATE = $Date
+        }
+      } catch { }
+    }
+    $archiveRef = if ($Sha) { $Sha } else { $Ref }
+    Invoke-WebRequest "https://codeload.github.com/$Repo/tar.gz/$archiveRef" -OutFile $Archive -UseBasicParsing
   }
   $Src = Join-Path $Tmp "src"
   New-Item -ItemType Directory -Path $Src | Out-Null
   tar -xzf $Archive -C $Src
   $Install = Get-ChildItem -Path $Src -Filter install.mjs -Recurse -Depth 1 | Select-Object -First 1
   if (-not $Install) { throw "install.mjs not found in archive" }
-  node $Install.FullName @args
+  & $Node $Install.FullName @args
   exit $LASTEXITCODE
 } finally {
   Remove-Item $Tmp -Recurse -Force -ErrorAction SilentlyContinue

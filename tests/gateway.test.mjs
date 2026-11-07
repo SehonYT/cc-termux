@@ -35,7 +35,7 @@ test("gateway reports a clear error when no provider is configured", async () =>
   try {
     assert.ok(await waitHealth(port), "gateway did not start");
     const res = await fetch("http://127.0.0.1:" + port + "/v1/messages", {
-      method: "POST", headers: { "content-type": "application/json" },
+      method: "POST", headers: { "content-type": "application/json", authorization: "Bearer cc-termux-local" },
       body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 5, messages: [{ role: "user", content: "hi" }] }),
     });
     assert.equal(res.status, 400);
@@ -58,7 +58,7 @@ test("gateway logs upstream failures to errors.log", async () => {
   try {
     assert.ok(await waitHealth(port), "gateway did not start");
     const res = await fetch("http://127.0.0.1:" + port + "/v1/messages", {
-      method: "POST", headers: { "content-type": "application/json" },
+      method: "POST", headers: { "content-type": "application/json", authorization: "Bearer cc-termux-local" },
       body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 5, messages: [{ role: "user", content: "hi" }] }),
     });
     assert.ok(res.status >= 500);
@@ -66,6 +66,22 @@ test("gateway logs upstream failures to errors.log", async () => {
     assert.ok(fs.existsSync(log), "errors.log was not written");
     const entry = JSON.parse(fs.readFileSync(log, "utf8").trim().split("\n").pop());
     assert.equal(entry.kind, "gateway");
+  } finally {
+    child.kill("SIGKILL");
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+test("gateway rejects requests without the local token", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cc-gw-"));
+  const port = 20000 + Math.floor(Math.random() * 1000);
+  const { child } = startGateway(tmp, port, { listen: { host: "127.0.0.1", port }, active: "", providers: {}, routing: {} });
+  try {
+    assert.ok(await waitHealth(port), "gateway did not start");
+    const res = await fetch("http://127.0.0.1:" + port + "/v1/messages", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model: "m", max_tokens: 5, messages: [] }),
+    });
+    assert.equal(res.status, 401);
   } finally {
     child.kill("SIGKILL");
     fs.rmSync(tmp, { recursive: true, force: true });

@@ -9,7 +9,14 @@ import { fileURLToPath } from "node:url";
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const base = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")).version;
 
+function shaArg() {
+  const i = process.argv.indexOf("--sha");
+  return i > 0 && process.argv[i + 1] ? process.argv[i + 1] : "";
+}
+
 function sha() {
+  const explicit = shaArg();
+  if (explicit) return explicit;
   if (process.env.GITHUB_SHA) return process.env.GITHUB_SHA;
   const r = spawnSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" });
   return r.status === 0 ? r.stdout.trim() : "";
@@ -30,6 +37,6 @@ export function labelVersion(version, commit) {
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  if (process.argv.includes("--tag")) console.log(buildTag());
-  else console.log(buildVersion());
+  if (process.argv.includes("--tag")) console.log(buildTag(base, sha()));
+  else console.log(buildVersion(base, sha()));
 }

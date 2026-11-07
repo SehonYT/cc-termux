@@ -21,13 +21,23 @@ export function localInfo(root = DEFAULT_ROOT) {
 }
 
 export function semverNewer(remote, local) {
-  const a = String(remote || "0.0.0").split(".").map(Number);
-  const b = String(local || "0.0.0").split(".").map(Number);
+  const a = String(remote || "0.0.0").split("+")[0].split(".").map(Number);
+  const b = String(local || "0.0.0").split("+")[0].split(".").map(Number);
   for (let i = 0; i < 3; i++) {
     if ((a[i] || 0) > (b[i] || 0)) return true;
     if ((a[i] || 0) < (b[i] || 0)) return false;
   }
   return false;
+}
+
+export function cmpVersions(a, b) {
+  const pa = String(a || "0").split("+")[0].split(".").map((n) => Number(n) || 0);
+  const pb = String(b || "0").split("+")[0].split(".").map((n) => Number(n) || 0);
+  for (let i = 0; i < 3; i++) {
+    if (pa[i] > pb[i]) return 1;
+    if (pa[i] < pb[i]) return -1;
+  }
+  return 0;
 }
 
 export function isNewer(local, remote) {
@@ -38,6 +48,8 @@ export function isNewer(local, remote) {
   if (Number.isFinite(l) && Number.isFinite(r)) return r > l;
   // Legacy stamps without a commit date: fall back to sha difference.
   if (local.sha && remote.sha) return local.sha !== remote.sha;
+  // No local provenance (offline/local tarball install): only a version bump counts.
+  if (!local.sha) return semverNewer(remote.version, local.version);
   return semverNewer(remote.version, local.version);
 }
 
@@ -49,7 +61,7 @@ export async function remoteInfo({ repo = DEFAULT_REPO, fetchImpl = fetch } = {}
   let commits = [];
   // The commit atom feed is public, stable per commit and not API rate-limited.
   try {
-    const r = await fetchImpl("https://github.com/" + repo + "/commits/main.atom", { headers, signal: AbortSignal.timeout(5000) });
+    const r = await fetchImpl("https://github.com/" + repo + "/commits/main.atom", { headers, signal: AbortSignal.timeout(8000) });
     if (r.ok) {
       const text = await r.text();
       const re = /Grit::Commit\/([0-9a-f]{40})[\s\S]*?<updated>([^<]+)<\/updated>/g;
@@ -65,7 +77,11 @@ export async function remoteInfo({ repo = DEFAULT_REPO, fetchImpl = fetch } = {}
   if (!sha) {
     try {
       const r = await fetchImpl("https://api.github.com/repos/" + repo + "/commits/main", { headers, signal: AbortSignal.timeout(5000) });
-      if (r.ok) sha = (await r.json()).sha || null;
+      if (r.ok) {
+        const j = await r.json();
+        sha = j.sha || null;
+        updatedAt = (j.commit && (j.commit.author && j.commit.author.date || j.commit.committer && j.commit.committer.date)) || null;
+      }
     } catch (e) { }
   }
   return { sha, version, updatedAt, commits };
@@ -75,11 +91,13 @@ export async function check({ root = DEFAULT_ROOT, repo = DEFAULT_REPO, fetchImp
   const cacheFile = path.join(root, "update-check.json");
   try {
     const cache = JSON.parse(fs.readFileSync(cacheFile, "utf8"));
-    if (Date.now() - new Date(cache.at).getTime() < cacheTtlMs) {
+    const fresh = Date.now() - new Date(cache.at).getTime() < cacheTtlMs;
+    if (fresh && cache.remote && cache.remote.updatedAt) {
       return { ...cache, local, available: isNewer(local, cache.remote), cached: true };
     }
   } catch (e) { }
   const remote = await remoteInfo({ repo, fetchImpl });
+  if (!remote.sha && !remote.version) throw new Error("could not reach GitHub to check for updates");
   const available = isNewer(local, remote);
   try { fs.writeFileSync(cacheFile, JSON.stringify({ at: new Date().toISOString(), remote }) + "\n"); } catch (e) { }
   return { local, remote, available, cached: false };
@@ -115,6 +133,11 @@ export async function claudeCodeUpToDate({ root = DEFAULT_ROOT, fetchImpl = fetc
   }
   if (!fs.existsSync(bin)) return { upToDate: false, localVersion, reason: "binary missing" };
   if (fs.statSync(bin).size < minBinaryBytes) return { upToDate: false, localVersion, reason: "binary too small" };
+  if (process.platform === "android") {
+    let loaderOk = false;
+    try { loaderOk = fs.readdirSync(path.join(root, "lib")).some((f) => f.startsWith("ld-musl-")); } catch (e) { loaderOk = false; }
+    if (!loaderOk) return { upToDate: false, localVersion, reason: "musl loader missing" };
+  }
   let remoteVersion = null;
   try { remoteVersion = await latestClaudeVersion({ fetchImpl }); }
   catch (e) {
@@ -122,7 +145,9 @@ export async function claudeCodeUpToDate({ root = DEFAULT_ROOT, fetchImpl = fetc
     return { upToDate: true, localVersion, reason: "registry unreachable - keeping installed binary" };
   }
   if (!remoteVersion) return { upToDate: false, localVersion, reason: "no registry version" };
-  return { upToDate: localVersion === remoteVersion, localVersion, remoteVersion, reason: localVersion === remoteVersion ? "up to date" : "new version available" };
+  const cmp = cmpVersions(localVersion, remoteVersion);
+  if (cmp > 0) return { upToDate: true, localVersion, remoteVersion, reason: "installed build is newer than the registry" };
+  return { upToDate: cmp === 0, localVersion, remoteVersion, reason: cmp === 0 ? "up to date" : "new version available" };
 }
 
 export async function selfUpdate({ root = DEFAULT_ROOT, repo = DEFAULT_REPO, archivePath = null, redownload = false, fetchImpl = fetch } = {}) {
@@ -141,8 +166,9 @@ export async function selfUpdate({ root = DEFAULT_ROOT, repo = DEFAULT_REPO, arc
       // can serve a cached archive that is older than the atom feed and cause an
       // endless "update available" loop.
       try { const info = await remoteInfo({ repo, fetchImpl }); targetSha = info.sha || null; targetDate = info.updatedAt || null; } catch (e) { }
+      if (!targetSha) throw new Error("could not resolve the latest commit - check your connection and retry");
       const local = localInfo(root);
-      if (!redownload && local.updatedAt && targetDate && new Date(targetDate).getTime() < new Date(local.updatedAt).getTime()) {
+      if (local.updatedAt && targetDate && new Date(targetDate).getTime() < new Date(local.updatedAt).getTime()) {
         step("remote feed is older than the installed build - not downgrading");
         return false;
       }

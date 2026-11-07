@@ -69,16 +69,24 @@ export function shouldAskPerf(mode) {
 }
 
 export async function savePerfMode(cfgPath, mode) {
-  let cfg = {};
-  try { cfg = JSON.parse(fs.readFileSync(cfgPath, "utf8")); } catch (e) { cfg = {}; }
+  let cfg;
+  try { cfg = JSON.parse(fs.readFileSync(cfgPath, "utf8")); }
+  catch (e) {
+    if (fs.existsSync(cfgPath)) { console.error("cc-termux: config is not valid JSON; leaving it untouched: " + cfgPath); return false; }
+    cfg = {};
+  }
   cfg.performance = { ...(cfg.performance || {}), mode };
   fs.mkdirSync(path.dirname(cfgPath), { recursive: true });
   fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2) + "\n", { mode: 0o600 });
 }
 export function setReducedMotion(home = os.homedir(), enabled = true) {
   const file = path.join(home, ".claude.json");
-  let cfg = {};
-  try { cfg = JSON.parse(fs.readFileSync(file, "utf8")); } catch (e) { cfg = {}; }
+  let cfg;
+  try { cfg = JSON.parse(fs.readFileSync(file, "utf8")); }
+  catch (e) {
+    if (fs.existsSync(file)) return false; // never overwrite a corrupt user config
+    cfg = {};
+  }
   if (cfg.prefersReducedMotion === enabled) return false;
   cfg.prefersReducedMotion = enabled;
   try { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, JSON.stringify(cfg, null, 2) + "\n"); } catch (e) { return false; }

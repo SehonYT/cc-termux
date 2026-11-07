@@ -28,7 +28,13 @@ function saveJson(file, value, mode) {
   fs.writeFileSync(file, JSON.stringify(value, null, 2) + "\n", mode ? { mode } : undefined);
 }
 function isOurShim(p) {
-  try { return /(cc-launcher\.mjs|bin\/cc-termux|ccp\.mjs)/.test(fs.readFileSync(p, "utf8")); } catch { return false; }
+  try {
+    const fd = fs.openSync(p, "r");
+    const b = Buffer.alloc(4096);
+    const n = fs.readSync(fd, b, 0, b.length, 0);
+    fs.closeSync(fd);
+    return /(cc-launcher\.mjs|bin\/cc-termux|ccp\.mjs)/.test(b.subarray(0, n).toString("utf8"));
+  } catch { return false; }
 }
 function writeShim(file, root) {
   const node = process.execPath;
@@ -41,10 +47,10 @@ function writeShim(file, root) {
     fs.chmodSync(file, 0o755);
   }
 }
-function findClaudeBinaries() {
+function findClaudeBinaries(searchPath) {
   const name = process.platform === "win32" ? "claude.cmd" : "claude";
   const out = [];
-  for (const dir of String(process.env.PATH || "").split(path.delimiter).filter(Boolean)) {
+  for (const dir of String(searchPath === undefined ? process.env.PATH || "" : searchPath).split(path.delimiter).filter(Boolean)) {
     const p = path.join(dir, name);
     try { if (fs.existsSync(p) && out.indexOf(p) < 0) out.push(p); } catch { }
   }
@@ -59,7 +65,7 @@ function backup(file) {
 
 const composite = (p, id) => (id ? "prov/" + p + "/" + id : id);
 
-export function healEnvironment({ root = process.env.CC_TERMUX_ROOT, home = os.homedir(), prefix, killGateways = true, installPrefix } = {}) {
+export function healEnvironment({ root = process.env.CC_TERMUX_ROOT, home = os.homedir(), prefix, killGateways = true, installPrefix, searchPath } = {}) {
   if (!root) throw new Error("install root is required");
   const changes = [];
   const cfgPath = process.env.CC_TERMUX_CONFIG || path.join(home, ".config", "cc-termux", "config.json");
@@ -74,13 +80,12 @@ export function healEnvironment({ root = process.env.CC_TERMUX_ROOT, home = os.h
     let dirty = false;
     const visible = () => Object.entries(cfg.providers).filter(([, p]) => !p.hidden);
     for (const [name, p] of visible()) {
-      const sample = !keys[name] && !p.apiKeyEnv && !Object.keys(p.modelsById || {}).length;
+      const sample = (p.sample === true || /^(sample|example)(-|$)/i.test(name)) && !keys[name] && !p.apiKey && !p.apiKeyEnv && !Object.keys(p.modelsById || {}).length;
       if (sample) { delete cfg.providers[name]; dirty = true; changes.push("config: removed sample provider " + name); }
     }
     if (!cfg.providers[cfg.active]) {
-      cfg.active = visible()[0] ? visible()[0][0] : "";
-      dirty = true;
-      changes.push("config: active provider -> " + (cfg.active || "(none)"));
+      const next = visible()[0] ? visible()[0][0] : "";
+      if (next !== cfg.active) { cfg.active = next; dirty = true; changes.push("config: active provider -> " + (next || "(none)")); }
     }
     if (cfg.override) {
       const p = cfg.providers[cfg.override.provider];
@@ -137,6 +142,19 @@ export function healEnvironment({ root = process.env.CC_TERMUX_ROOT, home = os.h
       const picker = { replaceBuiltInOptions: true, options: [...switchRows, ...rows] };
       if (JSON.stringify(settings.modelPicker) !== JSON.stringify(picker)) { settings.modelPicker = picker; changed = true; }
     }
+    const DENY = [
+      "Read(~/.config/cc-termux/keys.json)",
+      "Read(~/.config/cc-termux/config.json)",
+      "Read(~/.claude.json)",
+      "Read(~/.claude/settings.json)",
+      "Read(~/.cache/cc-termux/errors.log)",
+      "Read(~/.ssh/*)",
+    ];
+    settings.permissions = settings.permissions || {};
+    const deny = Array.isArray(settings.permissions.deny) ? settings.permissions.deny : [];
+    const before = deny.length;
+    for (const rule of DENY) if (!deny.includes(rule)) deny.push(rule);
+    if (deny.length !== before) { settings.permissions.deny = deny; changed = true; }
     if (changed) {
       try {
         fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
@@ -148,7 +166,7 @@ export function healEnvironment({ root = process.env.CC_TERMUX_ROOT, home = os.h
   }
 
   // 3. foreign claude binaries on PATH
-  for (const p of findClaudeBinaries()) {
+  for (const p of findClaudeBinaries(searchPath)) {
     if (isOurShim(p)) continue;
     try { const b = backup(p); writeShim(p, root); changes.push("claude binary: " + p + " -> shim (backup " + b + ")"); }
     catch (e) { changes.push("claude binary: could not replace " + p + " (" + e.code + ")"); }
@@ -179,13 +197,15 @@ export function healEnvironment({ root = process.env.CC_TERMUX_ROOT, home = os.h
       try { ver = fs.readFileSync(path.join(root, "VERSION"), "utf8").trim().split("-")[0] || "cc-termux"; } catch (e) { }
       const versionsDir = path.join(home, ".local", "share", "claude", "versions");
       fs.mkdirSync(versionsDir, { recursive: true });
-      const targetFile = path.join(versionsDir, ver);
+      let targetFile = path.join(versionsDir, ver);
+      // Never overwrite a real Claude native binary with our shim.
+      try { if (fs.existsSync(targetFile) && !isOurShim(targetFile)) targetFile = path.join(versionsDir, "cc-termux-" + ver); } catch (e) { }
       if (writeLauncherShim(targetFile, path.join(root, "bin", "cc-launcher.mjs"))) changes.push("shim: " + targetFile);
       const link = path.join(homeBin, "claude");
       let linkOk = false;
       try { linkOk = fs.lstatSync(link).isSymbolicLink() && fs.readlinkSync(link) === targetFile; } catch (e) { }
       if (!linkOk) {
-        try { if (fs.existsSync(link) && !fs.lstatSync(link).isSymbolicLink()) backup(link); } catch (e) { }
+        try { if (fs.existsSync(link) && !isOurShim(link)) backup(link); } catch (e) { }
         try { fs.rmSync(link, { force: true }); } catch (e) { }
         fs.symlinkSync(targetFile, link);
         changes.push("shim: " + link + " -> " + targetFile);
@@ -226,14 +246,19 @@ export function healEnvironment({ root = process.env.CC_TERMUX_ROOT, home = os.h
     // mark the install as native for Claude Code diagnostics
     try {
       const cj = path.join(home, ".claude.json");
-      let cfg = {};
-      try { cfg = JSON.parse(fs.readFileSync(cj, "utf8")); } catch (e) { cfg = {}; }
-      if (cfg.installMethod !== "native") { cfg.installMethod = "native"; saveJson(cj, cfg); changes.push("config: installMethod=native"); }
+      let cfg = null;
+      if (!fs.existsSync(cj)) cfg = {};
+      else { try { cfg = JSON.parse(fs.readFileSync(cj, "utf8")); } catch (e) { cfg = null; } }
+      const nativeBin = path.join(root, "bin", process.platform === "win32" ? "claude.exe" : "claude.bin");
+      if (cfg && fs.existsSync(nativeBin) && cfg.installMethod !== "native") { cfg.installMethod = "native"; saveJson(cj, cfg); changes.push("config: installMethod=native"); }
     } catch (e) { }
     // remove a leftover npm global package if present
     try {
-      const npmPkg = path.join(process.env.PREFIX || (process.platform === "android" ? "/data/data/com.termux/files/usr" : "/usr/local"), "lib", "node_modules", "@anthropic-ai", "claude-code");
-      if (fs.existsSync(npmPkg)) {
+      const npmPrefix = path.dirname(prefixBin);
+      const realPrefix = process.env.PREFIX || (process.platform === "android" ? "/data/data/com.termux/files/usr" : "/usr/local");
+      const npmPkg = path.join(npmPrefix, "lib", "node_modules", "@anthropic-ai", "claude-code");
+      // Only touch npm when operating on the real global prefix (never for temp/isolated roots).
+      if (path.resolve(npmPrefix) === path.resolve(realPrefix) && fs.existsSync(npmPkg)) {
         const r = spawnSync("npm", ["-g", "uninstall", "@anthropic-ai/claude-code"], { stdio: "ignore" });
         if (r.status === 0) changes.push("npm: removed leftover global claude-code package");
       }
@@ -255,7 +280,11 @@ export function healEnvironment({ root = process.env.CC_TERMUX_ROOT, home = os.h
       try {
         for (const d of fs.readdirSync("/proc")) {
           if (!/^\d+$/.test(d)) continue;
-          try { const c = fs.readFileSync("/proc/" + d + "/cmdline", "utf8"); if (c.includes("proxy/server.mjs") && Number(d) !== process.pid) pids.push(Number(d)); } catch { }
+          try {
+            const c = fs.readFileSync("/proc/" + d + "/cmdline", "utf8");
+            const pid = Number(d);
+            if (pid !== process.pid && pid !== process.ppid && c.split("\0").includes(path.join(root, "proxy", "server.mjs"))) pids.push(pid);
+          } catch { }
         }
       } catch { }
       if (pids.length && killGateways) {

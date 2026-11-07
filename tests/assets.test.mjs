@@ -15,9 +15,9 @@ function walk(dir) {
   const abs = path.join(repo, dir);
   if (!fs.existsSync(abs)) return out;
   for (const entry of fs.readdirSync(abs, { withFileTypes: true })) {
-    if (!entry.isFile()) continue;
-    if (/\.(bak|orig|log|tmp)$/.test(entry.name)) continue;
-    out.push(dir + "/" + entry.name);
+    const child = dir + "/" + entry.name;
+    if (entry.isDirectory()) out.push(...walk(child));
+    else if (entry.isFile() && !/\.(bak|orig|log|tmp)$/.test(entry.name)) out.push(child);
   }
   return out;
 }

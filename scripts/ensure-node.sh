@@ -1,8 +1,6 @@
 #!/bin/sh
 # Ensure a usable Node.js (>= 18) without requiring the user to install it.
-#
-# Order: existing node -> Termux pkg -> official Node tarball into the install root.
-# Sets NODE to an executable path. Set CC_NODE_DRY_RUN=1 to only print the plan.
+# Sets NODE to an executable path. CC_NODE_DRY_RUN=1 only prints the plan.
 
 cc_node_version_ok() {
   "$1" -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 18 ? 0 : 1)' >/dev/null 2>&1
@@ -10,18 +8,24 @@ cc_node_version_ok() {
 
 ensure_node() {
   if command -v node >/dev/null 2>&1 && cc_node_version_ok node; then
-    NODE=$(command -v node)
-    export NODE
+    NODE=$(command -v node); export NODE
     echo "cc-termux: using node $("$NODE" -p "process.versions.node")" >&2
     return 0
   fi
 
-  if command -v pkg >/dev/null 2>&1 && [ -n "${PREFIX:-}" ]; then
-    echo "cc-termux: installing Node.js via pkg" >&2
-    pkg install -y nodejs-lts >&2 2>&1 || pkg install -y nodejs >&2 2>&1 || true
-    if command -v node >/dev/null 2>&1 && cc_node_version_ok node; then
-      NODE=$(command -v node); export NODE; return 0
+  # Termux/Android: official Node builds are glibc and will not run on bionic.
+  is_termux=0
+  case "${PREFIX:-}" in *com.termux*) is_termux=1 ;; esac
+  if [ "$(uname -s 2>/dev/null)" = "Linux" ] && [ -d /data/data/com.termux/files/usr ]; then is_termux=1; fi
+  if [ "$is_termux" = "1" ]; then
+    if [ "${CC_NODE_DRY_RUN:-0}" = "1" ]; then echo "cc-termux: would install Node.js via pkg (Termux)" >&2; NODE=node; export NODE; return 0; fi
+    if command -v pkg >/dev/null 2>&1; then
+      echo "cc-termux: installing Node.js via pkg" >&2
+      pkg install -y nodejs-lts >&2 2>&1 || pkg install -y nodejs >&2 2>&1 || true
+      if command -v node >/dev/null 2>&1 && cc_node_version_ok node; then NODE=$(command -v node); export NODE; return 0; fi
     fi
+    echo "cc-termux: Node.js 18+ is required on Termux; run: pkg install nodejs-lts" >&2
+    return 1
   fi
 
   os=$(uname -s 2>/dev/null || echo unknown)
@@ -50,27 +54,42 @@ ensure_node() {
   ver="${CC_NODE_VERSION:-v22.14.0}"
   dir="${CC_TERMUX_ROOT:-$HOME/.local/share/cc-termux}/runtime"
   name="node-$ver-$plat"
-  url="https://nodejs.org/dist/$ver/$name.tar.gz"
+  NODE="$dir/$name/bin/node"
 
-  if [ "${CC_NODE_DRY_RUN:-0}" = "1" ]; then
-    echo "cc-termux: would download $url into $dir" >&2
-    NODE=$dir/$name/bin/node; export NODE; return 0
+  # Reuse an earlier download.
+  if [ -x "$NODE" ] && cc_node_version_ok "$NODE"; then
+    echo "cc-termux: using cached node $("$NODE" -p "process.versions.node")" >&2; export NODE; return 0
   fi
 
+  # musl distros cannot run the official glibc Node build.
+  if [ -e /lib/ld-musl-x86_64.so.1 ] || [ -e /lib/ld-musl-aarch64.so.1 ]; then
+    if command -v apk >/dev/null 2>&1; then
+      echo "cc-termux: installing nodejs via apk" >&2
+      apk add --no-cache nodejs >&2 2>&1 || true
+      if command -v node >/dev/null 2>&1 && cc_node_version_ok node; then NODE=$(command -v node); export NODE; return 0; fi
+    fi
+    echo "cc-termux: install Node.js 18+ with your package manager (official builds need glibc)" >&2
+    return 1
+  fi
+
+  url="https://nodejs.org/dist/$ver/$name.tar.gz"
+  if [ "${CC_NODE_DRY_RUN:-0}" = "1" ]; then
+    echo "cc-termux: would download $url into $dir" >&2; export NODE; return 0
+  fi
   mkdir -p "$dir" || return 1
   tmp="$dir/.download.$$"
-  if command -v curl >/dev/null 2>&1; then if [ -t 2 ]; then curl -fL --progress-bar "$url" -o "$tmp.tar.gz" || return 1; else curl -fsSL "$url" -o "$tmp.tar.gz" || return 1; fi;
-  elif command -v wget >/dev/null 2>&1; then wget -qO "$tmp.tar.gz" "$url" || return 1;
+  if command -v curl >/dev/null 2>&1; then
+    if [ -t 2 ]; then curl -fL --progress-bar "$url" -o "$tmp.tar.gz" || return 1; else curl -fsSL "$url" -o "$tmp.tar.gz" || return 1; fi
+  elif command -v wget >/dev/null 2>&1; then wget -qO "$tmp.tar.gz" "$url" || return 1
   else echo "cc-termux: curl or wget is required to download Node.js" >&2; return 1; fi
-  if command -v tar >/dev/null 2>&1; then
-    tar -xzf "$tmp.tar.gz" -C "$dir" || return 1
-  else
-    echo "cc-termux: tar is required to unpack Node.js" >&2; return 1
-  fi
+  if ! command -v tar >/dev/null 2>&1; then echo "cc-termux: tar is required to unpack Node.js" >&2; return 1; fi
+  tar -xzf "$tmp.tar.gz" -C "$dir" || return 1
   rm -f "$tmp.tar.gz"
-  NODE="$dir/$name/bin/node"
   chmod +x "$NODE" 2>/dev/null || true
-  if [ ! -x "$NODE" ]; then echo "cc-termux: Node.js download incomplete ($NODE)" >&2; return 1; fi
+  if [ ! -x "$NODE" ] || ! cc_node_version_ok "$NODE"; then
+    echo "cc-termux: downloaded Node.js cannot run on this system ($os/$arch)" >&2
+    return 1
+  fi
   echo "cc-termux: downloaded node $("$NODE" -p "process.versions.node")" >&2
   export NODE
 }

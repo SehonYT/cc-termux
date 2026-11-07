@@ -46,3 +46,29 @@ test("patcher leaves binaries without anchors untouched", () => {
     assert.deepEqual(fs.readFileSync(path.join(root, "bin", "claude.bin")), before);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
+test("stale backups are refreshed for a different binary and never reverted onto it", () => {
+  const root = setup("Switch between Claude models");
+  const bin = path.join(root, "bin", "claude.bin");
+  try {
+    assert.equal(run(root, "--apply").status, 0);
+    const newer = Buffer.from("brand new binary without any anchors but different length");
+    fs.writeFileSync(bin, newer);
+    assert.equal(run(root, "--apply").status, 0);
+    assert.deepEqual(fs.readFileSync(bin + ".orig"), newer, "backup refreshed to the new binary");
+    assert.equal(run(root, "--revert").status, 0);
+    assert.deepEqual(fs.readFileSync(bin), newer);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test("patcher refuses to patch a patched binary with a stale backup", () => {
+  const root = setup("Switch between Claude models");
+  const bin = path.join(root, "bin", "claude.bin");
+  try {
+    assert.equal(run(root, "--apply").status, 0);
+    fs.writeFileSync(bin + ".orig", Buffer.from("tiny stale backup"));
+    fs.rmSync(bin + ".orig.json", { force: true });
+    const r = run(root, "--apply");
+    assert.notEqual(r.status, 0);
+    assert.match(r.stderr, /belongs to a different build/);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});

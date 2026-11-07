@@ -32,16 +32,19 @@ export function isTty(stream = process.stderr) {
 }
 
 export function banner(lines, { stream = process.stderr, tty = isTty(stream) } = {}) {
-  if (!tty) { for (const l of lines) stream.write(l + "\n"); return; }
+  const safe = (text) => { try { stream.write(text); } catch (e) { } };
+  if (!Array.isArray(lines) || !lines.length) return;
+  const strip = (l) => String(l).replace(/\x1b\[[0-9;]*m/g, "");
+  if (!tty) { for (const l of lines) safe(strip(l) + "\n"); return; }
   const plain = lines.map((l) => l.replace(/\x1b\[[0-9;]*m/g, ""));
   const width = Math.max(...plain.map((l) => l.length));
   const rule = "  +" + "-".repeat(width + 2) + "+";
-  stream.write(rule + "\n");
+  safe(rule + "\n");
   for (let i = 0; i < lines.length; i++) {
     const pad = " ".repeat(width - plain[i].length);
-    stream.write("  | " + lines[i] + pad + " |\n");
+    safe("  | " + lines[i] + pad + " |\n");
   }
-  stream.write(rule + "\n");
+  safe(rule + "\n");
 }
 
 export function step(text, { stream = process.stderr, tty = isTty(stream) } = {}) {
@@ -59,16 +62,16 @@ export function createProgress(label, { stream = process.stderr, tty = isTty(str
   let lastLineLen = 0;
   let frame = 0;
   let lastUnknownAt = 0;
+  let done = false;
   const print = (text, final) => {
     if (!tty) return;
-    const line = "\r\x1b[2K" + text;
-    stream.write(line);
+    try { stream.write("\r\x1b[2K" + text); if (final) stream.write("\n"); } catch (e) { }
     lastLineLen = text.length;
-    if (final) stream.write("\n");
   };
   if (tty) stream.write("  " + label + "\n");
   return {
     update(received, total) {
+      if (done) return;
       const pct = total ? Math.floor((received / total) * 100) : null;
       if (tty) {
         if (total) {
@@ -89,6 +92,7 @@ export function createProgress(label, { stream = process.stderr, tty = isTty(str
       }
     },
     done({ ok = true, message = "" } = {}) {
+      done = true;
       if (tty) {
         print("  " + (ok ? "\x1b[32m\u2714\x1b[0m " : "\x1b[31m\u2716\x1b[0m ") + label + (message ? "  " + message : ""), true);
       } else {

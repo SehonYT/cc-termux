@@ -85,3 +85,9 @@ test("popular providers come first and tokens.bd is last", () => {
   }
   assert.ok(ids.indexOf("tokens") > ids.indexOf("agentrouter"));
 });
+test("presets whose discovery endpoint is not JSON use a known path or static models", () => {
+  assert.equal(byId.tokens.modelsPath, "/v1/models", "tokens.bd /models is HTML, /v1/models is JSON");
+  assert.equal(byId["github-models"].modelsPath, null);
+  assert.ok(Array.isArray(byId["github-models"].models) && byId["github-models"].models.length > 0);
+  assert.ok(byId.perplexity.models.includes("sonar"));
+});

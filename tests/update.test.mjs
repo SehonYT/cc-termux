@@ -90,6 +90,8 @@ test("claudeCodeUpToDate compares the installed version with the registry", asyn
   const registry = (version) => async () => ({ ok: true, json: async () => ({ version }) });
   try {
     fs.mkdirSync(path.join(root, "bin"), { recursive: true });
+    fs.mkdirSync(path.join(root, "lib"), { recursive: true });
+    if (process.platform === "android") fs.writeFileSync(path.join(root, "lib", "ld-musl-aarch64.so.1"), "loader");
     fs.writeFileSync(path.join(root, "VERSION"), "2.1.319\n");
     fs.writeFileSync(path.join(root, "bin", "claude.bin"), Buffer.alloc(64));
     const same = await claudeCodeUpToDate({ root, fetchImpl: registry("2.1.319"), minBinaryBytes: 1 });
@@ -160,4 +162,20 @@ test("selfUpdate refuses an older remote feed instead of downgrading", async () 
     assert.equal(ok, false);
     assert.equal(JSON.parse(fs.readFileSync(path.join(root, "cc-termux.json"), "utf8")).sha, "d".repeat(40));
   } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+});
+test("check ignores caches without a commit date (legacy false positives)", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cc-upd-cache-"));
+  try {
+    fs.writeFileSync(path.join(root, "cc-termux.json"), JSON.stringify({ version: "0.2.0+x", sha: "f".repeat(40), updatedAt: "2026-02-01T00:00:00Z" }));
+    fs.writeFileSync(path.join(root, "update-check.json"), JSON.stringify({ at: new Date().toISOString(), remote: { sha: "e".repeat(40), version: "0.1.0" } }));
+    const fresh = "a".repeat(40);
+    const fetchImpl = async (url) => {
+      if (url.includes("commits/main.atom")) return { ok: true, text: async () => "<entry><id>Grit::Commit/" + fresh + "</id><updated>2026-03-01T00:00:00Z</updated></entry>" };
+      if (url.includes("package.json")) return { ok: true, json: async () => ({ version: "0.2.0" }) };
+      throw new Error("unexpected " + url);
+    };
+    const r = await check({ root, fetchImpl, cacheTtlMs: 3600 * 1000 });
+    assert.equal(r.cached, false);
+    assert.equal(r.remote.sha, fresh);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });

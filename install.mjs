@@ -111,15 +111,16 @@ function runtimeAssets() {
   for (const f of ["patches.json", "presets.json", "config.example.json", "install.mjs", "install.sh", "install.ps1", "get.sh", "get.ps1", "package.json", "README.md", "LICENSE", "NOTICE"]) {
     if (fs.existsSync(path.join(SRC, f))) out.add(f);
   }
-  for (const dir of ["bin", "proxy", "commands", "scripts"]) {
-    const abs = path.join(SRC, dir);
-    if (!fs.existsSync(abs)) continue;
+  const walk = (rel) => {
+    const abs = path.join(SRC, rel);
+    if (!fs.existsSync(abs)) return;
     for (const entry of fs.readdirSync(abs, { withFileTypes: true })) {
-      if (!entry.isFile()) continue;
-      if (/\.(bak|orig|log|tmp)$/.test(entry.name)) continue;
-      out.add(dir + "/" + entry.name);
+      const child = rel + "/" + entry.name;
+      if (entry.isDirectory()) walk(child);
+      else if (entry.isFile() && !/\.(bak|orig|log|tmp)$/.test(entry.name)) out.add(child);
     }
-  }
+  };
+  for (const dir of ["bin", "proxy", "commands", "scripts"]) walk(dir);
   return [...out].sort();
 }
 
@@ -163,6 +164,16 @@ async function askPerformance() {
   }
 }
 
+function looksLikeShim(file) {
+  try {
+    const fd = fs.openSync(file, "r");
+    const b = Buffer.alloc(4096);
+    const n = fs.readSync(fd, b, 0, b.length, 0);
+    fs.closeSync(fd);
+    return b.subarray(0, n).toString("utf8").includes("cc-launcher.mjs");
+  } catch (e) { return false; }
+}
+
 function installShims(t) {
   const node = process.execPath;
   const scripts = {
@@ -176,6 +187,11 @@ function installShims(t) {
       fs.writeFileSync(path.join(ROOT, "bin", name + ".cmd"), line);
     }
     console.log("  windows shims written to " + path.join(ROOT, "bin") + " (add that folder to PATH)");
+    return;
+  }
+  const canonicalRoot = path.join(os.homedir(), ".local", "share", "cc-termux");
+  if (path.resolve(ROOT) !== path.resolve(canonicalRoot)) {
+    log("custom install root: skipping ~/.local and $PREFIX shims (add " + path.join(ROOT, "bin") + " to PATH)");
     return;
   }
   const prefix = process.env.PREFIX || (t.termux ? "/data/data/com.termux/files/usr" : "/usr/local");
@@ -194,11 +210,12 @@ function installShims(t) {
     try { ver = fs.readFileSync(path.join(ROOT, "VERSION"), "utf8").trim().split("-")[0] || "cc-termux"; } catch (e) { }
     const versionsDir = path.join(os.homedir(), ".local", "share", "claude", "versions");
     fs.mkdirSync(versionsDir, { recursive: true });
-    const targetFile = path.join(versionsDir, ver);
+    let targetFile = path.join(versionsDir, ver);
+    try { if (fs.existsSync(targetFile) && !looksLikeShim(targetFile)) targetFile = path.join(versionsDir, "cc-termux-" + ver); } catch (e) { }
     writeShim(path.dirname(targetFile), path.basename(targetFile), scripts.claude[0]);
     fs.mkdirSync(homeBin, { recursive: true });
     const link = path.join(homeBin, "claude");
-    try { if (fs.existsSync(link) && !fs.lstatSync(link).isSymbolicLink()) fs.renameSync(link, link + ".official-backup." + Date.now()); } catch (e) { }
+    try { if (fs.existsSync(link) && !looksLikeShim(link)) fs.renameSync(link, link + ".official-backup." + Date.now()); } catch (e) { }
     try { fs.rmSync(link, { force: true }); } catch (e) { }
     fs.symlinkSync(targetFile, link);
     writeShim(binDir, "cc-termux", scripts["cc-termux"][0]);
@@ -215,15 +232,22 @@ function installShims(t) {
   try { if (fs.existsSync(oldClaude)) { let dst = oldClaude + ".official-backup"; if (fs.existsSync(dst)) dst += "." + Date.now(); fs.renameSync(oldClaude, dst); } } catch (e) { }
   // mark native install + make ~/.local/bin visible to login shells
   try {
-    const cj = path.join(os.homedir(), ".claude.json");
-    let cfg = {};
-    try { cfg = JSON.parse(fs.readFileSync(cj, "utf8")); } catch (e) { cfg = {}; }
-    if (cfg.installMethod !== "native") { cfg.installMethod = "native"; fs.writeFileSync(cj, JSON.stringify(cfg, null, 2) + "\n"); }
+    const nativeBin = path.join(ROOT, "bin", process.platform === "win32" ? "claude.exe" : "claude.bin");
+    if (fs.existsSync(nativeBin)) {
+      const cj = path.join(os.homedir(), ".claude.json");
+      let raw = null;
+      try { raw = fs.readFileSync(cj, "utf8"); } catch (e) { raw = null; }
+      {
+        let cfg = null;
+        if (raw === null) cfg = {};
+        else { try { cfg = JSON.parse(raw); } catch (e) { console.error("cc-termux: ~/.claude.json is not valid JSON; leaving it untouched"); } }
+        if (cfg && cfg.installMethod !== "native") { cfg.installMethod = "native"; fs.writeFileSync(cj, JSON.stringify(cfg, null, 2) + "\n"); }
+      }
+    }
   } catch (e) { }
-  for (const rc of [path.join(os.homedir(), ".bashrc"), path.join(os.homedir(), ".profile")]) {
+  for (const rc of [path.join(os.homedir(), ".bashrc"), path.join(os.homedir(), ".profile"), path.join(os.homedir(), ".zprofile"), path.join(os.homedir(), ".zshrc")]) {
     try {
-      if (!fs.existsSync(rc)) continue;
-      const text = fs.readFileSync(rc, "utf8");
+      const text = fs.existsSync(rc) ? fs.readFileSync(rc, "utf8") : "";
       if (!text.includes("# cc-termux PATH")) fs.appendFileSync(rc, "\n# cc-termux PATH\nexport PATH=\"$HOME/.local/bin:$PATH\"\n");
     } catch (e) { }
   }
@@ -231,6 +255,7 @@ function installShims(t) {
 (async () => {
   if (has("--list-assets")) { for (const f of runtimeAssets()) console.log(f); return; }
   if (!nodeVersionOk(process.versions.node)) fail("Node.js 18+ is required (found " + process.versions.node + ")");
+  process.on("exit", () => { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) { } });
   const t = detectHostTarget();
   if (!CHECK && !process.env.CC_TERMUX_NO_BANNER) {
     banner([
@@ -272,6 +297,7 @@ function installShims(t) {
     for (const f of ["cli.js", "package.json", "sdk-tools.d.ts"]) if (fs.existsSync(path.join(pkg, f))) fs.copyFileSync(path.join(pkg, f), path.join(ROOT, "js", f));
     if (fs.existsSync(path.join(pkg, "vendor"))) fs.cpSync(path.join(pkg, "vendor"), path.join(ROOT, "js", "vendor"), { recursive: true });
     fs.writeFileSync(path.join(ROOT, "VERSION"), "2.1.112-js\n");
+    for (const stale of ["bin/claude.bin", "bin/claude.exe", ".direct-exec"]) { try { fs.rmSync(path.join(ROOT, stale), { force: true }); } catch (e) { } }
     log("JS fallback installed");
   } else {
     const ver = VERSION_ARG || (TARBALL ? "local" : await latestVersion());
@@ -293,6 +319,7 @@ function installShims(t) {
     fs.copyFileSync(srcBin, dst);
     fs.chmodSync(dst, 0o755);
     fs.writeFileSync(path.join(ROOT, "VERSION"), ver + "\n");
+    for (const stale of [dst + ".orig", dst + ".orig.json"]) { try { fs.rmSync(stale, { force: true }); } catch (e) { } }
     step("Claude Code " + ver + " installed into your device (" + dst + ")");
     log("source: registry.npmjs.org/@anthropic-ai/claude-code-" + t.pkg + " (official Anthropic package)");
     if (t.termux && t.loader) {
@@ -306,6 +333,7 @@ function installShims(t) {
       fs.chmodSync(path.join(ROOT, "lib", loaderName), 0o755);
       try { fs.unlinkSync(path.join(ROOT, "lib", "libc.musl-" + t.loader + ".so.1")); } catch {}
       fs.symlinkSync(loaderName, path.join(ROOT, "lib", "libc.musl-" + t.loader + ".so.1"));
+      try { fs.rmSync(path.join(ROOT, ".direct-exec"), { force: true }); } catch (e) { }
       let patchelfAvailable = spawnSync("patchelf", ["--version"], { stdio: "ignore" }).status === 0;
       if (!patchelfAvailable) {
         log("installing patchelf via pkg");
@@ -337,13 +365,13 @@ function installShims(t) {
     const pkg = JSON.parse(fs.readFileSync(path.join(SRC, "package.json"), "utf8"));
     let sha = process.env.CC_TERMUX_COMMIT_SHA || null;
     let commitDate = process.env.CC_TERMUX_COMMIT_DATE || null;
-    if (!sha || !commitDate) {
-      try {
-        const { remoteInfo } = await import(path.join(ROOT, "bin", "cc-update.mjs"));
-        const info = await remoteInfo({});
-        sha = sha || info.sha;
-        commitDate = commitDate || info.updatedAt;
-      } catch (e) { }
+    if (!sha) {
+      const g = spawnSync("git", ["-C", SRC, "rev-parse", "HEAD"], { encoding: "utf8" });
+      if (g.status === 0) sha = g.stdout.trim() || null;
+    }
+    if (!commitDate) {
+      const g = spawnSync("git", ["-C", SRC, "show", "-s", "--format=%cI", "HEAD"], { encoding: "utf8" });
+      if (g.status === 0) commitDate = g.stdout.trim() || null;
     }
     const short = sha ? String(sha).slice(0, 7) : "";
     const version = short ? pkg.version + "+" + short : pkg.version;

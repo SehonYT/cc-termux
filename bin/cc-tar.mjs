@@ -19,6 +19,12 @@ export function extractTgz(input, dest) {
   const gz = Buffer.isBuffer(input) ? input : fs.readFileSync(input);
   const buf = zlib.gunzipSync(gz);
   fs.mkdirSync(dest, { recursive: true });
+  const root = fs.realpathSync(dest);
+  const inside = (p) => p === root || p.startsWith(root + path.sep);
+  const safeParent = (target) => {
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    return inside(fs.realpathSync(path.dirname(target)));
+  };
   let offset = 0;
   let longName = "";
   let files = 0;
@@ -39,13 +45,17 @@ export function extractTgz(input, dest) {
     if (!target.startsWith(path.resolve(dest) + path.sep) && target !== path.resolve(dest)) throw new Error("tar entry escapes destination: " + name);
     if (type === "5") {
       fs.mkdirSync(target, { recursive: true });
+      if (!inside(fs.realpathSync(target))) { offset = dataStart + Math.ceil(size / 512) * 512; continue; }
     } else if (type === "2") {
-      const link = readString(buf, dataStart, size);
-      fs.mkdirSync(path.dirname(target), { recursive: true });
+      // tar stores the symlink target in the header linkname field (not the data block)
+      const link = readString(header, 157, 100);
+      const resolved = path.resolve(path.dirname(target), link);
+      if (!inside(resolved)) { offset = dataStart + Math.ceil(size / 512) * 512; continue; }
+      if (!safeParent(target)) { offset = dataStart + Math.ceil(size / 512) * 512; continue; }
       try { fs.unlinkSync(target); } catch { }
       fs.symlinkSync(link, target);
     } else if (type === "0" || type === "" || type === "\0") {
-      fs.mkdirSync(path.dirname(target), { recursive: true });
+      if (!safeParent(target)) { offset = dataStart + Math.ceil(size / 512) * 512; continue; }
       fs.writeFileSync(target, buf.subarray(dataStart, dataEnd), { mode: modeOf(header) });
       files++;
     }

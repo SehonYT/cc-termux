@@ -6,7 +6,6 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
-import { resolvePerf, applyPerfEnv, setReducedMotion } from "./cc-perf.mjs";
 
 const ROOT = process.env.CC_TERMUX_ROOT || path.join(os.homedir(), ".local", "share", "cc-termux");
 const CFG = process.env.CC_TERMUX_CONFIG || path.join(os.homedir(), ".config", "cc-termux", "config.json");
@@ -18,6 +17,7 @@ const cfg = loadConfig();
 const port = (cfg.listen && cfg.listen.port) || 8788;
 const base = "http://127.0.0.1:" + port;
 const SESSIONS = path.join(CACHE, "sessions");
+const GATEWAY_TOKEN = process.env.CC_TERMUX_GATEWAY_TOKEN || "cc-termux-local";
 fs.mkdirSync(SESSIONS, { recursive: true });
 const sessionFile = path.join(SESSIONS, process.pid + ".session");
 let sessionRegistered = false;
@@ -28,6 +28,16 @@ async function healthy() {
   try { const r = await fetch(base + "/health", { signal: AbortSignal.timeout(1000) }); return r.ok; } catch { return false; }
 }
 
+function isOurGateway(pid) {
+  try {
+    const env = fs.readFileSync("/proc/" + pid + "/environ", "utf8").split("\0");
+    const want = "CC_TERMUX_CONFIG=" + path.resolve(CFG);
+    if (env.includes(want)) return true;
+    if (!env.some((e) => e.startsWith("CC_TERMUX_CONFIG=")) && path.resolve(CFG) === path.join(os.homedir(), ".config", "cc-termux", "config.json")) return true;
+    return false;
+  } catch (e) { return false; }
+}
+
 function gatewayPids() {
   const out = [];
   try {
@@ -35,7 +45,9 @@ function gatewayPids() {
       if (!/^\d+$/.test(d)) continue;
       try {
         const cmd = fs.readFileSync("/proc/" + d + "/cmdline", "utf8");
-        if (cmd.includes("proxy/server.mjs") && Number(d) !== process.pid) out.push(Number(d));
+        const parts = cmd.split("\0");
+        const pid = Number(d);
+        if (pid !== process.pid && pid !== process.ppid && parts.includes(path.join(ROOT, "proxy", "server.mjs")) && isOurGateway(pid)) out.push(pid);
       } catch {}
     }
   } catch {}
@@ -43,7 +55,13 @@ function gatewayPids() {
 }
 
 function stopGateway() {
-  try { const pid = Number(fs.readFileSync(path.join(CACHE, "gateway.pid"), "utf8").trim()); process.kill(pid, "SIGTERM"); } catch {}
+  try {
+    const pid = Number(fs.readFileSync(path.join(CACHE, "gateway.pid"), "utf8").trim());
+    if (pid && pid !== process.pid) {
+      const cmd = fs.readFileSync("/proc/" + pid + "/cmdline", "utf8");
+      if (cmd.split("\0").includes(path.join(ROOT, "proxy", "server.mjs")) && isOurGateway(pid)) process.kill(pid, "SIGTERM");
+    }
+  } catch {}
   for (const pid of gatewayPids()) { try { process.kill(pid, "SIGTERM"); } catch {} }
   try { fs.unlinkSync(path.join(CACHE, "gateway.pid")); } catch {}
 }
@@ -53,7 +71,8 @@ function hasLiveSessions() {
     return fs.readdirSync(SESSIONS).some((f) => {
       if (!f.endsWith(".session")) return false;
       try {
-        const pid = Number(fs.readFileSync(path.join(SESSIONS, f), "utf8").trim());
+        const pid = Number(fs.readFileSync(path.join(SESSIONS, f), "utf8").trim()) || 0;
+        if (pid <= 0) throw new Error("empty session");
         process.kill(pid, 0);
         return true;
       } catch { try { fs.unlinkSync(path.join(SESSIONS, f)); } catch {} ; return false; }
@@ -67,11 +86,9 @@ async function ensureGateway() {
   for (const pid of gatewayPids()) { try { process.kill(pid, "SIGKILL"); } catch {} }
   const server = path.join(ROOT, "proxy", "server.mjs");
   if (!fs.existsSync(server)) { console.error("cc-launcher: gateway missing at " + server); process.exit(1); }
-  fs.writeFileSync(sessionFile, String(process.pid));
-  sessionRegistered = true;
   const child = spawn(process.execPath, [server], {
     detached: true, stdio: ["ignore", gwLog ?? "ignore", gwLog ?? "ignore"],
-    env: { ...process.env, CC_TERMUX_CONFIG: CFG, CC_TERMUX_MANAGED: "1" },
+    env: { ...process.env, CC_TERMUX_CONFIG: CFG, CC_TERMUX_MANAGED: "1", CC_TERMUX_GATEWAY_TOKEN: GATEWAY_TOKEN },
   });
   child.unref();
   try { fs.writeFileSync(path.join(CACHE, "gateway.pid"), String(child.pid)); } catch {}
@@ -103,7 +120,7 @@ function sanitizeSettings(p) {
   }
   const sm = typeof s.model === "string" ? s.model : "";
   const stale = !sm || sm === "default" || /^(opus|sonnet|haiku)$/.test(sm) || (/^claude-(opus|sonnet|haiku)-[0-9]/.test(sm) && !sm.startsWith("prov/"));
-  const target = p && p.model ? "prov/" + (p.name || "") + "/" + p.model : "";
+  const target = p && p.model ? "prov/" + (cfg.active || p.name || "") + "/" + p.model : "";
   if (stale && target) { s.model = target; changed = true; }
   if (changed) {
     try {
@@ -117,10 +134,11 @@ function sanitizeSettings(p) {
   }
 }
 
-function envForChild() {
+async function envForChild() {
   const env = { ...process.env };
   env.ANTHROPIC_BASE_URL = base;
-  env.ANTHROPIC_AUTH_TOKEN = env.ANTHROPIC_AUTH_TOKEN || "cc-termux-local";
+  env.ANTHROPIC_AUTH_TOKEN = GATEWAY_TOKEN;
+  env.CC_TERMUX_GATEWAY_TOKEN = GATEWAY_TOKEN;
   delete env.ANTHROPIC_API_KEY;
   const p = (cfg.providers || {})[cfg.active] || {};
   try { sanitizeSettings(p); } catch (e) { }
@@ -129,8 +147,9 @@ function envForChild() {
   const bareAnthropic = /^claude-(opus|sonnet|haiku)-[0-9]/.test(settingsModel) && !settingsModel.startsWith("prov/");
   const model = p.model || p.defaultModel;
   const a = p.aliases || {};
-  const composite = (id) => (p && p.name ? id : id);
+  const composite = (id) => (String(id).startsWith("prov/") || !cfg.active ? id : "prov/" + cfg.active + "/" + id);
   delete env.ANTHROPIC_MODEL;
+  for (const k of ["CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "ANTHROPIC_CUSTOM_HEADERS", "ANTHROPIC_BEDROCK_BASE_URL", "ANTHROPIC_VERTEX_BASE_URL"]) delete env[k];
   if (model) {
     if (!settingsModel || bareAnthropic) {
       // Stale/absent settings.model: pin the provider model so the session does not
@@ -144,11 +163,12 @@ function envForChild() {
     env.CLAUDE_CODE_SUBAGENT_MODEL = composite(a.subagent || model);
   }
   try {
-    const resolved = resolvePerf({ mode: (cfg.performance && cfg.performance.mode) || "off" });
+    const perfMod = await import("file://" + path.join(ROOT, "bin", "cc-perf.mjs"));
+    const resolved = perfMod.resolvePerf({ mode: (cfg.performance && cfg.performance.mode) || "off" });
     if (resolved.enabled) {
-      Object.assign(env, applyPerfEnv({}, resolved));
-      try { setReducedMotion(os.homedir(), true); } catch (e) { }
-      if (process.env.CC_TERMUX_PERF_VERBOSE === "1") process.stderr.write("cc-termux: performance profile: " + resolved.reason + "\n");
+      Object.assign(env, perfMod.applyPerfEnv({}, resolved));
+      try { perfMod.setReducedMotion(os.homedir(), true); } catch (e) { }
+      if (process.env.CC_TERMUX_PERF_VERBOSE === "1") process.stderr.write("cc-termux: performance profile: on\n");
     }
   } catch (e) { }
   if (p.contextWindow) env.CLAUDE_CODE_MAX_CONTEXT_TOKENS = String(p.contextWindow);
@@ -170,26 +190,41 @@ function envForChild() {
 (async () => {
   const argv = process.argv.slice(2);
   const trivial = argv.some((a) => a === "--version" || a === "-v" || a === "--help" || a === "-h");
-  if (!trivial) await ensureGateway();
-  const env = envForChild();
+  if (!trivial) {
+    try { fs.writeFileSync(sessionFile, String(process.pid)); sessionRegistered = true; } catch {}
+    await ensureGateway();
+  }
+  const env = await envForChild();
   const isWin = process.platform === "win32";
   const bin = path.join(ROOT, "bin", isWin ? "claude.exe" : "claude.bin");
-  let cmd = bin;
-  let args = process.argv.slice(2);
-  if (!fs.existsSync(bin)) { console.error("cc-launcher: Claude Code binary not installed at " + bin); process.exit(1); }
-  if (process.platform === "android" && !fs.existsSync(path.join(ROOT, ".direct-exec"))) {
-    try {
-      const loader = fs.readdirSync(path.join(ROOT, "lib")).find((f) => f.startsWith("ld-musl-"));
-      if (loader) { args = [bin, ...args]; cmd = path.join(ROOT, "lib", loader); }
-    } catch {}
+  const jsCli = path.join(ROOT, "js", "cli.js");
+  let installedVersion = "";
+  try { installedVersion = fs.readFileSync(path.join(ROOT, "VERSION"), "utf8").trim(); } catch {}
+  const jsMode = fs.existsSync(jsCli) && (installedVersion.endsWith("-js") || !fs.existsSync(bin));
+  let cmd;
+  let args;
+  if (jsMode) {
+    cmd = process.execPath;
+    args = [jsCli, ...process.argv.slice(2)];
+  } else {
+    cmd = bin;
+    args = process.argv.slice(2);
+    if (!fs.existsSync(bin)) { console.error("cc-launcher: Claude Code binary not installed at " + bin); process.exit(1); }
+    if (process.platform === "android" && !fs.existsSync(path.join(ROOT, ".direct-exec"))) {
+      try {
+        const loader = fs.readdirSync(path.join(ROOT, "lib")).find((f) => f.startsWith("ld-musl-"));
+        if (loader) { args = [bin, ...args]; cmd = path.join(ROOT, "lib", loader); }
+      } catch {}
+    }
   }
+  let child = null;
   const cleanup = () => {
     if (!sessionRegistered) return;
     try { fs.unlinkSync(sessionFile); } catch {}
     if (!hasLiveSessions()) stopGateway();
   };
   process.on("exit", cleanup);
-  for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"]) process.on(sig, () => { cleanup(); process.exit(130); });
+  for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"]) process.on(sig, () => { if (child) { try { child.kill(sig); } catch { cleanup(); process.exit(130); } } else { cleanup(); process.exit(130); } });
   if (!trivial && process.stderr.isTTY) {
     try {
       const mod = await import("file://" + path.join(ROOT, "bin", "cc-update.mjs"));
@@ -203,7 +238,7 @@ function envForChild() {
       }
     } catch (e) { }
   }
-  const child = spawn(cmd, args, { stdio: "inherit", env });
+  child = spawn(cmd, args, { stdio: "inherit", env });
   child.on("exit", (code, signal) => { cleanup(); process.exit(signal ? 1 : code ?? 0); });
   child.on("error", (e) => { console.error("cc-launcher: " + e.message); cleanup(); process.exit(1); });
 })();

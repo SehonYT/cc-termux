@@ -22,17 +22,26 @@ function loadConfig() {
 }
 let CONFIG = loadConfig();
 for (const [n, p] of Object.entries(CONFIG.providers || {})) p.name = p.name || n;
-const KEYS_PATH = path.join(os.homedir(), '.config', 'cc-termux', 'keys.json');
-const QUOTA_PATH = path.join(os.homedir(), '.cache', 'cc-termux', 'quota.json');
-const ERRORS_PATH = path.join(os.homedir(), '.cache', 'cc-termux', 'errors.log');
+const CONFIG_DIR = path.dirname(CONFIG_PATH);
+const CACHE_DIR = path.join(os.homedir(), '.cache', 'cc-termux');
+const KEYS_PATH = path.join(CONFIG_DIR, 'keys.json');
+const GATEWAY_TOKEN = process.env.CC_TERMUX_GATEWAY_TOKEN || (CONFIG.gatewayToken || 'cc-termux-local');
+const QUOTA_PATH = path.join(CACHE_DIR, 'quota.json');
+const ERRORS_PATH = path.join(CACHE_DIR, 'errors.log');
+function redact(text) {
+  return String(text)
+    .replace(/(sk-[A-Za-z0-9_-]{6,}|tok_[A-Za-z0-9]{6,}|AQ\.[A-Za-z0-9_-]{8,})/g, '***')
+    .replace(/(Bearer\s+)[A-Za-z0-9._-]{6,}/gi, '$1***')
+    .replace(/("?(?:api[_-]?key|authorization|token)"?\s*[:=]\s*"?)[^"\s,}]+/gi, '$1***');
+}
 function logFailure(kind, provider, model, status, message) {
   const rec = {
     at: new Date().toISOString(), kind,
     provider: provider || null, model: model || null,
     status: status == null ? null : status,
-    message: String(message || '').replace(/\s+/g, ' ').slice(0, 400),
+    message: redact(String(message || '')).replace(/\s+/g, ' ').slice(0, 400),
   };
-  try { fs.mkdirSync(path.dirname(ERRORS_PATH), { recursive: true }); fs.appendFileSync(ERRORS_PATH, JSON.stringify(rec) + '\n'); } catch (e) { }
+  try { fs.mkdirSync(path.dirname(ERRORS_PATH), { recursive: true, mode: 0o700 }); fs.appendFileSync(ERRORS_PATH, JSON.stringify(rec) + '\n'); fs.chmodSync(ERRORS_PATH, 0o600); } catch (e) { }
   LOG('failure', kind, provider || '-', model || '-', status == null ? '' : status, rec.message.slice(0, 180));
 }
 function recordQuota(providerName, model, status, text) {
@@ -97,7 +106,6 @@ async function fetchWithRetry(url, opts, provider, label) {
 function providerKey(p) {
   const KEYS = loadKeys();
   const byName = p.name && KEYS[p.name];
-  if (p.apiKey) return p.apiKey;
   if (byName) return byName;
   let k = p.apiKey || '';
   if (k.startsWith('env:')) k = process.env[k.slice(4)] || '';
@@ -136,6 +144,11 @@ function validOverride() {
 }
 
 function pickRoute(model) {
+  // 0) an explicit prov/<provider>/<model> id always routes to that provider
+  const prov = /^prov\/([^/]+)\/(.+)$/.exec(String(model));
+  if (prov && CONFIG.providers[prov[1]]) {
+    return { name: prov[1], provider: CONFIG.providers[prov[1]], model: prov[2] };
+  }
   // 1) an explicit override (set by /provider or a provswitch row) wins for any model
   //    that does not belong to the override provider itself.
   const ov = validOverride();
@@ -246,6 +259,7 @@ function toOpenAI(body, upstreamModel) {
 }
 
 function fromOpenAI(resp, model) {
+  if (resp && resp.error) throw new Error('upstream error: ' + (resp.error.message || JSON.stringify(resp.error)));
   const choice = (resp.choices && resp.choices[0]) || {};
   const msg = choice.message || {};
   const content = [];
@@ -353,9 +367,16 @@ async function proxyAnthropic(res, route, body, req) {
   const upstream = await fetchWithRetry(url, { method: 'POST', headers, body: JSON.stringify({ ...sanitizeBody(body), model: route.model }) }, p, 'anthropic ' + route.model);
   if (body.stream && upstream.ok) {
     res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });
+    res.flushHeaders();
     const reader = upstream.body.getReader();
-    for (;;) { const { done, value } = await reader.read(); if (done) break; res.write(Buffer.from(value)); }
-    res.end();
+    try {
+      for (;;) { const { done, value } = await reader.read(); if (done) break; res.write(Buffer.from(value)); }
+    } catch (e) {
+      logFailure('stream', route.name, route.model, null, e.message);
+      try { res.write('event: error\ndata: {"type":"error","error":{"type":"api_error","message":"upstream stream failed"}}\n\n'); } catch (e2) { }
+    } finally {
+      try { res.end(); } catch (e3) { try { res.destroy(); } catch (e4) { } }
+    }
     return;
   }
   const text = await upstream.text();
@@ -373,7 +394,7 @@ async function proxyOpenAI(res, route, body) {
   if (key) headers['authorization'] = 'Bearer ' + key;
   const payload = toOpenAI(body, route.model);
   const started = Date.now();
-  const upstream = await fetch(url, { method: 'POST', headers, body: JSON.stringify(payload) });
+  const upstream = await fetchWithRetry(url, { method: 'POST', headers, body: JSON.stringify(payload) }, p, 'openai ' + route.model);
   if (!upstream.ok) {
     const t = await upstream.text();
     logFailure('upstream', route.name, route.model, upstream.status, t);
@@ -458,6 +479,7 @@ function toResponses(body, upstreamModel) {
 }
 
 function fromResponses(resp, model) {
+  if (resp && resp.error) throw new Error('upstream error: ' + (resp.error.message || JSON.stringify(resp.error)));
   const content = [];
   for (const item of resp.output || []) {
     if (item.type === 'message') {
@@ -589,6 +611,20 @@ const server = http.createServer(async (req, res) => {
   try {
     try { CONFIG = loadConfig(); for (const [n, p] of Object.entries(CONFIG.providers || {})) p.name = p.name || n; } catch {}
     const u = new URL(req.url, 'http://localhost');
+    if (u.pathname !== '/health') {
+      const auth = String(req.headers.authorization || '');
+      const keyHdr = String(req.headers['x-api-key'] || '');
+      if (auth !== 'Bearer ' + GATEWAY_TOKEN && keyHdr !== GATEWAY_TOKEN) {
+        return anthropicError(res, 401, 'authentication_error', 'missing or invalid gateway token');
+      }
+    }
+    if (req.method === 'POST') {
+      const ct = String(req.headers['content-type'] || '');
+      if (!ct.includes('application/json')) {
+        res.writeHead(415, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ type: 'error', error: { type: 'invalid_request_error', message: 'content-type must be application/json' } }));
+      }
+    }
     if (req.method === 'GET') LOG('GET', u.pathname);
     if (u.pathname === '/v1/models' && req.method === 'GET') {
       LOG('GET /v1/models discovery');
@@ -598,7 +634,7 @@ const server = http.createServer(async (req, res) => {
         const cat = JSON.parse(fs.readFileSync(cacheFile, 'utf8'));
         models = (cat.models || []).map(m => ({
           type: 'model',
-          id: 'anthropic/' + m.id,
+          id: 'prov/' + CONFIG.active + '/' + m.id,
           display_name: m.name + ' (' + m.id + ')',
           created_at: new Date(m.fetchedAt || Date.now()).toISOString(),
         }));
@@ -614,7 +650,12 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method !== 'POST') { res.writeHead(404); return res.end('{}'); }
     const chunks = [];
-    for await (const c of req) chunks.push(c);
+    let total = 0;
+    for await (const c of req) {
+      total += c.length;
+      if (total > 10 * 1024 * 1024) { res.writeHead(413); return res.end('{}'); }
+      chunks.push(c);
+    }
     const raw = Buffer.concat(chunks).toString('utf8');
     let body = {}; try { body = JSON.parse(raw || '{}'); } catch {}
     if (u.pathname === '/v1/messages/count_tokens') {
@@ -670,6 +711,11 @@ if (process.env.CC_TERMUX_MANAGED === '1') {
   }, 5000).unref();
 }
 
-server.listen(port, (CONFIG.listen && CONFIG.listen.host) || '127.0.0.1', () => {
+let listenHost = (CONFIG.listen && CONFIG.listen.host) || '127.0.0.1';
+if (!/^(127\.0\.0\.1|::1|localhost)$/.test(listenHost) && process.env.CC_TERMUX_ALLOW_REMOTE !== '1') {
+  LOG('refusing non-loopback listen host ' + listenHost + ' (set CC_TERMUX_ALLOW_REMOTE=1 to override)');
+  listenHost = '127.0.0.1';
+}
+server.listen(port, listenHost, () => {
   LOG('gateway listening on', port, 'active=' + CONFIG.active, 'config=' + CONFIG_PATH);
 });

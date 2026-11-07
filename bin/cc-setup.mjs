@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 
 const HOME = os.homedir();
+const ROOT = process.env.CC_TERMUX_ROOT || path.join(HOME, ".local", "share", "cc-termux");
 const CFG = process.env.CC_TERMUX_CONFIG || path.join(HOME, ".config", "cc-termux", "config.json");
 const SETTINGS = path.join(HOME, ".claude", "settings.json");
 const CACHE_DIR = path.join(HOME, ".cache", "cc-termux");
@@ -124,27 +125,39 @@ async function fetchPresetModels(preset, key) {
   if (preset.kind === "gemini") return await fetchGeminiModels(key);
   if (preset.modelsPath === null && (preset.models || []).length) return presetStaticModels(preset);
   const url = String(preset.baseUrl).replace(/\/$/, "") + (preset.modelsPath || "/models");
-  const r = await fetch(url, { headers: key ? { authorization: "Bearer " + key } : {} });
-  if (!r.ok) {
-    if ((preset.models || []).length) { console.log(dim("  live model list unavailable (HTTP " + r.status + "), using preset models")); return presetStaticModels(preset); }
-    throw new Error(preset.name + " /models HTTP " + r.status + " - check the key");
+  try {
+    const r = await fetch(url, { headers: key ? { authorization: "Bearer " + key } : {} });
+    if (!r.ok) throw new Error(preset.name + " /models HTTP " + r.status + " - check the key");
+    let j;
+    try { j = await r.json(); } catch (e) { throw new Error(preset.name + " /models did not return JSON"); }
+    const arr = j.data || j.models || j;
+    let models = (Array.isArray(arr) ? arr : []).map((m) => ({
+      id: m.id || m.name,
+      name: m.name || m.id,
+      contextTokens: m.context_length || m.max_context_length || m.inputTokenLimit || null,
+      inUsd: m.pricing && m.pricing.prompt != null ? +(parseFloat(m.pricing.prompt) * 1e6).toFixed(3) : null,
+      outUsd: m.pricing && m.pricing.completion != null ? +(parseFloat(m.pricing.completion) * 1e6).toFixed(3) : null,
+    }));
+    if (preset.filterSuffix) models = models.filter((m) => String(m.id).endsWith(preset.filterSuffix));
+    if (!models.length && (preset.models || []).length) models = presetStaticModels(preset);
+    return models;
+  } catch (e) {
+    if ((preset.models || []).length && !/HTTP (401|403)/.test(e.message)) {
+      console.log(dim("  live model list unavailable (" + e.message + "), using preset models"));
+      return presetStaticModels(preset);
+    }
+    throw e;
   }
-  const j = await r.json();
-  const arr = j.data || j.models || j;
-  let models = (Array.isArray(arr) ? arr : []).map((m) => ({
-    id: m.id || m.name,
-    name: m.name || m.id,
-    contextTokens: m.context_length || m.max_context_length || m.inputTokenLimit || null,
-    inUsd: m.pricing && m.pricing.prompt != null ? +(parseFloat(m.pricing.prompt) * 1e6).toFixed(3) : null,
-    outUsd: m.pricing && m.pricing.completion != null ? +(parseFloat(m.pricing.completion) * 1e6).toFixed(3) : null,
-  }));
-  if (preset.filterSuffix) models = models.filter((m) => String(m.id).endsWith(preset.filterSuffix));
-  if (!models.length && (preset.models || []).length) models = presetStaticModels(preset);
-  return models;
 }
 
-async function fetchCustomModels(baseUrl, key) {
-  const r = await fetch(baseUrl.replace(/\/$/, "") + "/models", { headers: key ? { authorization: "Bearer " + key } : {} });
+function normalizeBase(base) {
+  return String(base || "").replace(/\/+$/, "").replace(/\/(v1beta\/openai|compatibility\/v1|v1)$/, "");
+}
+
+async function fetchCustomModels(baseUrl, key, type) {
+  const headers = key ? { authorization: "Bearer " + key } : {};
+  if (type === "anthropic") { headers["x-api-key"] = key; headers["anthropic-version"] = "2023-06-01"; }
+  const r = await fetch(baseUrl.replace(/\/$/, "") + "/models", { headers });
   if (!r.ok) throw new Error("custom /models HTTP " + r.status);
   const j = await r.json();
   const arr = j.data || j.models || j;
@@ -241,6 +254,7 @@ function writeSettings(c) {
   }));
   settings.modelPicker = { replaceBuiltInOptions: true, options: [...switchRows, ...options] };
   if (active.model) settings.model = composite(c.active, active.model);
+  else delete settings.model;
   fs.writeFileSync(SETTINGS, JSON.stringify(settings, null, 2) + "\n");
 }
 
@@ -263,6 +277,7 @@ function addProvider(c, name, opts) {
     model: opts.main, defaultModel: opts.main, contextWindow: opts.contextWindow || 128000,
     aliases: opts.aliases, modelsById,
   };
+  if (opts.noKey) p.noKey = true;
   c.providers[name] = p;
   const needsNative = family === "tokens" || opts.models.some(m => m.id.startsWith("claude-") || m.id.startsWith("anthropic/"));
   if (needsNative && opts.type === "openai" && family === "tokens") {
@@ -277,7 +292,6 @@ function addProvider(c, name, opts) {
   rebuild(c);
   saveCfg(c);
   writeSettings(c);
-  stopGateway();
   return p;
 }
 
@@ -298,7 +312,14 @@ async function fetchFor(kind, key, base) {
   if (kind === "openrouter") return { models: await fetchOpenRouterModels(key), type: "anthropic", baseUrl: "https://openrouter.ai/api", path: "/v1/messages", family: "openrouter" };
   if (kind === "gemini") return { models: await fetchGeminiModels(key), type: "openai", baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai", path: "/chat/completions", family: "gemini" };
   const type = kind === "custom-anthropic" ? "anthropic" : "openai";
-  return { models: await fetchCustomModels(base, key), type, baseUrl: base, path: type === "anthropic" ? "/v1/messages" : "/v1/chat/completions", family: "custom" };
+  const norm = normalizeBase(base);
+  try {
+    return { models: await fetchCustomModels(norm, key, type), type, baseUrl: norm, path: type === "anthropic" ? "/v1/messages" : "/v1/chat/completions", family: "custom" };
+  } catch (e) {
+    const manual = process.env.CC_SETUP_MODEL;
+    if (manual) return { models: [{ id: manual, name: manual, contextTokens: Number(process.env.CC_SETUP_CONTEXT) || 128000, inUsd: null, outUsd: null }], type, baseUrl: norm, path: process.env.CC_SETUP_PATH || (type === "anthropic" ? "/v1/messages" : "/v1/chat/completions"), family: "custom" };
+    throw e;
+  }
 }
 
 function errText(e) {
@@ -334,6 +355,7 @@ async function fetchAnyModels(p, key) {
 }
 
 async function promptProviderKey(c, name, p) {
+  if (p.noKey) return true;
   if (p.apiKeyEnv && process.env[p.apiKeyEnv]) return true;
   if (loadKeys()[name]) return true;
   console.log();
@@ -367,10 +389,12 @@ async function presetFlow(c, presetOverride) {
     preset = presets[Number(a) - 1];
     if (!preset) { console.log(cyan("  invalid preset")); return null; }
   }
+  if (preset.notes) console.log(dim("  " + preset.notes));
   let key = "";
   if (!preset.noKey) {
     if (preset.keyUrl) console.log(dim("  get a key: " + preset.keyUrl));
-    key = await askHidden("API key (hidden, empty for local/no key) > ");
+    key = await askHidden("API key (hidden) > ");
+    if (!key) { console.log(cyan("  no key entered")); return null; }
   }
   console.log(dim("  fetching models..."));
   let models;
@@ -380,13 +404,17 @@ async function presetFlow(c, presetOverride) {
   console.log(cyan("  \u2714 " + models.length + " models available"));
   const main = await pickModel(models, "Main model");
   const c2 = c;
-  const name = providerName(c2, preset.id);
+  const existing = visible(c2).find(([n, p]) => p.baseUrl === preset.baseUrl || n === preset.id);
+  const name = existing ? existing[0] : providerName(c2, preset.id);
+  const family = preset.id === "tokens" ? "tokens" : "custom";
   addProvider(c2, name, {
-    family: "custom", type: "openai", baseUrl: preset.baseUrl, path: preset.path || "/chat/completions",
+    family, type: "openai", baseUrl: preset.baseUrl, path: preset.path || "/chat/completions",
     key, models, main: main.id, contextWindow: main.contextTokens || 128000,
     aliases: { opus: main.id, sonnet: main.id, haiku: main.id, subagent: main.id },
+    noKey: !!(preset.noKey || preset.local),
   });
   summary(c2, name);
+  if ((await ask("\nSend a small test request now? (y/N) > ")).toLowerCase().startsWith("y")) await runSmokeTest();
   return name;
 }
 
@@ -402,7 +430,7 @@ function parseFlags() {
   const map = {
     "--preset": "CC_SETUP_PRESET", "--provider": "CC_SETUP_PROVIDER", "--key": "CC_SETUP_KEY",
     "--model": "CC_SETUP_MODEL", "--background": "CC_SETUP_BACKGROUND", "--base-url": "CC_SETUP_BASE_URL",
-    "--type": "CC_SETUP_TYPE", "--path": "CC_SETUP_PATH", "--context": "CC_SETUP_CONTEXT",
+    "--type": "CC_SETUP_TYPE", "--path": "CC_SETUP_PATH", "--name": "CC_SETUP_NAME", "--context": "CC_SETUP_CONTEXT",
   };
   for (const [flag, env] of Object.entries(map)) { const v = val(flag); if (v) process.env[env] = v; }
   return { test: a.includes("--test"), hasFlags: Object.keys(map).some((f) => a.includes(f)) };
@@ -439,14 +467,20 @@ async function envMode() {
   const key = process.env.CC_SETUP_KEY || process.env.TOKENS_BD_KEY || "";
   const base = process.env.CC_SETUP_BASE_URL || "";
   const f = await fetchFor(kind, key, base);
+  if (process.env.CC_SETUP_TYPE) f.type = process.env.CC_SETUP_TYPE;
+  if (process.env.CC_SETUP_PATH) f.path = process.env.CC_SETUP_PATH;
   const want = process.env.CC_SETUP_MODEL || "";
-  const main = f.models.find(m => m.id === want) || sortModels(f.models)[0];
+  const picked = f.models.find(m => m.id === want);
+  if (want && !picked) throw new Error("model " + want + " not found at this provider");
+  const main = picked || sortModels(f.models)[0];
   if (!main) throw new Error("no models returned");
   const bgId = process.env.CC_SETUP_BACKGROUND || "";
-  const bg = (bgId && f.models.find(m => m.id === bgId)) || main;
+  const bgPick = bgId && f.models.find(m => m.id === bgId);
+  if (bgId && !bgPick) throw new Error("background model " + bgId + " not found at this provider");
+  const bg = bgPick || main;
   const ctx = Number(process.env.CC_SETUP_CONTEXT || main.contextTokens || 128000);
   const c = loadCfg();
-  let name = providerName(c, f.family);
+  let name = process.env.CC_SETUP_NAME || providerName(c, f.family);
   const same = visible(c).find(([, p]) => p.baseUrl === f.baseUrl);
   if (same) name = same[0];
   delete c.providers["native"];
@@ -563,7 +597,6 @@ async function ttyMode() {
     rebuild(c);
     saveCfg(c);
     writeSettings(c);
-    stopGateway();
     console.log(cyan("\n  \u2714 switched to ") + name + " (" + (p.model || "default") + ")");
     console.log(dim("  running sessions switch on their next request; new sessions use this provider"));
     return;
@@ -573,7 +606,9 @@ async function ttyMode() {
 
 (async () => {
   try {
-    if (process.env.CC_SETUP_NONINTERACTIVE === "1" || !process.stdin.isTTY) return await envMode();
+    const flags = parseFlags();
+    const flagged = flags.hasFlags || flags.test || process.env.CC_SETUP_PRESET || process.env.CC_SETUP_PROVIDER || process.env.CC_SETUP_KEY;
+    if (flagged || process.env.CC_SETUP_NONINTERACTIVE === "1" || !process.stdin.isTTY) return await envMode();
     return await ttyMode();
   } catch (e) {
     console.error(cyan("setup failed: " + e.message));
