@@ -80,7 +80,7 @@ test("selfUpdate runs an installer inside a GitHub-style archive", async () => {
     await selfUpdate({ root, archivePath: tgz });
     assert.equal(fs.readFileSync(path.join(root, "marker"), "utf8"), "installed");
     const stamp = JSON.parse(fs.readFileSync(path.join(root, "cc-termux.json"), "utf8"));
-    assert.equal(stamp.version, "9.9.9");
+    assert.ok(String(stamp.version).startsWith("9.9.9"), "expected build version, got " + stamp.version);
   } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
 });
 test("claudeCodeUpToDate compares the installed version with the registry", async () => {

@@ -268,6 +268,18 @@ cc-termux patch status
 cc-termux patch revert
 ```
 
+## Versioning
+
+Every push to `main` is tagged automatically by CI (`version.yml`):
+
+```
+git tag  → v0.2.0-<short sha>
+app      → 0.2.0+<short sha>   (semver build metadata, changes on every commit)
+```
+
+`cc-termux status` shows the installed build version, and update checks compare commit shas (with the
+version label shownfor humans). No manual version bumping is required.
+
 ## Automatic repair on install
 
 `install.mjs` runs a self-heal step after every install/update (`bin/cc-heal.mjs`), so no manual

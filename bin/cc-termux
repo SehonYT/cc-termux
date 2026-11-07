@@ -411,6 +411,7 @@ switch (cmd) {
   case "status": {
     const c = load();
     const h = await health();
+    try { const st = JSON.parse(fs.readFileSync(path.join(ROOT, "cc-termux.json"), "utf8")); console.log("cc-termux: " + (st.version || "unknown")); } catch (e) { }
     console.log("gateway : " + (h ? "UP  http://127.0.0.1:" + port(c) : "DOWN"));
     console.log("active  : " + c.active);
     for (const [name, p] of Object.entries(c.providers || {})) {

@@ -88,7 +88,7 @@ function pkgTarballUrl(pkg, ver) {
 }
 
 function copyAssets() {
-  const files = ["proxy/server.mjs", "bin/cc-launcher.mjs", "bin/cc-setup.mjs", "bin/cc-termux", "bin/cc-env.mjs", "bin/cc-patch.mjs", "bin/ccp.mjs", "bin/cc-heal.mjs", "bin/cc-platform.mjs", "bin/cc-tar.mjs", "bin/cc-update.mjs", "patches.json", "presets.json", "config.example.json", "install.mjs", "install.sh", "install.ps1", "get.sh", "get.ps1", "scripts/ensure-node.sh", "package.json", "README.md", "LICENSE", "NOTICE"];
+  const files = ["proxy/server.mjs", "bin/cc-launcher.mjs", "bin/cc-setup.mjs", "bin/cc-termux", "bin/cc-env.mjs", "bin/cc-patch.mjs", "bin/ccp.mjs", "bin/cc-heal.mjs", "bin/cc-platform.mjs", "bin/cc-tar.mjs", "bin/cc-update.mjs", "patches.json", "presets.json", "config.example.json", "install.mjs", "install.sh", "install.ps1", "get.sh", "get.ps1", "scripts/ensure-node.sh", "scripts/version.mjs", "package.json", "README.md", "LICENSE", "NOTICE"];
   for (const f of files) {
     const from = path.join(SRC, f);
     const to = path.join(ROOT, f);
@@ -237,7 +237,9 @@ function installShims(t) {
       const { remoteInfo } = await import(path.join(ROOT, "bin", "cc-update.mjs"));
       sha = (await remoteInfo({})).sha;
     } catch (e) { }
-    fs.writeFileSync(path.join(ROOT, "cc-termux.json"), JSON.stringify({ version: pkg.version, sha, installedAt: new Date().toISOString() }, null, 2) + "\n");
+    const short = sha ? String(sha).slice(0, 7) : "";
+    const version = short ? pkg.version + "+" + short : pkg.version;
+    fs.writeFileSync(path.join(ROOT, "cc-termux.json"), JSON.stringify({ version, baseVersion: pkg.version, sha, installedAt: new Date().toISOString() }, null, 2) + "\n");
   } catch (e) { }
   if (!NO_SHIMS) installShims(t);
   try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}

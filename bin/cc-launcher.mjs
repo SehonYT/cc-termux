@@ -189,7 +189,8 @@ function envForChild() {
         new Promise((r) => setTimeout(() => r(null), 2500)),
       ]);
       if (info && info.available) {
-        console.error("cc-termux: update available (" + (info.local.version || "?") + " -> " + (info.remote.version || (info.remote.sha || "").slice(0, 7)) + ") - run: cc-termux update");
+        const { labelVersion } = await import("file://" + path.join(ROOT, "scripts", "version.mjs"));
+        console.error("cc-termux: update available (" + labelVersion(info.local.version, info.local.sha) + " -> " + labelVersion(info.remote.version, info.remote.sha) + ") - run: cc-termux update");
       }
     } catch (e) { }
   }

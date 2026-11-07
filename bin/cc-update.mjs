@@ -9,6 +9,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { extractTgz } from "./cc-tar.mjs";
+import { buildVersion, labelVersion } from "../scripts/version.mjs";
 
 export const DEFAULT_REPO = process.env.CC_TERMUX_REPO || "SehonYT/cc-termux";
 export const DEFAULT_ROOT = path.join(os.homedir(), ".local", "share", "cc-termux");
@@ -145,8 +146,8 @@ export async function selfUpdate({ root = DEFAULT_ROOT, repo = DEFAULT_REPO, arc
     try { sha = (await remoteInfo({ repo })).sha; } catch (e) { }
     const pkgPath = path.join(path.dirname(installer), "package.json");
     const pkg = fs.existsSync(pkgPath) ? JSON.parse(fs.readFileSync(pkgPath, "utf8")) : { version: "unknown" };
-    fs.writeFileSync(path.join(root, "cc-termux.json"), JSON.stringify({ version: pkg.version, sha, installedAt: new Date().toISOString() }, null, 2) + "\n");
-    console.log("cc-termux: updated to " + pkg.version + (sha ? " (" + sha.slice(0, 7) + ")" : "") + (codeOnly ? " [Claude Code binary kept]" : " [Claude Code binary reinstalled]"));
+    fs.writeFileSync(path.join(root, "cc-termux.json"), JSON.stringify({ version: buildVersion(pkg.version, sha || ""), baseVersion: pkg.version, sha, installedAt: new Date().toISOString() }, null, 2) + "\n");
+    console.log("cc-termux: updated to " + buildVersion(pkg.version, sha || "") + (codeOnly ? " [Claude Code binary kept]" : " [Claude Code binary reinstalled]"));
     return true;
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
@@ -159,8 +160,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const root = rootIdx > 0 ? process.argv[rootIdx + 1] : DEFAULT_ROOT;
   if (arg === "--check") {
     check({ root, cacheTtlMs: 0 }).then((r) => {
-      if (r.available) console.log("cc-termux update available: " + (r.local.version || "?") + " -> " + (r.remote.version || r.remote.sha.slice(0, 7)) + "  (run: cc-termux update)");
-      else console.log("cc-termux is up to date (" + (r.local.version || "unknown") + ")");
+      if (r.available) console.log("cc-termux update available: " + labelVersion(r.local.version, r.local.sha) + " -> " + labelVersion(r.remote.version, r.remote.sha) + "  (run: cc-termux update)");
+      else console.log("cc-termux is up to date (" + labelVersion(r.local.version, r.local.sha) + ")");
     }).catch((e) => { console.error("cc-termux: update check failed: " + e.message); process.exit(1); });
   } else if (arg === "--self-update") {
     selfUpdate({ root, redownload: process.argv.includes("--redownload") }).catch((e) => { console.error("cc-termux: update failed: " + e.message); process.exit(1); });
