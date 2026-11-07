@@ -331,6 +331,7 @@ const HELP = [
   "  cc-termux sync                   refresh the model catalog (context windows + prices)",
   "  cc-termux doctor [--fix]         self-check install/config/picker/secrets; --fix repairs",
   "  cc-termux diagnose               deep check: config, keys, binary, loader, gateway start",
+  "  cc-termux heal                   fix PATH/settings/sample-config issues automatically",
   "  cc-termux sync-picker            rebuild the /model picker from configured providers",
   "  cc-termux setup                  add/change provider, key, models (interactive)",
   "  cc-termux presets [--json]       list built-in free/local provider presets",
@@ -617,6 +618,10 @@ switch (cmd) {
         console.log(r.at + "  " + r.kind.padEnd(9) + "  " + String(r.provider || "-").padEnd(10) + "  " + String(r.model || "-").padEnd(30) + "  " + (r.status == null ? "" : r.status + "  ") + r.message.slice(0, 140));
       } catch (e) { console.log(line); }
     }
+    break;
+  }
+  case "heal": {
+    execFileSync(process.execPath, [path.join(ROOT, "bin", "cc-heal.mjs"), "--root", ROOT], { stdio: "inherit" });
     break;
   }
   default:

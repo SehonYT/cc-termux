@@ -209,6 +209,33 @@ CC_TERMUX_NO_UI_PATCH=1 bash install.sh   # skip on install
 
 See `NOTICE` for the caveats.
 
+## Automatic repair on install
+
+`install.mjs` runs a self-heal step after every install/update (`bin/cc-heal.mjs`), so no manual
+`doctor --fix` is needed:
+
+- removes `ANTHROPIC_*` / context override keys from `~/.claude/settings.json` `env`
+- replaces a stale `model` (`default`, `opus`/`sonnet`/`haiku`, bare `claude-*-<n>`) with the active provider model
+- replaces foreign `claude` binaries earlier in `PATH` with the cc-termux shim (original kept as `claude.official-backup`)
+- removes sample provider entries left by older releases (no key, no catalog)
+
+It is idempotent and also available on demand:
+
+```bash
+cc-termux heal
+```
+
+## Tests
+
+```bash
+npm run check     # syntax + JSON validation
+npm test          # heal, gateway contract and installer-plan tests
+```
+
+CI runs both on Node 18/20/22. The heal test plants a foreign `claude` binary, a stale settings
+file and a sample config in a temp directory and asserts all three are repaired; gateway tests
+assert the no-provider error and that upstream failures land in `errors.log`.
+
 ## Gateway lifecycle
 
 The gateway is not a daemon. It starts when `claude` runs and stops when the last Claude Code
