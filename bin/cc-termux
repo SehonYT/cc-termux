@@ -127,6 +127,7 @@ async function doctor(fix) {
   }
   const projCfgs = [path.join(process.cwd(), ".claude", "settings.json"), path.join(process.cwd(), ".claude", "settings.local.json")];
   for (const f of projCfgs) {
+    if (path.resolve(f) === path.resolve(settingsPath)) continue;
     try {
       const ps = JSON.parse(fs.readFileSync(f, "utf8"));
       if (ps.model) warn("project settings set model: " + ps.model + "  (" + f + ")");
