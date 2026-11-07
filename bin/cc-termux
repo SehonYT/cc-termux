@@ -109,6 +109,14 @@ async function doctor(fix) {
   } else if (smProv && !c.providers[smProv]) warn("settings.model points to removed provider " + smProv);
   else pass("settings.model: " + sm);
 
+  const activeP = c.providers[c.active] || {};
+  const expectedModel = c.active && activeP.model ? "prov/" + c.active + "/" + activeP.model : "";
+  const sm2 = settings.model || "";
+  const bare = /^claude-(opus|sonnet|haiku)-[0-9]/.test(sm2) && !sm2.startsWith("prov/");
+  if (expectedModel && (!sm2 || bare)) {
+    if (fix) { settings.model = expectedModel; fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n"); fixed++; pass("settings.model set to " + expectedModel); }
+    else warn("settings.model is " + (sm2 || "empty") + " - should be " + expectedModel + " (doctor --fix)");
+  }
   const expected = vis.length + vis.reduce((n, [, p]) => n + Object.keys(p.modelsById || {}).length, 0);
   const have = ((settings.modelPicker || {}).options || []).length;
   if (have === expected) pass("model picker in sync (" + have + " rows)");
@@ -177,6 +185,7 @@ async function diagnose() {
     const ks = loadKeys();
     console.log("  providers " + (vis.length ? vis.map(([n, p]) => n + "(" + (ks[n] ? "key" : "no key") + ")").join(", ") : "none"));
     console.log("  active    " + (c.active || "(none)") + "  override=" + JSON.stringify(c.override || null));
+  try { console.log("  settings  model=" + (JSON.parse(fs.readFileSync(path.join(os.homedir(), ".claude", "settings.json"), "utf8")).model || "(none)")); } catch (e) { console.log("  settings  model=(unreadable)"); }
     console.log("  port      " + ((c.listen && c.listen.port) || 8788));
   }
   const bin = path.join(ROOT, "bin", process.platform === "win32" ? "claude.exe" : "claude.bin");

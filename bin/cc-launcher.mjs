@@ -91,16 +91,24 @@ function envForChild() {
   env.ANTHROPIC_AUTH_TOKEN = env.ANTHROPIC_AUTH_TOKEN || "cc-termux-local";
   delete env.ANTHROPIC_API_KEY;
   const p = (cfg.providers || {})[cfg.active] || {};
+  let settingsModel = "";
+  try { settingsModel = (JSON.parse(fs.readFileSync(path.join(os.homedir(), ".claude", "settings.json"), "utf8")).model) || ""; } catch {}
+  const bareAnthropic = /^claude-(opus|sonnet|haiku)-[0-9]/.test(settingsModel) && !settingsModel.startsWith("prov/");
   const model = p.model || p.defaultModel;
   const a = p.aliases || {};
   const composite = (id) => (p && p.name ? id : id);
+  delete env.ANTHROPIC_MODEL;
   if (model) {
-    env.ANTHROPIC_MODEL = "";
+    if (!settingsModel || bareAnthropic) {
+      // Stale/absent settings.model: pin the provider model so the session does not
+      // fall back to Anthropic's built-in default (Opus). Mid-session picker changes
+      // still work because only the stale cases are pinned.
+      env.ANTHROPIC_MODEL = cfg.active && p.model ? "prov/" + cfg.active + "/" + p.model : model;
+    }
     env.ANTHROPIC_DEFAULT_OPUS_MODEL = composite(a.opus || model);
     env.ANTHROPIC_DEFAULT_SONNET_MODEL = composite(a.sonnet || model);
     env.ANTHROPIC_DEFAULT_HAIKU_MODEL = composite(a.haiku || model);
     env.CLAUDE_CODE_SUBAGENT_MODEL = composite(a.subagent || model);
-    delete env.ANTHROPIC_MODEL;
   }
   if (p.contextWindow) env.CLAUDE_CODE_MAX_CONTEXT_TOKENS = String(p.contextWindow);
   env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS = "1";
