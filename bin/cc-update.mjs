@@ -31,21 +31,31 @@ export function semverNewer(remote, local) {
 }
 
 export function isNewer(local, remote) {
-  if (local && local.sha && remote && remote.sha) return local.sha !== remote.sha;
-  return semverNewer(remote && remote.version, local && local.version);
+  if (!local || !remote) return false;
+  if (local.sha && remote.sha && local.sha === remote.sha) return false;
+  const l = local.updatedAt && new Date(local.updatedAt).getTime();
+  const r = remote.updatedAt && new Date(remote.updatedAt).getTime();
+  if (Number.isFinite(l) && Number.isFinite(r)) return r > l;
+  // Legacy stamps without a commit date: fall back to sha difference.
+  if (local.sha && remote.sha) return local.sha !== remote.sha;
+  return semverNewer(remote.version, local.version);
 }
 
 export async function remoteInfo({ repo = DEFAULT_REPO, fetchImpl = fetch } = {}) {
   const headers = { "user-agent": "cc-termux" };
   let sha = null;
   let version = null;
+  let updatedAt = null;
+  let commits = [];
   // The commit atom feed is public, stable per commit and not API rate-limited.
   try {
     const r = await fetchImpl("https://github.com/" + repo + "/commits/main.atom", { headers, signal: AbortSignal.timeout(5000) });
     if (r.ok) {
       const text = await r.text();
-      const m = /Grit::Commit\/([0-9a-f]{40})/.exec(text);
-      if (m) sha = m[1];
+      const re = /Grit::Commit\/([0-9a-f]{40})[\s\S]*?<updated>([^<]+)<\/updated>/g;
+      let m;
+      while ((m = re.exec(text)) !== null) commits.push({ sha: m[1], updatedAt: m[2] });
+      if (commits.length) { sha = commits[0].sha; updatedAt = commits[0].updatedAt; }
     }
   } catch (e) { }
   try {
@@ -58,7 +68,7 @@ export async function remoteInfo({ repo = DEFAULT_REPO, fetchImpl = fetch } = {}
       if (r.ok) sha = (await r.json()).sha || null;
     } catch (e) { }
   }
-  return { sha, version };
+  return { sha, version, updatedAt, commits };
 }
 export async function check({ root = DEFAULT_ROOT, repo = DEFAULT_REPO, fetchImpl = fetch, cacheTtlMs = 12 * 3600 * 1000 } = {}) {
   const local = localInfo(root);
@@ -122,6 +132,7 @@ export async function selfUpdate({ root = DEFAULT_ROOT, repo = DEFAULT_REPO, arc
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cc-update-"));
   const tgz = path.join(tmp, "src.tgz");
   let targetSha = null;
+  let targetDate = null;
   try {
     if (archivePath) {
       fs.copyFileSync(archivePath, tgz);
@@ -129,7 +140,12 @@ export async function selfUpdate({ root = DEFAULT_ROOT, repo = DEFAULT_REPO, arc
       // Resolve the commit first, then download that exact commit. Downloading "main"
       // can serve a cached archive that is older than the atom feed and cause an
       // endless "update available" loop.
-      try { targetSha = (await remoteInfo({ repo, fetchImpl })).sha || null; } catch (e) { }
+      try { const info = await remoteInfo({ repo, fetchImpl }); targetSha = info.sha || null; targetDate = info.updatedAt || null; } catch (e) { }
+      const local = localInfo(root);
+      if (!redownload && local.updatedAt && targetDate && new Date(targetDate).getTime() < new Date(local.updatedAt).getTime()) {
+        step("remote feed is older than the installed build - not downgrading");
+        return false;
+      }
       const url = targetSha
         ? "https://codeload.github.com/" + repo + "/tar.gz/" + targetSha
         : "https://codeload.github.com/" + repo + "/tar.gz/refs/heads/main";
@@ -163,13 +179,16 @@ export async function selfUpdate({ root = DEFAULT_ROOT, repo = DEFAULT_REPO, arc
     if (codeOnly) args.push("--code-only");
     const env = { ...process.env, CC_TERMUX_NO_BANNER: codeOnly ? "1" : "" };
     if (targetSha) env.CC_TERMUX_COMMIT_SHA = targetSha;
+    if (typeof targetDate !== "undefined" && targetDate) env.CC_TERMUX_COMMIT_DATE = targetDate;
     const res = spawnSync(process.execPath, args, { stdio: "inherit", env });
     if (res.status !== 0) throw new Error("installer exited with " + res.status);
     let sha = targetSha;
     if (!sha) { try { sha = (await remoteInfo({ repo, fetchImpl })).sha; } catch (e) { } }
     const pkgPath = path.join(path.dirname(installer), "package.json");
     const pkg = fs.existsSync(pkgPath) ? JSON.parse(fs.readFileSync(pkgPath, "utf8")) : { version: "unknown" };
-    fs.writeFileSync(path.join(root, "cc-termux.json"), JSON.stringify({ version: buildVersion(pkg.version, sha || ""), baseVersion: pkg.version, sha, installedAt: new Date().toISOString() }, null, 2) + "\n");
+    const stamp = { version: buildVersion(pkg.version, sha || ""), baseVersion: pkg.version, sha, installedAt: new Date().toISOString() };
+    if (typeof targetDate !== "undefined" && targetDate) stamp.updatedAt = targetDate;
+    fs.writeFileSync(path.join(root, "cc-termux.json"), JSON.stringify(stamp, null, 2) + "\n");
     try { fs.rmSync(path.join(root, "update-check.json"), { force: true }); } catch (e) { }
     step("cc-termux updated to " + buildVersion(pkg.version, sha || "") + (codeOnly ? " (Claude Code binary kept)" : " (Claude Code binary reinstalled)"));
     return true;

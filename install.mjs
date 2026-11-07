@@ -336,15 +336,20 @@ function installShims(t) {
   try {
     const pkg = JSON.parse(fs.readFileSync(path.join(SRC, "package.json"), "utf8"));
     let sha = process.env.CC_TERMUX_COMMIT_SHA || null;
-    if (!sha) {
+    let commitDate = process.env.CC_TERMUX_COMMIT_DATE || null;
+    if (!sha || !commitDate) {
       try {
         const { remoteInfo } = await import(path.join(ROOT, "bin", "cc-update.mjs"));
-        sha = (await remoteInfo({})).sha;
+        const info = await remoteInfo({});
+        sha = sha || info.sha;
+        commitDate = commitDate || info.updatedAt;
       } catch (e) { }
     }
     const short = sha ? String(sha).slice(0, 7) : "";
     const version = short ? pkg.version + "+" + short : pkg.version;
-    fs.writeFileSync(path.join(ROOT, "cc-termux.json"), JSON.stringify({ version, baseVersion: pkg.version, sha, installedAt: new Date().toISOString() }, null, 2) + "\n");
+    const stamp = { version, baseVersion: pkg.version, sha, installedAt: new Date().toISOString() };
+    if (commitDate) stamp.updatedAt = commitDate;
+    fs.writeFileSync(path.join(ROOT, "cc-termux.json"), JSON.stringify(stamp, null, 2) + "\n");
   } catch (e) { }
   await askPerformance();
   if (!NO_SHIMS) installShims(t);

@@ -16,15 +16,17 @@ function fakeFetch(remoteSha, remoteVersion) {
   return async (url) => ({
     ok: true,
     headers: { get: () => null },
-    text: async () => "<id>tag:github.com,2008:Grit::Commit/" + remoteSha + "</id>",
+    text: async () => "<entry><id>tag:github.com,2008:Grit::Commit/" + remoteSha + "</id><updated>2026-01-02T00:00:00Z</updated></entry>",
     json: async () => ({ version: remoteVersion }),
   });
 }
 
-test("version and sha comparison", () => {
+test("version, sha and commit-date comparison", () => {
   assert.equal(semverNewer("0.2.0", "0.1.9"), true);
   assert.equal(semverNewer("0.1.0", "0.1.0"), false);
-  assert.equal(isNewer({ sha: "aaa" }, { sha: "bbb" }), true);
+  assert.equal(isNewer({ sha: "aaa", updatedAt: "2026-01-01T00:00:00Z" }, { sha: "bbb", updatedAt: "2026-01-02T00:00:00Z" }), true);
+  assert.equal(isNewer({ sha: "bbb", updatedAt: "2026-01-02T00:00:00Z" }, { sha: "aaa", updatedAt: "2026-01-01T00:00:00Z" }), false, "older remote must not look newer");
+  assert.equal(isNewer({ sha: "aaa" }, { sha: "bbb" }), true, "legacy fallback");
   assert.equal(isNewer({ sha: "aaa" }, { sha: "aaa" }), false);
 });
 
@@ -124,7 +126,7 @@ test("selfUpdate pins the download to the resolved commit and stamps it", async 
   const buf = fs.readFileSync(tgzPath);
   const sha = "c".repeat(40);
   const fetchImpl = async (url) => {
-    if (url.includes("commits/main.atom")) return { ok: true, text: async () => "<id>Grit::Commit/" + sha + "</id>", json: async () => ({}) };
+    if (url.includes("commits/main.atom")) return { ok: true, text: async () => "<entry><id>Grit::Commit/" + sha + "</id><updated>2026-01-02T00:00:00Z</updated></entry>", json: async () => ({}) };
     if (url.includes("package.json")) return { ok: true, json: async () => ({ version: "9.9.9" }) };
     if (url.includes("/tar.gz/" + sha)) return { ok: true, headers: { get: () => String(buf.length) }, body: (async function* () { yield buf; })() };
     throw new Error("unexpected url " + url);
@@ -138,6 +140,24 @@ test("selfUpdate pins the download to the resolved commit and stamps it", async 
     const stamp = JSON.parse(fs.readFileSync(path.join(root, "cc-termux.json"), "utf8"));
     assert.equal(stamp.sha, sha);
     assert.equal(stamp.version, "9.9.9+" + sha.slice(0, 7));
+    assert.equal(stamp.updatedAt, "2026-01-02T00:00:00Z");
     assert.equal(fs.existsSync(path.join(root, "update-check.json")), false, "stale update cache cleared");
+  } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+});
+test("selfUpdate refuses an older remote feed instead of downgrading", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cc-upd-stale-"));
+  const root = path.join(tmp, "root");
+  fs.mkdirSync(root, { recursive: true });
+  fs.writeFileSync(path.join(root, "cc-termux.json"), JSON.stringify({ version: "9.9.9+newer", sha: "d".repeat(40), updatedAt: "2026-02-01T00:00:00Z" }));
+  const staleSha = "e".repeat(40);
+  const fetchImpl = async (url) => {
+    if (url.includes("commits/main.atom")) return { ok: true, text: async () => "<entry><id>Grit::Commit/" + staleSha + "</id><updated>2026-01-01T00:00:00Z</updated></entry>", json: async () => ({}) };
+    if (url.includes("package.json")) return { ok: true, json: async () => ({ version: "9.9.9" }) };
+    throw new Error("should not download: " + url);
+  };
+  try {
+    const ok = await selfUpdate({ root, fetchImpl });
+    assert.equal(ok, false);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(root, "cc-termux.json"), "utf8")).sha, "d".repeat(40));
   } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
 });
