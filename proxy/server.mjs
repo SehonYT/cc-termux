@@ -430,9 +430,23 @@ async function proxyOpenAI(res, route, body) {
   const payload = toOpenAI(body, route.model);
   const started = Date.now();
   const abort = abortOnClose(null, res);
-  const upstream = await fetchWithRetry(url, { method: 'POST', headers, body: JSON.stringify(payload), signal: abort.signal }, p, 'openai ' + route.model);
+  let upstream = await fetchWithRetry(url, { method: 'POST', headers, body: JSON.stringify(payload), signal: abort.signal }, p, 'openai ' + route.model);
+  let upstreamErrorText = null;
   if (!upstream.ok) {
-    const t = await upstream.text();
+    let t = await upstream.text();
+    upstreamErrorText = t;
+    if (upstream.status === 400 && /max_tokens|max_completion_tokens|stream_options|reasoning_effort/i.test(t)) {
+      const fixed = { ...payload };
+      if (fixed.max_tokens != null) { fixed.max_completion_tokens = fixed.max_tokens; delete fixed.max_tokens; }
+      delete fixed.stream_options;
+      delete fixed.reasoning_effort;
+      const retry = await fetchWithRetry(url, { method: 'POST', headers, body: JSON.stringify(fixed), signal: abort.signal }, p, 'openai retry ' + route.model);
+      if (retry.ok) upstream = retry;
+      else t = await retry.text();
+    }
+  }
+  if (!upstream.ok) {
+    const t = upstreamErrorText || '';
     logFailure('upstream', route.name, route.model, upstream.status, t);
     if (upstream.status === 429 || upstream.status === 503) recordQuota(route.name, route.model, upstream.status, t);
     LOG('upstream error', upstream.status, t.slice(0, 400));

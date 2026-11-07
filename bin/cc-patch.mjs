@@ -107,12 +107,17 @@ function ensureBackup(buf) {
 function apply() {
   let buf;
   try { buf = fs.readFileSync(BIN); } catch (e) { console.error("cc-patch: binary not found: " + BIN); process.exit(1); }
-  ensureBackup(buf);
+  const original = Buffer.from(buf);
   const defs = loadDefs();
   const applied = [], skipped = [];
   let changed = applyRegions(buf, defs.regions || [], applied, skipped);
   changed += applyText(buf, defs.text || [], applied, skipped);
-  if (!changed) { console.log("cc-patch: nothing to do" + (skipped.length ? " [" + skipped.join(", ") + "]" : "")); return 0; }
+  if (!changed) {
+    ensureBackup(original);
+    console.log("cc-patch: nothing to do" + (skipped.length ? " [" + skipped.join(", ") + "]" : ""));
+    return 0;
+  }
+  ensureBackup(original);
   try { atomicWrite(BIN, buf, 0o755); }
   catch (e) { console.error("cc-patch: cannot write binary (" + e.code + "). Quit Claude sessions and retry."); process.exit(1); }
   console.log("cc-patch: applied " + applied.join(", ") + (skipped.length ? "  (skipped: " + skipped.join(", ") + ")" : ""));

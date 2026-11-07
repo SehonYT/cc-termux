@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 
 const repo = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
-test("installer --code-only updates assets but keeps the Claude Code binary", () => {
+test("installer --code-only updates assets but keeps the Claude Code binary", { skip: process.platform === "win32" }, () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cc-codeonly-"));
   const home = path.join(tmp, "home");
   const root = path.join(home, ".local", "share", "cc-termux");

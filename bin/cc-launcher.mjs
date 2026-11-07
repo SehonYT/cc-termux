@@ -39,6 +39,10 @@ function isOurGateway(pid) {
 }
 
 function gatewayPids() {
+  if (process.platform !== "linux") {
+    try { const pid = Number(fs.readFileSync(path.join(CACHE, "gateway.pid"), "utf8").trim()) || 0; if (pid > 0) return [pid]; } catch (e) { }
+    return [];
+  }
   const out = [];
   try {
     for (const d of fs.readdirSync("/proc")) {
@@ -82,6 +86,13 @@ function hasLiveSessions() {
 
 async function ensureGateway() {
   if (await healthy()) return;
+  const lockFile = path.join(CACHE, "gateway.lock");
+  let locked = false;
+  try { fs.mkdirSync(CACHE, { recursive: true }); fs.writeFileSync(lockFile, String(process.pid), { flag: "wx", mode: 0o600 }); locked = true; } catch (e) {
+    for (let i = 0; i < 100; i++) { if (await healthy()) return; await new Promise((r) => setTimeout(r, 100)); }
+    try { fs.unlinkSync(lockFile); fs.writeFileSync(lockFile, String(process.pid), { flag: "wx", mode: 0o600 }); locked = true; } catch (e2) { }
+  }
+  const releaseLock = () => { if (locked) { try { fs.unlinkSync(lockFile); } catch (e) { } } };
   // remove stale instances so a fresh one can bind the port
   for (const pid of gatewayPids()) { try { process.kill(pid, "SIGKILL"); } catch {} }
   const server = path.join(ROOT, "proxy", "server.mjs");
@@ -92,7 +103,8 @@ async function ensureGateway() {
   });
   child.unref();
   try { fs.writeFileSync(path.join(CACHE, "gateway.pid"), String(child.pid)); } catch {}
-  for (let i = 0; i < 300; i++) { if (await healthy()) return; await new Promise((r) => setTimeout(r, 100)); }
+  for (let i = 0; i < 300; i++) { if (await healthy()) { releaseLock(); return; } await new Promise((r) => setTimeout(r, 100)); }
+  releaseLock();
   const logFile = path.join(CACHE, "gateway.log");
   console.error("cc-launcher: gateway failed to start");
   try {

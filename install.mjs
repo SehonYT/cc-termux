@@ -294,8 +294,7 @@ function installShims(t) {
     return;
   }
   fs.mkdirSync(ROOT, { recursive: true });
-  copyAssets();
-  if (!CHECK) step("cc-termux files updated");
+
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cctermux-"));
 
   if (CODE_ONLY) {
@@ -382,6 +381,9 @@ function installShims(t) {
       throw e;
     }
   }
+
+  copyAssets();
+  if (!CHECK) step("cc-termux files updated");
 
   const cfgPath = CFG;
   if (!fs.existsSync(cfgPath) || RESET_CONFIG) {

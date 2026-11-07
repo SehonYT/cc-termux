@@ -13,7 +13,7 @@ function setup(anchor) {
   fs.mkdirSync(path.join(root, "bin"), { recursive: true });
   fs.copyFileSync(path.join(repo, "patches.json"), path.join(root, "patches.json"));
   const bin = Buffer.from("prefix |" + anchor + "| suffix");
-  fs.writeFileSync(path.join(root, "bin", "claude.bin"), bin, { mode: 0o755 });
+  fs.writeFileSync(path.join(root, "bin", process.platform === "win32" ? "claude.exe" : "claude.bin"), bin, { mode: 0o755 });
   return root;
 }
 
@@ -27,28 +27,28 @@ test("patcher applies known anchors, is idempotent and skips unknown ones", () =
   const root = setup("Switch between Claude models");
   try {
     assert.equal(run(root, "--apply").status, 0);
-    const patched = fs.readFileSync(path.join(root, "bin", "claude.bin"), "utf8");
+    const patched = fs.readFileSync(path.join(root, "bin", process.platform === "win32" ? "claude.exe" : "claude.bin"), "utf8");
     assert.match(patched, /Switch between AI providers/);
     assert.ok(fs.existsSync(path.join(root, "bin", "claude.bin.orig")));
     assert.match(run(root, "--apply").stdout, /nothing to do/);
     assert.equal(run(root, "--revert").status, 0);
-    assert.match(fs.readFileSync(path.join(root, "bin", "claude.bin"), "utf8"), /Switch between Claude models/);
+    assert.match(fs.readFileSync(path.join(root, "bin", process.platform === "win32" ? "claude.exe" : "claude.bin"), "utf8"), /Switch between Claude models/);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
 test("patcher leaves binaries without anchors untouched", () => {
   const root = setup("some unrelated string");
   try {
-    const before = fs.readFileSync(path.join(root, "bin", "claude.bin"));
+    const before = fs.readFileSync(path.join(root, "bin", process.platform === "win32" ? "claude.exe" : "claude.bin"));
     const r = run(root, "--apply");
     assert.equal(r.status, 0);
     assert.match(r.stdout, /anchor missing/);
-    assert.deepEqual(fs.readFileSync(path.join(root, "bin", "claude.bin")), before);
+    assert.deepEqual(fs.readFileSync(path.join(root, "bin", process.platform === "win32" ? "claude.exe" : "claude.bin")), before);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 test("stale backups are refreshed for a different binary and never reverted onto it", () => {
   const root = setup("Switch between Claude models");
-  const bin = path.join(root, "bin", "claude.bin");
+  const bin = path.join(root, "bin", process.platform === "win32" ? "claude.exe" : "claude.bin");
   try {
     assert.equal(run(root, "--apply").status, 0);
     const newer = Buffer.from("brand new binary without any anchors but different length");
@@ -62,7 +62,7 @@ test("stale backups are refreshed for a different binary and never reverted onto
 
 test("patcher refuses to patch a patched binary with a stale backup", () => {
   const root = setup("Switch between Claude models");
-  const bin = path.join(root, "bin", "claude.bin");
+  const bin = path.join(root, "bin", process.platform === "win32" ? "claude.exe" : "claude.bin");
   try {
     assert.equal(run(root, "--apply").status, 0);
     fs.writeFileSync(bin + ".orig", Buffer.from("tiny stale backup"));

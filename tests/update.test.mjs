@@ -93,15 +93,15 @@ test("claudeCodeUpToDate compares the installed version with the registry", asyn
     fs.mkdirSync(path.join(root, "lib"), { recursive: true });
     if (process.platform === "android") fs.writeFileSync(path.join(root, "lib", "ld-musl-aarch64.so.1"), "loader");
     fs.writeFileSync(path.join(root, "VERSION"), "2.1.319\n");
-    fs.writeFileSync(path.join(root, "bin", "claude.bin"), Buffer.alloc(64));
+    fs.writeFileSync(path.join(root, "bin", process.platform === "win32" ? "claude.exe" : "claude.bin"), Buffer.alloc(64));
     const same = await claudeCodeUpToDate({ root, fetchImpl: registry("2.1.319"), minBinaryBytes: 1 });
     assert.equal(same.upToDate, true);
     const newer = await claudeCodeUpToDate({ root, fetchImpl: registry("2.1.320"), minBinaryBytes: 1 });
     assert.equal(newer.upToDate, false);
-    fs.unlinkSync(path.join(root, "bin", "claude.bin"));
+    fs.unlinkSync(path.join(root, "bin", process.platform === "win32" ? "claude.exe" : "claude.bin"));
     const missing = await claudeCodeUpToDate({ root, fetchImpl: registry("2.1.319"), minBinaryBytes: 1 });
     assert.equal(missing.upToDate, false);
-    fs.writeFileSync(path.join(root, "bin", "claude.bin"), Buffer.alloc(64));
+    fs.writeFileSync(path.join(root, "bin", process.platform === "win32" ? "claude.exe" : "claude.bin"), Buffer.alloc(64));
     const offline = async () => { throw new Error("offline"); };
     const keep = await claudeCodeUpToDate({ root, fetchImpl: offline, minBinaryBytes: 1 });
     assert.equal(keep.upToDate, true);

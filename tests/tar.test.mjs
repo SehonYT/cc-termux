@@ -42,7 +42,7 @@ test("extractTgz rejects path traversal", () => {
   try { assert.throws(() => extractTgz(tgz, tmp), /escapes destination/); }
   finally { fs.rmSync(tmp, { recursive: true, force: true }); }
 });
-test("extractTgz handles symlinks and skips links that escape the destination", () => {
+test("extractTgz handles symlinks and skips links that escape the destination", { skip: process.platform === "win32" }, () => {
   const tgz = zlib.gzipSync(Buffer.concat([
     tarEntry("pkg/ok-link.js", Buffer.alloc(0), "2", "cli.js"),
     tarEntry("pkg/bad-link", Buffer.alloc(0), "2", "../../escape.txt"),

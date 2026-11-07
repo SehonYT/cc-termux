@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { healEnvironment } from "../bin/cc-heal.mjs";
 
-test("heal repairs settings, foreign claude binaries and sample configs", () => {
+test("heal repairs settings, foreign claude binaries and sample configs", { skip: process.platform === "win32" }, () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cc-heal-"));
   const home = path.join(tmp, "home");
   const root = path.join(home, ".local", "share", "cc-termux");

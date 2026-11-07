@@ -192,7 +192,13 @@ export async function selfUpdate({ root = DEFAULT_ROOT, repo = DEFAULT_REPO, arc
     }
     const src = path.join(tmp, "src");
     fs.mkdirSync(src, { recursive: true });
-    extractTgz(tgz, src);
+    const sysTar = spawnSync("tar", ["--version"], { stdio: "ignore" });
+    if (sysTar.status === 0) {
+      const ex = spawnSync("tar", ["-xzf", tgz, "-C", src], { stdio: "ignore" });
+      if (ex.status !== 0) throw new Error("tar extraction failed");
+    } else {
+      extractTgz(tgz, src);
+    }
     const installer = findInstaller(src);
     if (!installer) throw new Error("install.mjs missing in archive (contents: " + fs.readdirSync(src).join(", ") + ")");
     let codeOnly = false;

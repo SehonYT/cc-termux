@@ -14,7 +14,7 @@ function startGateway(tmp, port, config) {
   const cfg = path.join(tmp, "config.json");
   fs.writeFileSync(cfg, JSON.stringify(config));
   const child = spawn(process.execPath, [path.join(root, "proxy", "server.mjs")], {
-    env: { ...process.env, HOME: home, CC_TERMUX_CONFIG: cfg },
+    env: { ...process.env, HOME: home, USERPROFILE: home, CC_TERMUX_CONFIG: cfg },
     stdio: ["ignore", "pipe", "pipe"],
   });
   return { child, home };

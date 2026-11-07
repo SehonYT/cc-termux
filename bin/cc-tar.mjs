@@ -81,9 +81,10 @@ export function extractTgz(input, dest) {
     } else if (type === "2") {
       // tar stores the symlink target in the header linkname field (not the data block)
       const link = (pax && pax.linkpath) || readString(header, 157, 100);
-      const resolved = path.resolve(path.dirname(target), link);
-      if (!inside(resolved)) { offset = dataStart + Math.ceil(size / 512) * 512; continue; }
-      if (!safeParent(target)) { offset = dataStart + Math.ceil(size / 512) * 512; continue; }
+      if (!safeParent(target)) { offset = dataStart + Math.ceil(size / 512) * 512; pax = null; continue; }
+      const realDir = fs.realpathSync(path.dirname(target));
+      const resolved = path.resolve(realDir, link);
+      if (!inside(resolved)) { offset = dataStart + Math.ceil(size / 512) * 512; pax = null; continue; }
       try { fs.unlinkSync(target); } catch { }
       fs.symlinkSync(link, target);
     } else if (type === "0" || type === "" || type === "\0") {
