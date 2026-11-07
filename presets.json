@@ -122,6 +122,176 @@
       "path": "/v1/chat/completions",
       "keyUrl": "https://tokens.bd/dashboard/keys",
       "notes": "Anthropic-compatible endpoint also available"
+    },
+    {
+      "id": "agentrouter",
+      "name": "AgentRouter",
+      "kind": "openai",
+      "baseUrl": "https://agentrouter.org/v1",
+      "path": "/chat/completions",
+      "keyUrl": "https://agentrouter.org",
+      "notes": "new-api gateway: sign in, create a key, then paste it here"
+    },
+    {
+      "id": "deepseek",
+      "name": "DeepSeek",
+      "kind": "openai",
+      "baseUrl": "https://api.deepseek.com/v1",
+      "path": "/chat/completions",
+      "keyUrl": "https://platform.deepseek.com/api_keys"
+    },
+    {
+      "id": "xai",
+      "name": "xAI (Grok)",
+      "kind": "openai",
+      "baseUrl": "https://api.x.ai/v1",
+      "path": "/chat/completions",
+      "keyUrl": "https://console.x.ai"
+    },
+    {
+      "id": "fireworks",
+      "name": "Fireworks AI",
+      "kind": "openai",
+      "baseUrl": "https://api.fireworks.ai/inference/v1",
+      "path": "/chat/completions",
+      "keyUrl": "https://fireworks.ai/account/api-keys"
+    },
+    {
+      "id": "novita",
+      "name": "Novita AI",
+      "kind": "openai",
+      "baseUrl": "https://api.novita.ai/v3/openai",
+      "path": "/chat/completions",
+      "keyUrl": "https://novita.ai/settings/key-management"
+    },
+    {
+      "id": "nebius",
+      "name": "Nebius AI Studio",
+      "kind": "openai",
+      "baseUrl": "https://api.studio.nebius.ai/v1",
+      "path": "/chat/completions",
+      "keyUrl": "https://studio.nebius.ai/settings/api-keys"
+    },
+    {
+      "id": "chutes",
+      "name": "Chutes",
+      "kind": "openai",
+      "baseUrl": "https://llm.chutes.ai/v1",
+      "path": "/chat/completions",
+      "keyUrl": "https://chutes.ai/app/api"
+    },
+    {
+      "id": "scaleway",
+      "name": "Scaleway Generative APIs",
+      "kind": "openai",
+      "baseUrl": "https://api.scaleway.ai/v1",
+      "path": "/chat/completions",
+      "keyUrl": "https://console.scaleway.com/iam/api-keys"
+    },
+    {
+      "id": "ovh",
+      "name": "OVHcloud AI Endpoints",
+      "kind": "openai",
+      "baseUrl": "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1",
+      "path": "/chat/completions",
+      "keyUrl": "https://endpoints.ai.cloud.ovh.net"
+    },
+    {
+      "id": "zai",
+      "name": "Z.AI (GLM)",
+      "kind": "openai",
+      "baseUrl": "https://api.z.ai/api/paas/v4",
+      "path": "/chat/completions",
+      "keyUrl": "https://z.ai/manage-apikey/apikey-list"
+    },
+    {
+      "id": "moonshot",
+      "name": "Moonshot (Kimi)",
+      "kind": "openai",
+      "baseUrl": "https://api.moonshot.ai/v1",
+      "path": "/chat/completions",
+      "keyUrl": "https://platform.moonshot.ai/console/api-keys"
+    },
+    {
+      "id": "qwen",
+      "name": "Qwen (DashScope)",
+      "kind": "openai",
+      "baseUrl": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+      "path": "/chat/completions",
+      "keyUrl": "https://bailian.console.alibabacloud.com"
+    },
+    {
+      "id": "minimax",
+      "name": "MiniMax",
+      "kind": "openai",
+      "baseUrl": "https://api.minimax.io/v1",
+      "path": "/chat/completions",
+      "keyUrl": "https://platform.minimax.io/user-center/basic-information/interface-key"
+    },
+    {
+      "id": "siliconflow",
+      "name": "SiliconFlow",
+      "kind": "openai",
+      "baseUrl": "https://api.siliconflow.cn/v1",
+      "path": "/chat/completions",
+      "keyUrl": "https://cloud.siliconflow.cn/account/ak"
+    },
+    {
+      "id": "deepinfra",
+      "name": "DeepInfra",
+      "kind": "openai",
+      "baseUrl": "https://api.deepinfra.com/v1/openai",
+      "path": "/chat/completions",
+      "keyUrl": "https://deepinfra.com/dash/api_keys"
+    },
+    {
+      "id": "upstage",
+      "name": "Upstage",
+      "kind": "openai",
+      "baseUrl": "https://api.upstage.ai/v1",
+      "path": "/chat/completions",
+      "keyUrl": "https://console.upstage.ai/api-keys"
+    },
+    {
+      "id": "perplexity",
+      "name": "Perplexity",
+      "kind": "openai",
+      "baseUrl": "https://api.perplexity.ai",
+      "path": "/chat/completions",
+      "keyUrl": "https://www.perplexity.ai/settings/api",
+      "modelsPath": null,
+      "models": [
+        "sonar",
+        "sonar-pro",
+        "sonar-reasoning",
+        "sonar-reasoning-pro",
+        "sonar-deep-research"
+      ],
+      "notes": "no public /models endpoint; preset model list is used"
+    },
+    {
+      "id": "cohere",
+      "name": "Cohere (compatibility API)",
+      "kind": "openai",
+      "baseUrl": "https://api.cohere.ai/compatibility/v1",
+      "path": "/chat/completions",
+      "keyUrl": "https://dashboard.cohere.com/api-keys"
+    },
+    {
+      "id": "requesty",
+      "name": "Requesty Router",
+      "kind": "openai",
+      "baseUrl": "https://router.requesty.ai/v1",
+      "path": "/chat/completions",
+      "keyUrl": "https://app.requesty.ai/api-keys"
+    },
+    {
+      "id": "featherless",
+      "name": "Featherless AI",
+      "kind": "openai",
+      "baseUrl": "https://api.featherless.ai/v1",
+      "path": "/chat/completions",
+      "keyUrl": "https://featherless.ai/account/api-keys"
     }
   ]
 }

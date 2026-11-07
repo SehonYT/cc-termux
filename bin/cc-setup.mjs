@@ -113,11 +113,22 @@ async function fetchGeminiModels(key) {
   return arr;
 }
 
+function presetStaticModels(preset) {
+  return (preset.models || []).filter(Boolean).map((m) => {
+    if (typeof m === "string") return { id: m, name: m, contextTokens: null, inUsd: null, outUsd: null };
+    return { id: m.id || m.name, name: m.name || m.id, contextTokens: m.contextTokens || null, inUsd: m.inUsd == null ? null : m.inUsd, outUsd: m.outUsd == null ? null : m.outUsd };
+  });
+}
+
 async function fetchPresetModels(preset, key) {
   if (preset.kind === "gemini") return await fetchGeminiModels(key);
+  if (preset.modelsPath === null && (preset.models || []).length) return presetStaticModels(preset);
   const url = String(preset.baseUrl).replace(/\/$/, "") + (preset.modelsPath || "/models");
   const r = await fetch(url, { headers: key ? { authorization: "Bearer " + key } : {} });
-  if (!r.ok) throw new Error(preset.name + " /models HTTP " + r.status + " - check the key");
+  if (!r.ok) {
+    if ((preset.models || []).length) { console.log(dim("  live model list unavailable (HTTP " + r.status + "), using preset models")); return presetStaticModels(preset); }
+    throw new Error(preset.name + " /models HTTP " + r.status + " - check the key");
+  }
   const j = await r.json();
   const arr = j.data || j.models || j;
   let models = (Array.isArray(arr) ? arr : []).map((m) => ({
@@ -128,6 +139,7 @@ async function fetchPresetModels(preset, key) {
     outUsd: m.pricing && m.pricing.completion != null ? +(parseFloat(m.pricing.completion) * 1e6).toFixed(3) : null,
   }));
   if (preset.filterSuffix) models = models.filter((m) => String(m.id).endsWith(preset.filterSuffix));
+  if (!models.length && (preset.models || []).length) models = presetStaticModels(preset);
   return models;
 }
 

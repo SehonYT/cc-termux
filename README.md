@@ -128,22 +128,42 @@ cc-termux setup        # choose "6" for free/online presets
 
 ### Provider presets
 
-| Preset | Base URL | Key |
-|---|---|---|
-| openrouter | `https://openrouter.ai/api/v1` | yes, free `:free` models |
-| gemini | `https://generativelanguage.googleapis.com/v1beta/openai` | yes |
-| groq | `https://api.groq.com/openai/v1` | yes |
-| cerebras | `https://api.cerebras.ai/v1` | yes |
-| mistral | `https://api.mistral.ai/v1` | yes |
-| nvidia | `https://integrate.api.nvidia.com/v1` | yes |
-| sambanova | `https://api.sambanova.ai/v1` | yes |
-| huggingface | `https://router.huggingface.co/v1` | yes |
-| github-models | `https://models.github.ai/inference` | GitHub token |
-| together | `https://api.together.xyz/v1` | yes |
-| ollama | `http://127.0.0.1:11434/v1` | no (local) |
-| lmstudio | `http://127.0.0.1:1234/v1` | no (local) |
-| llamacpp | `http://127.0.0.1:8080/v1` | no (local) |
-| tokens | `https://tokens.bd` | yes |
+| Preset | Name | Base URL | Key |
+|---|---|---|---|
+| `openrouter` | OpenRouter (free models) | `https://openrouter.ai/api/v1` | yes  Free models end with :free |
+| `gemini` | Google Gemini (AI Studio) | `https://generativelanguage.googleapis.com/v1beta/openai` | yes  Free tier is per-key; quota is detected from 429 responses |
+| `groq` | Groq | `https://api.groq.com/openai/v1` | yes |
+| `cerebras` | Cerebras | `https://api.cerebras.ai/v1` | yes |
+| `mistral` | Mistral | `https://api.mistral.ai/v1` | yes |
+| `nvidia` | NVIDIA NIM | `https://integrate.api.nvidia.com/v1` | yes |
+| `sambanova` | SambaNova | `https://api.sambanova.ai/v1` | yes |
+| `huggingface` | HuggingFace Router | `https://router.huggingface.co/v1` | yes |
+| `github-models` | GitHub Models | `https://models.github.ai/inference` | yes |
+| `together` | Together AI | `https://api.together.xyz/v1` | yes |
+| `ollama` | Ollama (local) | `http://127.0.0.1:11434/v1` | no (local)  Install Ollama, run a model, then pick it here |
+| `lmstudio` | LM Studio (local) | `http://127.0.0.1:1234/v1` | no (local)  Start the LM Studio local server first |
+| `llamacpp` | llama.cpp server (local) | `http://127.0.0.1:8080/v1` | no (local)  Run llama-server --port 8080 |
+| `tokens` | tokens.bd | `https://tokens.bd` | yes  Anthropic-compatible endpoint also available |
+| `agentrouter` | AgentRouter | `https://agentrouter.org/v1` | yes  new-api gateway: sign in, create a key, then paste it here |
+| `deepseek` | DeepSeek | `https://api.deepseek.com/v1` | yes |
+| `xai` | xAI (Grok) | `https://api.x.ai/v1` | yes |
+| `fireworks` | Fireworks AI | `https://api.fireworks.ai/inference/v1` | yes |
+| `novita` | Novita AI | `https://api.novita.ai/v3/openai` | yes |
+| `nebius` | Nebius AI Studio | `https://api.studio.nebius.ai/v1` | yes |
+| `chutes` | Chutes | `https://llm.chutes.ai/v1` | yes |
+| `scaleway` | Scaleway Generative APIs | `https://api.scaleway.ai/v1` | yes |
+| `ovh` | OVHcloud AI Endpoints | `https://oai.endpoints.kepler.ai.cloud.ovh.net/v1` | yes |
+| `zai` | Z.AI (GLM) | `https://api.z.ai/api/paas/v4` | yes |
+| `moonshot` | Moonshot (Kimi) | `https://api.moonshot.ai/v1` | yes |
+| `qwen` | Qwen (DashScope) | `https://dashscope-intl.aliyuncs.com/compatible-mode/v1` | yes |
+| `minimax` | MiniMax | `https://api.minimax.io/v1` | yes |
+| `siliconflow` | SiliconFlow | `https://api.siliconflow.cn/v1` | yes |
+| `deepinfra` | DeepInfra | `https://api.deepinfra.com/v1/openai` | yes |
+| `upstage` | Upstage | `https://api.upstage.ai/v1` | yes |
+| `perplexity` | Perplexity | `https://api.perplexity.ai` | yes  no public /models endpoint; preset model list is used |
+| `cohere` | Cohere (compatibility API) | `https://api.cohere.ai/compatibility/v1` | yes |
+| `requesty` | Requesty Router | `https://router.requesty.ai/v1` | yes |
+| `featherless` | Featherless AI | `https://api.featherless.ai/v1` | yes |
 
 Custom OpenAI-compatible and Anthropic-compatible endpoints can be added by URL.
 
@@ -344,6 +364,14 @@ cc-termux heal
 ```
 
 ## Tests
+
+```bash
+npm test              # all suites, run sequentially
+npm test -- presets   # or: node --test tests/presets.test.mjs
+npm run check         # syntax/JSON/shell checks
+```
+
+See [`tests/README.md`](tests/README.md) for every suite and the mock fixtures.
 
 ```bash
 npm run check     # syntax + JSON validation
