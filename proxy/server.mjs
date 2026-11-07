@@ -15,7 +15,21 @@ import os from 'node:os';
 import path from 'node:path';
 
 const CONFIG_PATH = process.env.CC_TERMUX_CONFIG || path.join(os.homedir(), '.config', 'cc-termux', 'config.json');
-const LOG = (...a) => { if (!process.env.CC_TERMUX_QUIET) console.error(new Date().toISOString(), ...a); };
+const LOG = (...a) => {
+  if (process.env.CC_TERMUX_QUIET) return;
+  const line = new Date().toISOString() + " " + a.join(" ");
+  console.error(line);
+  try {
+    const gwLog = path.join(os.homedir(), ".cache", "cc-termux", "gateway.log");
+    fs.mkdirSync(path.dirname(gwLog), { recursive: true, mode: 0o700 });
+    fs.appendFileSync(gwLog, line + "\n");
+    fs.chmodSync(gwLog, 0o600);
+    if (fs.statSync(gwLog).size > 5 * 1024 * 1024) {
+      const tail = fs.readFileSync(gwLog, "utf8").trim().split("\n").slice(-500).join("\n");
+      fs.writeFileSync(gwLog, tail + "\n");
+    }
+  } catch (e) { }
+};
 
 function loadConfig() {
   return JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
@@ -61,7 +75,12 @@ function recordQuota(providerName, model, status, text) {
   } catch (e) { }
 }
 function loadKeys() { try { return JSON.parse(fs.readFileSync(KEYS_PATH, 'utf8')); } catch { return {}; } }
-function saveConfig() { fs.writeFileSync(CONFIG_PATH, JSON.stringify(CONFIG, null, 2) + '\n', { mode: 0o600 }); }
+function saveConfig() {
+  const tmp = CONFIG_PATH + '.' + process.pid + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(CONFIG, null, 2) + '\n', { mode: 0o600 });
+  fs.renameSync(tmp, CONFIG_PATH);
+  try { fs.chmodSync(CONFIG_PATH, 0o600); } catch (e) { }
+}
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const RETRYABLE = new Set([408, 409, 425, 429, 500, 502, 503, 504]);
@@ -70,6 +89,7 @@ const RETRYABLE = new Set([408, 409, 425, 429, 500, 502, 503, 504]);
 // exponential backoff + jitter, honoring Retry-After. Per-provider overrides:
 //   "retries": 5, "retryBaseMs": 800
 async function fetchWithRetry(url, opts, provider, label) {
+  opts = { ...opts, signal: opts.signal || AbortSignal.timeout(900000) };
   const attempts = Math.max(1, Number(provider.retries || 5));
   const baseMs = Math.max(100, Number(provider.retryBaseMs || 800));
   const maxMs = Math.max(baseMs, Number(provider.retryMaxMs || 20000));
@@ -98,6 +118,7 @@ async function fetchWithRetry(url, opts, provider, label) {
       if (i === attempts - 1) throw e;
       const wait = Math.min(maxMs, baseMs * 2 ** i) * (0.7 + Math.random() * 0.6);
       LOG('retry', label, (e.name || e.code || 'error'), 'attempt', i + 1 + '/' + attempts, 'in', Math.round(wait) + 'ms');
+      if (lastErr && lastErr.name === 'AbortError') throw lastErr;
       await sleep(wait);
     }
   }
@@ -343,7 +364,7 @@ function createTranslator(model, send) {
       if (failed) return;
       startMsg();
       closeBlock();
-      send('message_delta', { type: 'message_delta', delta: { stop_reason: stopReason, stop_sequence: null }, usage: { output_tokens: usage.output } });
+      send('message_delta', { type: 'message_delta', delta: { stop_reason: stopReason, stop_sequence: null }, usage: { input_tokens: usage.input, output_tokens: usage.output } });
       send('message_stop', { type: 'message_stop' });
     },
   };
@@ -351,6 +372,14 @@ function createTranslator(model, send) {
 
 function sseSend(res) {
   return (event, data) => res.write('event: ' + event + '\ndata: ' + JSON.stringify(data) + '\n\n');
+}
+
+function abortOnClose(req, res) {
+  const ac = new AbortController();
+  const onClose = () => { if (!res.writableEnded) { try { ac.abort(); } catch (e) { } } };
+  res.once('close', onClose);
+  req.once('aborted', onClose);
+  return { signal: ac.signal, cleanup: () => { try { res.removeListener('close', onClose); req.removeListener('aborted', onClose); } catch (e) { } } };
 }
 
 function anthropicError(res, status, type, message) {
@@ -364,7 +393,12 @@ async function proxyAnthropic(res, route, body, req) {
   const key = providerKey(p);
   const headers = { 'content-type': 'application/json', 'anthropic-version': '2023-06-01', accept: 'application/json' };
   if (key) { headers['authorization'] = 'Bearer ' + key; headers['x-api-key'] = key; }
-  const upstream = await fetchWithRetry(url, { method: 'POST', headers, body: JSON.stringify({ ...sanitizeBody(body), model: route.model }) }, p, 'anthropic ' + route.model);
+  if (req && req.headers['anthropic-beta']) headers['anthropic-beta'] = req.headers['anthropic-beta'];
+  if (req && req.headers['anthropic-version']) headers['anthropic-version'] = req.headers['anthropic-version'];
+  const abort = abortOnClose(req, res);
+  let upstream;
+  try { upstream = await fetchWithRetry(url, { method: 'POST', headers, body: JSON.stringify({ ...sanitizeBody(body), model: route.model }), signal: abort.signal }, p, 'anthropic ' + route.model); }
+  catch (e) { abort.cleanup(); throw e; }
   if (body.stream && upstream.ok) {
     res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });
     res.flushHeaders();
@@ -382,6 +416,7 @@ async function proxyAnthropic(res, route, body, req) {
   const text = await upstream.text();
   if (!upstream.ok) logFailure('upstream', route.name, route.model, upstream.status, text);
   if (upstream.status === 429 || upstream.status === 503) recordQuota(route.name, route.model, upstream.status, text);
+  abort.cleanup();
   res.writeHead(upstream.status, { 'content-type': 'application/json' });
   res.end(text);
 }
@@ -394,7 +429,8 @@ async function proxyOpenAI(res, route, body) {
   if (key) headers['authorization'] = 'Bearer ' + key;
   const payload = toOpenAI(body, route.model);
   const started = Date.now();
-  const upstream = await fetchWithRetry(url, { method: 'POST', headers, body: JSON.stringify(payload) }, p, 'openai ' + route.model);
+  const abort = abortOnClose(null, res);
+  const upstream = await fetchWithRetry(url, { method: 'POST', headers, body: JSON.stringify(payload), signal: abort.signal }, p, 'openai ' + route.model);
   if (!upstream.ok) {
     const t = await upstream.text();
     logFailure('upstream', route.name, route.model, upstream.status, t);
@@ -576,7 +612,8 @@ async function proxyResponses(res, route, body) {
   const headers = { 'content-type': 'application/json', accept: 'application/json' };
   if (key) headers['authorization'] = 'Bearer ' + key;
   LOG('API responses', route.name, route.model);
-  const upstream = await fetchWithRetry(url, { method: 'POST', headers, body: JSON.stringify(toResponses(body, route.model)) }, p, 'responses ' + route.model);
+  const abort = abortOnClose(null, res);
+  const upstream = await fetchWithRetry(url, { method: 'POST', headers, body: JSON.stringify(toResponses(body, route.model)), signal: abort.signal }, p, 'responses ' + route.model);
   if (!upstream.ok) {
     const t = await upstream.text();
     logFailure('upstream', route.name, route.model, upstream.status, t);
@@ -602,10 +639,24 @@ async function proxyResponses(res, route, body) {
   try {
     for (;;) { const { done, value } = await reader.read(); if (done) break; tr.onData(dec.decode(value, { stream: true })); }
     tr.onEnd();
-  } catch (e) { LOG('responses stream error', e.message); }
-  res.end();
+  } catch (e) {
+    logFailure('stream', route.name, route.model, null, e.message);
+    LOG('responses stream error', e.message);
+    try { res.write('event: error\ndata: {"type":"error","error":{"type":"api_error","message":"upstream stream failed"}}\n\n'); res.write('event: message_stop\ndata: {"type":"message_stop"}\n\n'); } catch (e2) { }
+  } finally {
+    try { res.end(); } catch (e3) { try { res.destroy(); } catch (e4) { } }
+  }
 }
-const estimate = b => Math.ceil(JSON.stringify(b || '').length / 4);
+function estimate(value) {
+  if (value == null) return 0;
+  if (typeof value === "string") return Math.ceil(value.length / 4);
+  if (Array.isArray(value)) return value.reduce((n, v) => n + estimate(v), 0);
+  if (typeof value === "object") {
+    if (value.type === "image" || value.type === "image_url" || (value.source && value.source.type === "base64")) return 85;
+    return Object.entries(value).reduce((n, [k, v]) => (k === "data" && typeof v === "string" ? n + 85 : n + estimate(v)), 0);
+  }
+  return 1;
+}
 
 const server = http.createServer(async (req, res) => {
   try {
@@ -678,7 +729,8 @@ const server = http.createServer(async (req, res) => {
           body.model = model;
         }
       }
-      const route = pickRoute(model);
+      let route;
+      try { route = pickRoute(model); } catch (e) { return anthropicError(res, 400, 'invalid_request_error', e.message); }
       LOG('REQ', route.name, '->', route.model, 'stream=' + !!body.stream, 'tools=' + (body.tools || []).length);
       if (route.provider.type === 'anthropic') return await proxyAnthropic(res, route, body, req);
       if (responsesApi(route.provider, route.model) === 'responses') return await proxyResponses(res, route, body);
@@ -716,6 +768,7 @@ if (!/^(127\.0\.0\.1|::1|localhost)$/.test(listenHost) && process.env.CC_TERMUX_
   LOG('refusing non-loopback listen host ' + listenHost + ' (set CC_TERMUX_ALLOW_REMOTE=1 to override)');
   listenHost = '127.0.0.1';
 }
+server.on('error', (e) => { LOG('gateway server error', e.code || e.message); process.exit(1); });
 server.listen(port, listenHost, () => {
   LOG('gateway listening on', port, 'active=' + CONFIG.active, 'config=' + CONFIG_PATH);
 });

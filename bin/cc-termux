@@ -9,13 +9,20 @@ import { execFileSync } from "node:child_process";
 const ROOT = process.env.CC_TERMUX_ROOT || path.join(os.homedir(), ".local", "share", "cc-termux");
 const CFG = process.env.CC_TERMUX_CONFIG || path.join(os.homedir(), ".config", "cc-termux", "config.json");
 const CATALOG = path.join(os.homedir(), ".cache", "cc-termux", "catalog.json");
+function atomicWrite(file, text, mode = 0o600) {
+  const tmp = file + "." + process.pid + ".tmp";
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(tmp, text, { mode });
+  fs.renameSync(tmp, file);
+  try { fs.chmodSync(file, mode); } catch (e) { }
+}
 const load = () => JSON.parse(fs.readFileSync(CFG, "utf8"));
-const save = (c) => { fs.mkdirSync(path.dirname(CFG), { recursive: true }); fs.writeFileSync(CFG, JSON.stringify(c, null, 2) + "\n", { mode: 0o600 }); };
+const save = (c) => { atomicWrite(CFG, JSON.stringify(c, null, 2) + "\n", 0o600); };
 const port = (c) => (c.listen && c.listen.port) || 8788;
 const KEYS_PATH = path.join(path.dirname(CFG), 'keys.json');
 const loadKeys = () => { try { return JSON.parse(fs.readFileSync(KEYS_PATH, 'utf8')); } catch { return {}; } };
-const saveKeys = (k) => { fs.mkdirSync(path.dirname(KEYS_PATH), { recursive: true }); fs.writeFileSync(KEYS_PATH, JSON.stringify(k, null, 2) + '\n', { mode: 0o600 }); };
-const mask = (k) => !k ? "(not set)" : k.startsWith("env:") ? k : k.slice(0, 6) + "..." + k.slice(-4);
+const saveKeys = (k) => { atomicWrite(KEYS_PATH, JSON.stringify(k, null, 2) + '\n', 0o600); };
+const mask = (k) => !k ? "(not set)" : k.startsWith("env:") ? k : "set (ends " + k.slice(-4) + ")";
 
 const SETTINGS_PATH = path.join(os.homedir(), ".claude", "settings.json");
 const visibleProviders = (c) => Object.entries(c.providers || {}).filter(([, p]) => !p.hidden);

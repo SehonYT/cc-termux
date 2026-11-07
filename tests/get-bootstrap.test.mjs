@@ -8,7 +8,9 @@ import { fileURLToPath } from "node:url";
 
 const repo = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
-test("get.sh works without a controlling terminal (CI/pipe)", () => {
+const hasSetsid = (() => { try { return spawnSync("setsid", ["true"], { stdio: "ignore" }).status === 0; } catch (e) { return false; } })();
+
+test("get.sh works without a controlling terminal (CI/pipe)", { skip: process.platform === "win32" || !hasSetsid }, () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cc-get-"));
   try {
     const src = path.join(tmp, "src", "cc-termux-main");

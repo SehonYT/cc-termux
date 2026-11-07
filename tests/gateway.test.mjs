@@ -87,3 +87,23 @@ test("gateway rejects requests without the local token", async () => {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+test("count_tokens ignores base64 image payloads", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cc-gw-"));
+  const port = 21000 + Math.floor(Math.random() * 1000);
+  const { child } = startGateway(tmp, port, { listen: { host: "127.0.0.1", port }, active: "", providers: {}, routing: {} });
+  try {
+    assert.ok(await waitHealth(port), "gateway did not start");
+    const image = "A".repeat(400000);
+    const res = await fetch("http://127.0.0.1:" + port + "/v1/messages/count_tokens", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: "Bearer cc-termux-local" },
+      body: JSON.stringify({ model: "x", messages: [{ role: "user", content: [{ type: "image", source: { type: "base64", media_type: "image/png", data: image } }, { type: "text", text: "hi" }] }] }),
+    });
+    assert.equal(res.status, 200);
+    const j = await res.json();
+    assert.ok(j.input_tokens < 1000, "image payload must not be counted as text: " + j.input_tokens);
+  } finally {
+    child.kill("SIGKILL");
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});

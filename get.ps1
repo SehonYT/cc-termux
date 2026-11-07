@@ -44,21 +44,25 @@ try {
   } else {
     $Sha = ""
     $Date = ""
-    if ($Ref -eq "main") {
-      try {
-        $atom = (Invoke-WebRequest "https://github.com/$Repo/commits/main.atom" -UseBasicParsing).Content
+    try {
+      if ($Ref -eq "main") {
+        $atom = (Invoke-WebRequest "https://github.com/$Repo/commits/main.atom" -UseBasicParsing -TimeoutSec 20).Content
         $m = [regex]::Match($atom, "Grit::Commit/([0-9a-f]{40})")
         if ($m.Success) {
           $Sha = $m.Groups[1].Value
           $d = [regex]::Match($atom, "<updated>([^<]+)</updated>")
           if ($d.Success) { $Date = $d.Groups[1].Value }
-          $env:CC_TERMUX_COMMIT_SHA = $Sha
-          $env:CC_TERMUX_COMMIT_DATE = $Date
         }
-      } catch { }
-    }
+      } else {
+        $api = (Invoke-WebRequest "https://api.github.com/repos/$Repo/commits/$Ref" -UseBasicParsing -TimeoutSec 20).Content | ConvertFrom-Json
+        $Sha = $api.sha
+        $Date = $api.commit.committer.date
+      }
+      if ($Sha) { $env:CC_TERMUX_COMMIT_SHA = $Sha }
+      if ($Date) { $env:CC_TERMUX_COMMIT_DATE = $Date }
+    } catch { }
     $archiveRef = if ($Sha) { $Sha } else { $Ref }
-    Invoke-WebRequest "https://codeload.github.com/$Repo/tar.gz/$archiveRef" -OutFile $Archive -UseBasicParsing
+    Invoke-WebRequest "https://codeload.github.com/$Repo/tar.gz/$archiveRef" -OutFile $Archive -UseBasicParsing -TimeoutSec 900
   }
   $Src = Join-Path $Tmp "src"
   New-Item -ItemType Directory -Path $Src | Out-Null

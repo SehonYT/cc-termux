@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { isNewer, semverNewer, check, localInfo, findInstaller, selfUpdate, claudeCodeUpToDate } from "../bin/cc-update.mjs";
+import { isNewer, semverNewer, check, localInfo, findInstaller, selfUpdate, claudeCodeUpToDate, cmpVersions } from "../bin/cc-update.mjs";
 import zlib from "node:zlib";
 
 function tmpRoot(version, sha) {
@@ -177,5 +177,24 @@ test("check ignores caches without a commit date (legacy false positives)", asyn
     const r = await check({ root, fetchImpl, cacheTtlMs: 3600 * 1000 });
     assert.equal(r.cached, false);
     assert.equal(r.remote.sha, fresh);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+test("cmpVersions orders builds and ignores metadata", () => {
+  assert.equal(cmpVersions("2.1.320", "2.1.319"), 1);
+  assert.equal(cmpVersions("2.1.319", "2.1.319"), 0);
+  assert.equal(cmpVersions("2.1.319", "2.1.320"), -1);
+  assert.equal(cmpVersions("0.2.0+abc", "0.2.0+def"), 0);
+});
+
+test("missing local provenance is treated as updateable", () => {
+  assert.equal(isNewer({ version: "0.2.0", sha: null }, { sha: "a".repeat(40), version: "0.2.0", updatedAt: "2026-01-01T00:00:00Z" }), true);
+  assert.equal(isNewer({ version: "0.2.0", sha: null }, { version: "0.2.0" }), false);
+});
+
+test("offline update checks throw instead of claiming up to date", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cc-upd-off-"));
+  try {
+    const offline = async () => { throw new Error("offline"); };
+    await assert.rejects(() => check({ root, fetchImpl: offline, cacheTtlMs: 0 }), /could not reach GitHub/);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });

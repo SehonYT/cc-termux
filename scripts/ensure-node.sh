@@ -86,6 +86,15 @@ ensure_node() {
   elif command -v wget >/dev/null 2>&1; then wget -q --timeout=30 --tries=3 -O "$tmp.tar.gz" "$url" || return 1
   else echo "cc-termux: curl or wget is required to download Node.js" >&2; return 1; fi
   if ! command -v tar >/dev/null 2>&1; then echo "cc-termux: tar is required to unpack Node.js" >&2; return 1; fi
+  # Verify against the official SHASUMS256.txt when a sha256 tool is available.
+  SUM=""
+  if command -v sha256sum >/dev/null 2>&1; then SUM=$(sha256sum "$tmp.tar.gz" | cut -d" " -f1)
+  elif command -v shasum >/dev/null 2>&1; then SUM=$(shasum -a 256 "$tmp.tar.gz" | cut -d" " -f1); fi
+  if [ -n "$SUM" ]; then
+    if command -v curl >/dev/null 2>&1; then EXPECTED=$(curl -fsSL --max-time 30 "https://nodejs.org/dist/$ver/SHASUMS256.txt" 2>/dev/null | grep " $name.tar.gz" | cut -d" " -f1 || true)
+    elif command -v wget >/dev/null 2>&1; then EXPECTED=$(wget -qO- --timeout=30 "https://nodejs.org/dist/$ver/SHASUMS256.txt" 2>/dev/null | grep " $name.tar.gz" | cut -d" " -f1 || true); fi
+    if [ -n "$EXPECTED" ] && [ "$EXPECTED" != "$SUM" ]; then echo "cc-termux: Node.js checksum mismatch" >&2; return 1; fi
+  fi
   tar -xzf "$tmp.tar.gz" -C "$dir" || return 1
   rm -f "$tmp.tar.gz"
   chmod +x "$NODE" 2>/dev/null || true

@@ -163,16 +163,22 @@ async function fetchCustomModels(baseUrl, key, type) {
   const arr = j.data || j.models || j;
   return arr.map(m => ({ id: m.id || m.name, name: m.name || m.id, contextTokens: m.context_length || m.inputTokenLimit || null, inUsd: null, outUsd: null }));
 }
+function atomicWrite(file, text, mode = 0o600) {
+  const tmp = file + "." + process.pid + ".tmp";
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(tmp, text, { mode });
+  fs.renameSync(tmp, file);
+  try { fs.chmodSync(file, mode); } catch (e) { }
+}
 function loadCfg() {
   try { return JSON.parse(fs.readFileSync(CFG, "utf8")); } catch (e) { return { listen: { host: "127.0.0.1", port: 8788 }, providers: {}, active: "", routing: {} }; }
 }
 function saveCfg(c) {
-  fs.mkdirSync(path.dirname(CFG), { recursive: true });
-  fs.writeFileSync(CFG, JSON.stringify(c, null, 2) + "\n", { mode: 0o600 });
+  atomicWrite(CFG, JSON.stringify(c, null, 2) + "\n", 0o600);
 }
 const KEYS_PATH = path.join(path.dirname(CFG), 'keys.json');
 function loadKeys() { try { return JSON.parse(fs.readFileSync(KEYS_PATH, 'utf8')); } catch (e) { return {}; } }
-function saveKeys(k) { fs.mkdirSync(path.dirname(KEYS_PATH), { recursive: true }); fs.writeFileSync(KEYS_PATH, JSON.stringify(k, null, 2) + '\n', { mode: 0o600 }); }
+function saveKeys(k) { atomicWrite(KEYS_PATH, JSON.stringify(k, null, 2) + '\n', 0o600); }
 const visible = (c) => Object.entries(c.providers || {}).filter(([, p]) => !p.hidden);
 const composite = (p, id) => "prov/" + p + "/" + id;
 

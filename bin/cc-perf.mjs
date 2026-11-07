@@ -77,7 +77,10 @@ export async function savePerfMode(cfgPath, mode) {
   }
   cfg.performance = { ...(cfg.performance || {}), mode };
   fs.mkdirSync(path.dirname(cfgPath), { recursive: true });
-  fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2) + "\n", { mode: 0o600 });
+  const tmp = cfgPath + "." + process.pid + ".tmp";
+  fs.writeFileSync(tmp, JSON.stringify(cfg, null, 2) + "\n", { mode: 0o600 });
+  fs.renameSync(tmp, cfgPath);
+  try { fs.chmodSync(cfgPath, 0o600); } catch (e) { }
 }
 export function setReducedMotion(home = os.homedir(), enabled = true) {
   const file = path.join(home, ".claude.json");
@@ -89,6 +92,11 @@ export function setReducedMotion(home = os.homedir(), enabled = true) {
   }
   if (cfg.prefersReducedMotion === enabled) return false;
   cfg.prefersReducedMotion = enabled;
-  try { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, JSON.stringify(cfg, null, 2) + "\n"); } catch (e) { return false; }
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const tmp = file + "." + process.pid + ".tmp";
+    fs.writeFileSync(tmp, JSON.stringify(cfg, null, 2) + "\n");
+    fs.renameSync(tmp, file);
+  } catch (e) { return false; }
   return true;
 }

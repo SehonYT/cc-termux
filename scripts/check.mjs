@@ -19,8 +19,18 @@ const shellFiles = ["get.sh", "install.sh", "scripts/ensure-node.sh"];
 for (const f of shellFiles) {
   const p = path.join(root, f);
   if (!fs.existsSync(p)) continue;
-  const r = spawnSync("bash", ["-n", p], { stdio: "inherit" });
+  const first = fs.readFileSync(p, "utf8").split("\n")[0];
+  const shell = first.includes("bash") ? "bash" : "sh";
+  const r = spawnSync(shell, ["-n", p], { stdio: "inherit" });
   if (r.status !== 0) { console.error("shell syntax error:", f); failed++; }
+}
+const psFiles = ["get.ps1", "install.ps1"];
+for (const f of psFiles) {
+  const p = path.join(root, f);
+  if (!fs.existsSync(p)) continue;
+  const pw = spawnSync("pwsh", ["-NoProfile", "-Command", "$null = [System.Management.Automation.Language.Parser]::ParseFile('" + p.replace(/'/g, "''") + "', [ref]$null, [ref]$null)"], { stdio: "inherit" });
+  if (pw.error && pw.error.code === "ENOENT") continue;
+  if (pw.status !== 0) { console.error("powershell syntax error:", f); failed++; }
 }
 
 for (const f of files) {

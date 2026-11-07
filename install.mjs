@@ -9,6 +9,9 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { createInterface } from "node:readline/promises";
+import crypto from "node:crypto";
+import { Readable, Transform } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
 import { detectTarget, nodeVersionOk, glibcTooOld } from "./bin/cc-platform.mjs";
 import { extractTgz } from "./bin/cc-tar.mjs";
@@ -64,7 +67,30 @@ function extract(tgz, dest) {
   try { extractTgz(tgz, dest); return true; } catch (e) { fail("extraction failed: " + e.message); }
 }
 
-async function download(url, file, label) {
+async function npmIntegrity(name, version) {
+  try {
+    const r = await fetch("https://registry.npmjs.org/" + name + "/" + version, { signal: AbortSignal.timeout(20000) });
+    if (!r.ok) return null;
+    const j = await r.json();
+    return (j.dist && j.dist.integrity) || null;
+  } catch (e) { return null; }
+}
+
+function verifyIntegrity(file, integrity) {
+  if (!integrity || !integrity.startsWith("sha512-")) return true;
+  try {
+    const hash = crypto.createHash("sha512").update(fs.readFileSync(file)).digest("base64");
+    return hash === integrity.slice("sha512-".length);
+  } catch (e) { return false; }
+}
+
+async function fetchText(url) {
+  const r = await fetch(url, { signal: AbortSignal.timeout(20000) });
+  if (!r.ok) throw new Error("HTTP " + r.status + " " + url);
+  return await r.text();
+}
+
+async function download(url, file, label, integrity) {
   let lastErr;
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
@@ -72,23 +98,14 @@ async function download(url, file, label) {
       if (!r.ok) throw new Error("HTTP " + r.status);
       const total = Number(r.headers.get("content-length")) || 0;
       const prog = createProgress(label || ("downloading " + path.basename(file)), { stream: process.stderr });
-      const chunks = [];
       let received = 0;
-      if (r.body && typeof r.body[Symbol.asyncIterator] === "function") {
-        for await (const chunk of r.body) {
-          chunks.push(Buffer.from(chunk));
-          received += chunk.length;
-          prog.update(received, total);
-        }
-      } else {
-        chunks.push(Buffer.from(await r.arrayBuffer()));
-        received = chunks[0].length;
-        prog.update(received, total);
-      }
-      const buf = Buffer.concat(chunks);
-      fs.writeFileSync(file, buf);
-      prog.done({ ok: true, message: buf.length + " bytes" });
-      return buf.length;
+      const out = fs.createWriteStream(file);
+      const meter = new Transform({ transform(chunk, _enc, cb) { received += chunk.length; prog.update(received, total); cb(null, chunk); } });
+      if (r.body && typeof r.body.getReader === "function") await pipeline(Readable.fromWeb(r.body), meter, out);
+      else { const buf = Buffer.from(await r.arrayBuffer()); received = buf.length; fs.writeFileSync(file, buf); }
+      if (integrity && !verifyIntegrity(file, integrity)) throw new Error("integrity check failed for " + url);
+      prog.done({ ok: true, message: received + " bytes" });
+      return received;
     } catch (e) {
       lastErr = e;
       if (attempt < 3) {
@@ -290,7 +307,7 @@ function installShims(t) {
   } else if (t.js) {
     log("no native target for " + process.platform + "/" + process.arch + ": installing JS fallback 2.1.112");
     const tgz = path.join(tmp, "cc.tgz");
-    await download("https://registry.npmjs.org/@anthropic-ai/claude-code/-/claude-code-2.1.112.tgz", tgz, "Claude Code JS fallback from the official Anthropic registry (registry.npmjs.org)");
+    await download("https://registry.npmjs.org/@anthropic-ai/claude-code/-/claude-code-2.1.112.tgz", tgz, "Claude Code JS fallback from the official Anthropic registry (registry.npmjs.org)", await npmIntegrity("@anthropic-ai/claude-code", "2.1.112"));
     extract(tgz, path.join(tmp, "js"));
     const pkg = path.join(tmp, "js", "package");
     fs.mkdirSync(path.join(ROOT, "js"), { recursive: true });
@@ -305,7 +322,7 @@ function installShims(t) {
     if (!tgz) {
       log("downloading Claude Code " + ver + " (" + t.pkg + ")");
       tgz = path.join(tmp, "pkg.tgz");
-      const size = await download("https://registry.npmjs.org/@anthropic-ai/claude-code-" + t.pkg + "/-/" + "claude-code-" + t.pkg + "-" + ver + ".tgz", tgz, "Claude Code " + ver + " (" + t.pkg + ") from the official Anthropic registry (registry.npmjs.org)");
+      const size = await download("https://registry.npmjs.org/@anthropic-ai/claude-code-" + t.pkg + "/-/" + "claude-code-" + t.pkg + "-" + ver + ".tgz", tgz, "Claude Code " + ver + " (" + t.pkg + ") from the official Anthropic registry (registry.npmjs.org)", await npmIntegrity("@anthropic-ai/claude-code-" + t.pkg, ver));
       log("downloaded " + (size / 1e6).toFixed(1) + " MB");
     } else log("using local tarball " + tgz);
     extract(tgz, path.join(tmp, "pkg"));
@@ -315,7 +332,13 @@ function installShims(t) {
     if (!fs.existsSync(srcBin)) srcBin = path.join(pkg, "claude");
     if (!fs.existsSync(srcBin)) fail("binary not found in tarball");
     const dst = path.join(ROOT, "bin", t.bin);
+    const rollbackBin = dst + ".rollback";
+    const versionPath = path.join(ROOT, "VERSION");
+    const rollbackVer = versionPath + ".rollback";
     fs.mkdirSync(path.dirname(dst), { recursive: true });
+    if (fs.existsSync(dst)) fs.copyFileSync(dst, rollbackBin);
+    if (fs.existsSync(versionPath)) fs.copyFileSync(versionPath, rollbackVer);
+    try {
     fs.copyFileSync(srcBin, dst);
     fs.chmodSync(dst, 0o755);
     for (const stale of [dst + ".orig", dst + ".orig.json"]) { try { fs.rmSync(stale, { force: true }); } catch (e) { } }
@@ -324,7 +347,13 @@ function installShims(t) {
     if (t.termux && t.loader) {
       log("installing musl loader (" + t.loader + ")");
       const alpine = path.join(tmp, "alpine.tgz");
-      await download("https://dl-cdn.alpinelinux.org/alpine/v3.20/releases/" + t.loader + "/alpine-minirootfs-3.20.3-" + t.loader + ".tar.gz", alpine, "Alpine musl loader (needed on Termux)");
+      const alpineUrl = "https://dl-cdn.alpinelinux.org/alpine/v3.20/releases/" + t.loader + "/alpine-minirootfs-3.20.3-" + t.loader + ".tar.gz";
+      await download(alpineUrl, alpine, "Alpine musl loader (needed on Termux)");
+      try {
+        const expected = (await fetchText(alpineUrl + ".sha256")).trim().split(/\s+/)[0];
+        const actual = crypto.createHash("sha256").update(fs.readFileSync(alpine)).digest("hex");
+        if (expected && expected !== actual) throw new Error("Alpine loader checksum mismatch");
+      } catch (e) { if (/checksum mismatch/.test(e.message)) throw e; }
       extract(alpine, path.join(tmp, "alpine"));
       const loaderName = "ld-musl-" + t.loader + ".so.1";
       fs.mkdirSync(path.join(ROOT, "lib"), { recursive: true });
@@ -344,7 +373,14 @@ function installShims(t) {
       else log("patchelf unavailable: loader mode (self-relaunch may be limited)");
     }
     // Only record success after the binary and its loader are in place.
-    fs.writeFileSync(path.join(ROOT, "VERSION"), ver + "\n");
+    fs.writeFileSync(versionPath, ver + "\n");
+    fs.rmSync(rollbackBin, { force: true });
+    fs.rmSync(rollbackVer, { force: true });
+    } catch (e) {
+      try { if (fs.existsSync(rollbackBin)) fs.copyFileSync(rollbackBin, dst); else fs.rmSync(dst, { force: true }); } catch (e2) { }
+      try { if (fs.existsSync(rollbackVer)) fs.copyFileSync(rollbackVer, versionPath); } catch (e2) { }
+      throw e;
+    }
   }
 
   const cfgPath = CFG;

@@ -16,14 +16,23 @@ REF="${CC_TERMUX_REF:-main}"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT INT TERM
 
-# Resolve the exact commit for main so the installed provenance matches the code.
+# Resolve the exact commit so the installed provenance matches the code.
 SHA=""
 DATE=""
-if [ -z "${CC_TERMUX_ARCHIVE:-}" ] && [ "$REF" = "main" ]; then
-  if command -v curl >/dev/null 2>&1; then ATOM=$(curl -fsSL -m 10 "https://github.com/$REPO/commits/main.atom" 2>/dev/null || true); else ATOM=""; fi
-  if [ -n "$ATOM" ]; then
+fetch_text() {
+  if command -v curl >/dev/null 2>&1; then curl -fsSL -m 15 "$1" 2>/dev/null || true
+  elif command -v wget >/dev/null 2>&1; then wget -qO- --timeout=15 "$1" 2>/dev/null || true
+  fi
+}
+if [ -z "${CC_TERMUX_ARCHIVE:-}" ]; then
+  if [ "$REF" = "main" ]; then
+    ATOM=$(fetch_text "https://github.com/$REPO/commits/main.atom")
     SHA=$(printf "%s" "$ATOM" | grep -o "Grit::Commit/[0-9a-f]\{40\}" | head -1 | cut -d/ -f2 || true)
     DATE=$(printf "%s" "$ATOM" | sed -n "s/.*<updated>\([^<]*\)<\/updated>.*/\1/p" | head -1 || true)
+  else
+    API=$(fetch_text "https://api.github.com/repos/$REPO/commits/$REF")
+    SHA=$(printf "%s" "$API" | sed -n 's/.*"sha"[[:space:]]*:[[:space:]]*"\([0-9a-f]\{40\}\)".*/\1/p' | head -1 || true)
+    DATE=$(printf "%s" "$API" | sed -n 's/.*"date"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1 || true)
   fi
 fi
 [ -n "$SHA" ] && export CC_TERMUX_COMMIT_SHA="$SHA"

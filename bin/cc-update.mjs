@@ -48,8 +48,8 @@ export function isNewer(local, remote) {
   if (Number.isFinite(l) && Number.isFinite(r)) return r > l;
   // Legacy stamps without a commit date: fall back to sha difference.
   if (local.sha && remote.sha) return local.sha !== remote.sha;
-  // No local provenance (offline/local tarball install): only a version bump counts.
-  if (!local.sha) return semverNewer(remote.version, local.version);
+  // No local provenance (archive/local install): a known remote commit counts as an update.
+  if (!local.sha) return Boolean(remote.sha) || semverNewer(remote.version, local.version);
   return semverNewer(remote.version, local.version);
 }
 
@@ -176,8 +176,12 @@ export async function selfUpdate({ root = DEFAULT_ROOT, repo = DEFAULT_REPO, arc
         ? "https://codeload.github.com/" + repo + "/tar.gz/" + targetSha
         : "https://codeload.github.com/" + repo + "/tar.gz/refs/heads/main";
       if (targetSha) step("updating to commit " + targetSha.slice(0, 7));
-      const r = await fetchImpl(url, { signal: AbortSignal.timeout(180000) });
-      if (!r.ok) throw new Error("download HTTP " + r.status);
+      let r = null;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try { r = await fetchImpl(url, { signal: AbortSignal.timeout(180000) }); if (r.ok) break; throw new Error("download HTTP " + r.status); }
+        catch (e) { if (attempt === 3) throw e; await new Promise((res) => setTimeout(res, 1000 * attempt)); }
+      }
+      if (!r || !r.ok) throw new Error("download failed");
       const total = Number(r.headers.get("content-length")) || 0;
       const prog = createProgress("cc-termux source archive from GitHub", { stream: process.stderr });
       const chunks = [];

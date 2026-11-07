@@ -13,6 +13,8 @@ Individual suite: `node --test tests/<name>.test.mjs`.
 
 | File | Covers |
 |---|---|
+| `get-bootstrap.test.mjs` | no-TTY piped bootstrap runs the installer under setsid |
+| `setup.test.mjs` | setup flag/help handling |
 | `assets.test.mjs` | installer ships every runtime file and every relative import (catches missing modules like `cc-perf.mjs`) |
 | `presets.test.mjs` | provider preset schema, unique ids, 20 new provider endpoints (incl. AgentRouter), static model fallbacks, ordering (popular first, tokens.bd last) |
 | `perf.test.mjs` | speed-mode opt-in: asked once on any OS, default no, never automatic, flag set |
