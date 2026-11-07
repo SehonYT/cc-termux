@@ -152,7 +152,7 @@ export async function selfUpdate({ root = DEFAULT_ROOT, repo = DEFAULT_REPO, arc
     }
     const args = [installer, "--root", root, "--no-setup"];
     if (codeOnly) args.push("--code-only");
-    const res = spawnSync(process.execPath, args, { stdio: "inherit", env: { ...process.env, CC_TERMUX_NO_BANNER: "1" } });
+    const res = spawnSync(process.execPath, args, { stdio: "inherit", env: { ...process.env, CC_TERMUX_NO_BANNER: codeOnly ? "1" : "" } });
     if (res.status !== 0) throw new Error("installer exited with " + res.status);
     let sha = null;
     try { sha = (await remoteInfo({ repo })).sha; } catch (e) { }
