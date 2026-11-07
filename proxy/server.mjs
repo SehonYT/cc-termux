@@ -24,6 +24,17 @@ let CONFIG = loadConfig();
 for (const [n, p] of Object.entries(CONFIG.providers || {})) p.name = p.name || n;
 const KEYS_PATH = path.join(os.homedir(), '.config', 'cc-termux', 'keys.json');
 const QUOTA_PATH = path.join(os.homedir(), '.cache', 'cc-termux', 'quota.json');
+const ERRORS_PATH = path.join(os.homedir(), '.cache', 'cc-termux', 'errors.log');
+function logFailure(kind, provider, model, status, message) {
+  const rec = {
+    at: new Date().toISOString(), kind,
+    provider: provider || null, model: model || null,
+    status: status == null ? null : status,
+    message: String(message || '').replace(/\s+/g, ' ').slice(0, 400),
+  };
+  try { fs.mkdirSync(path.dirname(ERRORS_PATH), { recursive: true }); fs.appendFileSync(ERRORS_PATH, JSON.stringify(rec) + '\n'); } catch (e) { }
+  LOG('failure', kind, provider || '-', model || '-', status == null ? '' : status, rec.message.slice(0, 180));
+}
 function recordQuota(providerName, model, status, text) {
   try {
     let q = {}; try { q = JSON.parse(fs.readFileSync(QUOTA_PATH, 'utf8')); } catch (e) { q = {}; }
@@ -348,6 +359,7 @@ async function proxyAnthropic(res, route, body, req) {
     return;
   }
   const text = await upstream.text();
+  if (!upstream.ok) logFailure('upstream', route.name, route.model, upstream.status, text);
   if (upstream.status === 429 || upstream.status === 503) recordQuota(route.name, route.model, upstream.status, text);
   res.writeHead(upstream.status, { 'content-type': 'application/json' });
   res.end(text);
@@ -364,6 +376,7 @@ async function proxyOpenAI(res, route, body) {
   const upstream = await fetch(url, { method: 'POST', headers, body: JSON.stringify(payload) });
   if (!upstream.ok) {
     const t = await upstream.text();
+    logFailure('upstream', route.name, route.model, upstream.status, t);
     if (upstream.status === 429 || upstream.status === 503) recordQuota(route.name, route.model, upstream.status, t);
     LOG('upstream error', upstream.status, t.slice(0, 400));
     // Pass the real status through: a 403 (key cap / permission) must not look like a
@@ -391,7 +404,7 @@ async function proxyOpenAI(res, route, body) {
     }
     tr.onEnd();
   } catch (e) {
-    LOG('stream error', e.message);
+    logFailure('stream', route.name, route.model, null, e.message);
     send('error', { type: 'error', error: { type: 'api_error', message: String(e.message) } });
   }
   res.end();
@@ -499,6 +512,7 @@ function createResponsesTranslator(model, send) {
         if (t === 'error' || t === 'response.failed') {
           failed = true;
           const msg = (j.error && (j.error.message || j.error.code)) || (j.response && j.response.error && j.response.error.message) || 'upstream error';
+          logFailure('stream', null, model, null, String(msg));
           LOG('responses error', String(msg).slice(0, 200));
           send('error', { type: 'error', error: { type: 'api_error', message: String(msg) } });
           continue;
@@ -543,6 +557,7 @@ async function proxyResponses(res, route, body) {
   const upstream = await fetchWithRetry(url, { method: 'POST', headers, body: JSON.stringify(toResponses(body, route.model)) }, p, 'responses ' + route.model);
   if (!upstream.ok) {
     const t = await upstream.text();
+    logFailure('upstream', route.name, route.model, upstream.status, t);
     if (upstream.status === 429 || upstream.status === 503) recordQuota(route.name, route.model, upstream.status, t);
     LOG('responses upstream error', upstream.status, t.slice(0, 300));
     // endpoint unsupported -> fall back to chat/completions
@@ -631,6 +646,7 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(404, { 'content-type': 'application/json' });
     res.end(JSON.stringify({ type: 'error', error: { type: 'not_found_error', message: 'unknown path ' + u.pathname } }));
   } catch (e) {
+    logFailure('gateway', null, null, null, e.stack || e.message);
     LOG('fatal', e.stack || e.message);
     try { anthropicError(res, 500, 'api_error', String(e.message)); } catch {}
   }

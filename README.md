@@ -222,6 +222,23 @@ session exits:
 - concurrent sessions share one gateway; the last one to exit stops it.
 - stale instances are killed before a new gateway starts, and `cc-termux restart` stops all of them.
 
+## Failure logs
+
+Every failure is persisted, not just printed:
+
+- `~/.cache/cc-termux/gateway.log` - raw gateway output (startup, requests, retries).
+- `~/.cache/cc-termux/errors.log` - one JSON line per failure:
+  `{ at, kind, provider, model, status, message }` where `kind` is `upstream`, `stream` or `gateway`.
+
+```bash
+cc-termux errors          # last 20 failures, formatted
+cc-termux errors 50       # more
+cc-termux logs            # raw gateway log tail
+```
+
+Upstream HTTP failures include status and the provider's message (no keys are written).
+Stream errors, gateway exceptions and provider switchovers are recorded too.
+
 ## Diagnostics
 
 ```bash

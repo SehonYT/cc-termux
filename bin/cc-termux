@@ -247,6 +247,7 @@ const HELP = [
   "  cc-termux patch [status|revert]   re-apply / inspect the TUI patches",
   "  cc-termux test [prompt]          headless request through the gateway",
   "  cc-termux logs                   tail gateway log",
+  "  cc-termux errors [n]             last gateway/provider failures (structured)",
   "  cc-termux usage [provider]       show quota/spend (tokens.bd) or quota links",
   "  cc-termux restart                stop the gateway (restarts on next run)",
   "  cc-termux update                 reinstall the latest Claude Code binary",
@@ -513,6 +514,19 @@ switch (cmd) {
   }
   case "diagnose": {
     await diagnose();
+    break;
+  }
+  case "errors": {
+    const f = path.join(os.homedir(), ".cache", "cc-termux", "errors.log");
+    if (!fs.existsSync(f)) { console.log("no failures logged"); break; }
+    const n = Number(args[0]) || 20;
+    const lines = fs.readFileSync(f, "utf8").trim().split("\n").slice(-n);
+    for (const line of lines) {
+      try {
+        const r = JSON.parse(line);
+        console.log(r.at + "  " + r.kind.padEnd(9) + "  " + String(r.provider || "-").padEnd(10) + "  " + String(r.model || "-").padEnd(30) + "  " + (r.status == null ? "" : r.status + "  ") + r.message.slice(0, 140));
+      } catch (e) { console.log(line); }
+    }
     break;
   }
   default:
