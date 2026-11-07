@@ -106,8 +106,25 @@ function pkgTarballUrl(pkg, ver) {
   return "https://registry.npmjs.org/@anthropic-ai/claude-code-" + pkg + "/-/" + "claude-code-" + pkg + "-" + ver + ".tgz";
 }
 
+function runtimeAssets() {
+  const out = new Set();
+  for (const f of ["patches.json", "presets.json", "config.example.json", "install.mjs", "install.sh", "install.ps1", "get.sh", "get.ps1", "package.json", "README.md", "LICENSE", "NOTICE"]) {
+    if (fs.existsSync(path.join(SRC, f))) out.add(f);
+  }
+  for (const dir of ["bin", "proxy", "commands", "scripts"]) {
+    const abs = path.join(SRC, dir);
+    if (!fs.existsSync(abs)) continue;
+    for (const entry of fs.readdirSync(abs, { withFileTypes: true })) {
+      if (!entry.isFile()) continue;
+      if (/\.(bak|orig|log|tmp)$/.test(entry.name)) continue;
+      out.add(dir + "/" + entry.name);
+    }
+  }
+  return [...out].sort();
+}
+
 function copyAssets() {
-  const files = ["proxy/server.mjs", "bin/cc-launcher.mjs", "bin/cc-setup.mjs", "bin/cc-termux", "bin/cc-env.mjs", "bin/cc-patch.mjs", "bin/ccp.mjs", "bin/cc-heal.mjs", "bin/cc-platform.mjs", "bin/cc-tar.mjs", "bin/cc-ui.mjs", "bin/cc-update.mjs", "patches.json", "presets.json", "config.example.json", "install.mjs", "install.sh", "install.ps1", "get.sh", "get.ps1", "scripts/ensure-node.sh", "scripts/version.mjs", "package.json", "README.md", "LICENSE", "NOTICE"];
+  const files = runtimeAssets();
   for (const f of files) {
     const from = path.join(SRC, f);
     const to = path.join(ROOT, f);
@@ -212,6 +229,7 @@ function installShims(t) {
   }
 }
 (async () => {
+  if (has("--list-assets")) { for (const f of runtimeAssets()) console.log(f); return; }
   if (!nodeVersionOk(process.versions.node)) fail("Node.js 18+ is required (found " + process.versions.node + ")");
   const t = detectHostTarget();
   if (!CHECK && !process.env.CC_TERMUX_NO_BANNER) {

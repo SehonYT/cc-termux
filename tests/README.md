@@ -13,6 +13,7 @@ Individual suite: `node --test tests/<name>.test.mjs`.
 
 | File | Covers |
 |---|---|
+| `assets.test.mjs` | installer ships every runtime file and every relative import (catches missing modules like `cc-perf.mjs`) |
 | `presets.test.mjs` | provider preset schema, unique ids, 20 new provider endpoints (incl. AgentRouter), static model fallbacks, ordering (popular first, tokens.bd last) |
 | `perf.test.mjs` | speed-mode opt-in: asked once on any OS, default no, never automatic, flag set |
 | `platform.test.mjs` | CPU/OS matrix: native targets, Android musl loader, ARMv7/i686/riscv fallbacks, Node/glibc guards |
