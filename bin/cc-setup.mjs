@@ -282,6 +282,55 @@ function errText(e) {
   return m;
 }
 
+async function fetchAnyModels(p, key) {
+  if (p.kind === "gemini" || /generativelanguage/.test(p.baseUrl || "")) return await fetchGeminiModels(key);
+  const base = String(p.baseUrl).replace(/\/$/, "");
+  const candidates = [...new Set([
+    base.replace(/\/(v1|v1beta|v1beta\/openai|openai)$/, "") + "/v1/models",
+    base + "/models",
+    base + "/v1/models",
+  ])];
+  let lastErr;
+  for (const url of candidates) {
+    try {
+      const r = await fetch(url, { headers: key ? { authorization: "Bearer " + key } : {} });
+      if (!r.ok) { lastErr = new Error(url + " HTTP " + r.status); continue; }
+      const j = await r.json();
+      const arr = j.data || j.models || j;
+      const models = (Array.isArray(arr) ? arr : []).map((m) => ({
+        id: m.id || m.name, name: m.name || m.id,
+        contextTokens: m.context_length || m.max_context_length || m.inputTokenLimit || null,
+        inUsd: null, outUsd: null,
+      }));
+      if (models.length) return models;
+    } catch (e) { lastErr = e; }
+  }
+  throw lastErr || new Error("no models endpoint responded");
+}
+
+async function promptProviderKey(c, name, p) {
+  if (p.apiKeyEnv && process.env[p.apiKeyEnv]) return true;
+  if (loadKeys()[name]) return true;
+  console.log();
+  console.log(cyan("  no API key stored for " + name));
+  if (p.keyUrl) console.log(dim("  key page: " + p.keyUrl));
+  const key = await askHidden("API key (hidden, empty to skip) > ");
+  if (!key) return false;
+  const ks = loadKeys(); ks[name] = key; saveKeys(ks);
+  try {
+    const models = await fetchAnyModels(p, key);
+    const map = {};
+    for (const m of models) map[m.id] = { name: m.name, contextTokens: m.contextTokens, inUsd: m.inUsd, outUsd: m.outUsd };
+    p.modelsById = map;
+    if (!p.model || !map[p.model]) p.model = models[0].id;
+    p.contextWindow = map[p.model] && map[p.model].contextTokens ? map[p.model].contextTokens : p.contextWindow;
+    console.log(cyan("  \u2714 key valid - " + models.length + " models"));
+  } catch (e) {
+    console.log(cyan("  warning: key saved but validation failed (" + errText(e) + ")"));
+  }
+  return true;
+}
+
 async function presetFlow(c, presetOverride) {
   const presets = loadPresets().free || [];
   if (!presets.length) { console.log(cyan("  no presets found")); return null; }
@@ -419,15 +468,31 @@ async function ttyMode() {
     });
   }
   console.log();
-  console.log("  " + (list.length ? "Enter a number to switch provider, " : "") + "a = add provider, q = quit");
+  console.log("  " + (list.length ? "Enter a number to switch provider, " : "") + "a = add provider, r = remove provider, q = quit");
   console.log();
   const a = await ask("Choice > ");
   if (a.toLowerCase() === "q") return;
   if (a.toLowerCase() === "a" || !list.length) { await addFlow(c); return; }
+  if (a.toLowerCase() === "r") {
+    const pick = Number(await ask("Remove which provider? number > "));
+    const entry = list[pick - 1];
+    if (!entry) { console.log(cyan("  invalid choice")); return; }
+    const [name] = entry;
+    if ((await ask("Remove " + name + "? (y/N) > ")).toLowerCase().startsWith("y")) {
+      delete c.providers[name];
+      delete c.providers[name + "~native"];
+      const ks = loadKeys(); delete ks[name]; delete ks[name + "~native"]; saveKeys(ks);
+      if (!c.providers[c.active]) { c.active = Object.keys(c.providers).filter((k) => !c.providers[k].hidden)[0] || ""; delete c.override; }
+      rebuild(c); saveCfg(c); writeSettings(c); stopGateway();
+      console.log(cyan("\n  \u2714 removed " + name));
+    }
+    return;
+  }
   const n = Number(a);
   if (Number.isInteger(n) && n >= 1 && n <= list.length) {
     const name = list[n - 1][0];
     const p = c.providers[name];
+    if (!(await promptProviderKey(c, name, p))) { console.log(cyan("  no key configured, provider not switched")); return; }
     c.active = name;
     c.override = { provider: name, model: p.model || null };
     rebuild(c);

@@ -226,6 +226,8 @@ cc-termux logs
 | `401`/`403` | wrong key or missing permission; re-run `cc-termux setup` |
 | `429 ... quota` | provider quota. `cc-termux usage <provider>` shows the observed limit; the gateway retries transient limits and fails fast on hard quotas |
 | model returns an empty answer | provider rejected the tool schema; switch model or provider |
+| `Error relocating ... libtermux-exec-ld-preload.so` | the musl loader inherited Termux's bionic `LD_PRELOAD`. The launcher now strips it; update with the install command. Installing `patchelf` (`pkg install patchelf`) switches to direct exec and avoids loader mode entirely |
+| setup lists providers with `no key` | an older install copied the sample config. Remove them with `cc-termux setup` -> `r`, or delete `~/.config/cc-termux/config.json` and re-run setup. New installs start empty |
 | provider does not appear in `/model` | `cc-termux sync-picker`, then reopen the picker |
 | gateway down | `cc-termux restart`, then run `claude` again |
 

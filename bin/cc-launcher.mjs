@@ -62,7 +62,12 @@ function envForChild() {
   env.DISABLE_AUTOUPDATER = "1";
   env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1";
   env.CLAUDE_CODE_DISABLE_MOUSE = env.CLAUDE_CODE_DISABLE_MOUSE || "1";
-  if (process.platform === "android") env.BROWSER = env.BROWSER || "termux-open-url";
+  if (process.platform === "android") {
+    env.BROWSER = env.BROWSER || "termux-open-url";
+    // libtermux-exec is a bionic library; the musl loader cannot relocate it.
+    delete env.LD_PRELOAD;
+    delete env.LD_LIBRARY_PATH;
+  }
   return env;
 }
 

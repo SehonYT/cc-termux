@@ -193,7 +193,13 @@ function installShims(t) {
       fs.chmodSync(path.join(ROOT, "lib", loaderName), 0o755);
       try { fs.unlinkSync(path.join(ROOT, "lib", "libc.musl-" + t.loader + ".so.1")); } catch {}
       fs.symlinkSync(loaderName, path.join(ROOT, "lib", "libc.musl-" + t.loader + ".so.1"));
-      const patched = spawnSync("patchelf", ["--set-interpreter", path.join(ROOT, "lib", loaderName), dst], { stdio: "ignore" });
+      let patchelfAvailable = spawnSync("patchelf", ["--version"], { stdio: "ignore" }).status === 0;
+      if (!patchelfAvailable) {
+        log("installing patchelf via pkg");
+        spawnSync("pkg", ["install", "-y", "patchelf"], { stdio: "ignore" });
+        patchelfAvailable = spawnSync("patchelf", ["--version"], { stdio: "ignore" }).status === 0;
+      }
+      const patched = patchelfAvailable ? spawnSync("patchelf", ["--set-interpreter", path.join(ROOT, "lib", loaderName), dst], { stdio: "ignore" }) : { status: 1 };
       if (patched.status === 0) { fs.writeFileSync(path.join(ROOT, ".direct-exec"), ""); log("ELF interpreter patched (direct exec)"); }
       else log("patchelf unavailable: loader mode (self-relaunch may be limited)");
     }
@@ -202,9 +208,13 @@ function installShims(t) {
   const cfgPath = CFG;
   if (!fs.existsSync(cfgPath)) {
     fs.mkdirSync(path.dirname(cfgPath), { recursive: true });
-    fs.copyFileSync(path.join(ROOT, "config.example.json"), cfgPath);
-    fs.chmodSync(cfgPath, 0o600);
-    log("created config " + cfgPath);
+    fs.writeFileSync(cfgPath, JSON.stringify({
+      listen: { host: "127.0.0.1", port: 8788 },
+      active: "",
+      providers: {},
+      routing: {},
+    }, null, 2) + "\n", { mode: 0o600 });
+    log("created empty config " + cfgPath);
   }
 
   try { spawnSync(process.execPath, [path.join(ROOT, "bin", "cc-patch.mjs"), "--apply"], { stdio: "inherit", env: { ...process.env, CC_TERMUX_ROOT: ROOT } }); } catch {}
