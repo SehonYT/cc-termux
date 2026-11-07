@@ -56,7 +56,7 @@ export function info(text, { stream = process.stderr, tty = isTty(stream) } = {}
 }
 
 // Progress renderer. TTY: animated single line. Non-TTY: milestones only.
-export function createProgress(label, { stream = process.stderr, tty = isTty(stream), width = 28 } = {}) {
+export function createProgress(label, { stream = process.stderr, tty = isTty(stream) } = {}) {
   const started = Date.now();
   let lastPct = -10;
   let lastLineLen = 0;

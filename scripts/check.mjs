@@ -38,7 +38,7 @@ for (const f of files) {
   if (r.status !== 0) { console.error('syntax error:', f); failed++; }
 }
 
-for (const j of ['package.json', 'presets.json', 'config.example.json']) {
+for (const j of ['package.json', 'presets.json', 'patches.json']) {
   try { JSON.parse(fs.readFileSync(path.join(root, j), 'utf8')); }
   catch (e) { console.error('invalid JSON:', j, e.message); failed++; }
 }

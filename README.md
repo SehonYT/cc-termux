@@ -497,11 +497,10 @@ bin/cc-termux                          control CLI
 bin/cc-setup.mjs                       provider wizard
 bin/cc-patch.mjs                       optional UI patches
 bin/ccp.mjs                            standalone picker
-bin/cc-env.mjs                         model/context environment for Claude Code
 proxy/server.mjs                       gateway and protocol adapters
 presets.json                           provider presets
 commands/provider.md                   /provider slash command
-tests/                                 mock upstreams for development
+tests/                                 test suites (node:test)
 ```
 
 ## Limitations

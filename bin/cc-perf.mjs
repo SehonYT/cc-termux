@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Mobile / low-end device performance profile.
 //
-// Enabled automatically on Termux/Android, or manually with `cc-termux tune on`.
+// Enabled only when the user chooses it (`cc-termux tune on`, install prompt, or CC_TERMUX_PERF=1).
 // The profile disables expensive UI/IO features Claude Code exposes as env flags
 // and turns on reduced motion. Nothing here changes the model or provider.
 import fs from "node:fs";
@@ -21,15 +21,6 @@ export const PERF_ENV = {
   CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1",
   CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1",
 };
-
-export function isMobileLike({ platform = process.platform, env = process.env, prefix } = {}) {
-  if (platform === "android") return true;
-  if (platform !== "linux" && platform !== "freebsd") return false;
-  if (prefix === undefined) prefix = env.PREFIX || process.env.PREFIX || "";
-  if (/termux/i.test(String(prefix || ""))) return true;
-  if (env.TERMUX_VERSION) return true;
-  return false;
-}
 
 export function resolvePerf({ mode = "off", platform = process.platform, env = process.env, prefix = process.env.PREFIX } = {}) {
   const override = String(env.CC_TERMUX_PERF || "").toLowerCase();

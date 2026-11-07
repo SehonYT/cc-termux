@@ -12,8 +12,8 @@ import { extractTgz } from "./cc-tar.mjs";
 import { buildVersion, labelVersion } from "../scripts/version.mjs";
 import { createProgress, banner, step, info } from "./cc-ui.mjs";
 
-export const DEFAULT_REPO = process.env.CC_TERMUX_REPO || "SehonYT/cc-termux";
-export const DEFAULT_ROOT = path.join(os.homedir(), ".local", "share", "cc-termux");
+const DEFAULT_REPO = process.env.CC_TERMUX_REPO || "SehonYT/cc-termux";
+const DEFAULT_ROOT = path.join(os.homedir(), ".local", "share", "cc-termux");
 
 export function localInfo(root = DEFAULT_ROOT) {
   try { return JSON.parse(fs.readFileSync(path.join(root, "cc-termux.json"), "utf8")); }
@@ -53,7 +53,7 @@ export function isNewer(local, remote) {
   return semverNewer(remote.version, local.version);
 }
 
-export async function remoteInfo({ repo = DEFAULT_REPO, fetchImpl = fetch } = {}) {
+async function remoteInfo({ repo = DEFAULT_REPO, fetchImpl = fetch } = {}) {
   const headers = { "user-agent": "cc-termux" };
   let sha = null;
   let version = null;
@@ -116,7 +116,7 @@ export function findInstaller(dir, depth = 0) {
   return null;
 }
 
-export async function latestClaudeVersion({ fetchImpl = fetch } = {}) {
+async function latestClaudeVersion({ fetchImpl = fetch } = {}) {
   const r = await fetchImpl("https://registry.npmjs.org/@anthropic-ai/claude-code/latest", { signal: AbortSignal.timeout(15000) });
   if (!r.ok) throw new Error("registry HTTP " + r.status);
   return (await r.json()).version || null;

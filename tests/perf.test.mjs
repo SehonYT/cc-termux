@@ -1,14 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { isMobileLike, resolvePerf, applyPerfEnv, PERF_ENV, shouldAskPerf, perfDefaultAnswer, PERF_PROMPT_LINES } from "../bin/cc-perf.mjs";
-
-test("mobile detection covers Android and Termux", () => {
-  assert.equal(isMobileLike({ platform: "android", env: {} }), true);
-  assert.equal(isMobileLike({ platform: "linux", prefix: "/data/data/com.termux/files/usr", env: {} }), true);
-  assert.equal(isMobileLike({ platform: "linux", prefix: "/usr", env: {} }), false);
-  assert.equal(isMobileLike({ platform: "win32", env: {} }), false);
-  assert.equal(isMobileLike({ platform: "darwin", env: {} }), false);
-});
+import { resolvePerf, applyPerfEnv, PERF_ENV, shouldAskPerf, perfDefaultAnswer, PERF_PROMPT_LINES } from "../bin/cc-perf.mjs";
 
 test("nothing is enabled unless the user chose it", () => {
   for (const platform of ["android", "linux", "darwin", "win32"]) {

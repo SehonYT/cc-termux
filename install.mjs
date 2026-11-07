@@ -15,7 +15,7 @@ import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
 import { detectTarget, nodeVersionOk, glibcTooOld } from "./bin/cc-platform.mjs";
 import { extractTgz } from "./bin/cc-tar.mjs";
-import { createProgress, banner, step, info, isTty } from "./bin/cc-ui.mjs";
+import { createProgress, banner, step, info } from "./bin/cc-ui.mjs";
 import { PERF_PROMPT_LINES, perfDefaultAnswer, savePerfMode, shouldAskPerf } from "./bin/cc-perf.mjs";
 
 const SRC = path.dirname(fileURLToPath(import.meta.url));
@@ -118,14 +118,9 @@ async function download(url, file, label, integrity) {
   throw new Error("download failed: " + (lastErr && (lastErr.message || lastErr.name)) + " - " + url);
 }
 
-function pkgTarballUrl(pkg, ver) {
-  const name = "claude-code-" + pkg.replace(/^linux-|^darwin-|^win32-/, "");
-  return "https://registry.npmjs.org/@anthropic-ai/claude-code-" + pkg + "/-/" + "claude-code-" + pkg + "-" + ver + ".tgz";
-}
-
 function runtimeAssets() {
   const out = new Set();
-  for (const f of ["patches.json", "presets.json", "config.example.json", "install.mjs", "install.sh", "install.ps1", "get.sh", "get.ps1", "package.json", "README.md", "LICENSE", "NOTICE"]) {
+  for (const f of ["patches.json", "presets.json", "install.mjs", "install.sh", "install.ps1", "get.sh", "get.ps1", "package.json", "README.md", "LICENSE", "NOTICE"]) {
     if (fs.existsSync(path.join(SRC, f))) out.add(f);
   }
   const walk = (rel) => {
