@@ -133,14 +133,14 @@ async function askPerformance() {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   try {
     console.log();
-    banner(["Speed mode (optional)"], { stream: process.stdout, tty: true });
+    banner(["Performance mode (optional)"], { stream: process.stdout, tty: true });
     for (const line of PERF_PROMPT_LINES) console.log("  " + line);
     console.log();
     const hint = def === "yes" ? "[Y/n]" : "[y/N]";
-    const a = (await rl.question("  Turn on speed mode? " + hint + " > ")).trim().toLowerCase();
+    const a = (await rl.question("  Turn on performance mode? " + hint + " > ")).trim().toLowerCase();
     const yes = a === "" ? def === "yes" : a.startsWith("y");
-    savePerfMode(cfgPath, yes ? "mobile" : "off");
-    step(yes ? "Speed mode is ON (change later: cc-termux tune off)" : "Speed mode is off (change later: cc-termux tune on)", { stream: process.stdout, tty: true });
+    savePerfMode(cfgPath, yes ? "on" : "off");
+    step(yes ? "Performance mode is ON (change later: cc-termux tune off)" : "Performance mode is off (change later: cc-termux tune on)", { stream: process.stdout, tty: true });
   } finally {
     rl.close();
   }

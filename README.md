@@ -299,14 +299,14 @@ The installer shows this explicitly and displays a live progress bar:
 `cc-termux update` shows the same styling and keeps the installed binary when Claude Code
 is already current (code-only update), so no unnecessary 150 MB re-download happens.
 
-## Speed mode (phones and slow computers)
+## Performance mode (phones and slow computers)
 
 During install - and once more when updating from an older cc-termux to the version that
 introduces this option - the installer **asks you** (on every OS, phone or PC):
 
 ```
-  Speed mode (optional)
-  Speed mode: makes Claude Code smoother on phones and slow computers.
+  Performance mode (optional)
+  Performance mode: makes Claude Code smoother on phones and slow computers.
 
   If you turn it on, these things will be turned OFF:
     - clicking with the mouse
@@ -318,7 +318,7 @@ introduces this option - the installer **asks you** (on every OS, phone or PC):
     - animations
 
   You can change this anytime: cc-termux tune on / cc-termux tune off
-  Turn on speed mode? [y/N] >
+  Turn on performance mode? [y/N] >
 ```
 
 - **Nothing is enabled automatically.** The default answer is `no`, on every device.
@@ -326,7 +326,7 @@ introduces this option - the installer **asks you** (on every OS, phone or PC):
 - Change your mind anytime:
 
 ```bash
-cc-termux tune on      # turn speed mode on
+cc-termux tune on      # turn performance mode on
 cc-termux tune off     # turn it off
 cc-termux tune         # show status
 ```

@@ -18,8 +18,9 @@ test("nothing is enabled unless the user chose it", () => {
 });
 
 test("manual choice works on every OS", () => {
-  assert.equal(resolvePerf({ mode: "mobile", platform: "win32", env: {} }).enabled, true);
-  assert.equal(resolvePerf({ mode: "mobile", platform: "darwin", env: {} }).enabled, true);
+  assert.equal(resolvePerf({ mode: "on", platform: "win32", env: {} }).enabled, true);
+  assert.equal(resolvePerf({ mode: "on", platform: "darwin", env: {} }).enabled, true);
+  assert.equal(resolvePerf({ mode: "mobile", platform: "android", env: {} }).enabled, true, "legacy mobile still on");
   assert.equal(resolvePerf({ mode: "off", platform: "android", env: {} }).enabled, false);
   assert.equal(resolvePerf({ mode: "auto", platform: "android", env: { CC_TERMUX_PERF: "0" } }).enabled, false);
   assert.equal(resolvePerf({ mode: "auto", platform: "linux", env: { CC_TERMUX_PERF: "1" } }).enabled, true);
@@ -39,10 +40,12 @@ test("the prompt is shown once, on any device, and defaults to no", () => {
   assert.equal(shouldAskPerf(undefined), true);
   assert.equal(shouldAskPerf("auto"), true, "legacy auto means no explicit choice");
   assert.equal(shouldAskPerf("off"), false);
+  assert.equal(shouldAskPerf("on"), false);
   assert.equal(shouldAskPerf("mobile"), false);
   assert.equal(perfDefaultAnswer({}), "no");
   assert.equal(perfDefaultAnswer({ mode: "local" }), "no");
   assert.equal(perfDefaultAnswer({ mode: "off" }), "no");
+  assert.equal(perfDefaultAnswer({ mode: "on" }), "yes");
   assert.equal(perfDefaultAnswer({ mode: "mobile" }), "yes");
 });
 

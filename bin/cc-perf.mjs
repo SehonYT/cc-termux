@@ -35,7 +35,7 @@ export function resolvePerf({ mode = "off", platform = process.platform, env = p
   const override = String(env.CC_TERMUX_PERF || "").toLowerCase();
   if (override === "1" || override === "on" || override === "mobile") return { enabled: true, mode: "mobile", reason: "CC_TERMUX_PERF" };
   if (override === "0" || override === "off" || override === "normal") return { enabled: false, mode: "off", reason: "CC_TERMUX_PERF" };
-  if (mode === "mobile" || mode === "on") return { enabled: true, mode: "mobile", reason: "chosen by you" };
+  if (mode === "mobile" || mode === "on") return { enabled: true, mode: "on", reason: "chosen by you" };
   return { enabled: false, mode: "off", reason: "off" };
 }
 
@@ -45,7 +45,7 @@ export function applyPerfEnv(env, resolved) {
 }
 
 export const PERF_PROMPT_LINES = [
-  "Speed mode: makes Claude Code smoother on phones and slow computers.",
+  "Performance mode: makes Claude Code smoother on phones and slow computers.",
   "",
   "If you turn it on, these things will be turned OFF:",
   "  - clicking with the mouse",
