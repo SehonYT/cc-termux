@@ -79,6 +79,17 @@ async function doctor(fix) {
     else pass("provider " + name + ": " + p.model + "  (" + mc + " models, retries " + (p.retries || 5) + ")");
   }
 
+  try {
+    const pids = [];
+    for (const d of fs.readdirSync("/proc")) {
+      if (!/^\d+$/.test(d)) continue;
+      try {
+        const cmd = fs.readFileSync("/proc/" + d + "/cmdline", "utf8");
+        if (cmd.includes("proxy/server.mjs") && Number(d) !== process.pid) pids.push(Number(d));
+      } catch (e) { }
+    }
+    if (pids.length > 1) warn(pids.length + " gateway processes running (run: cc-termux restart)");
+  } catch (e) { }
   const portv = (c.listen && c.listen.port) || 8788;
   let health = null;
   try { health = await (await fetch("http://127.0.0.1:" + portv + "/health")).json(); } catch (e) {}
@@ -361,6 +372,15 @@ switch (cmd) {
   case "restart": {
     const pidf = path.join(os.homedir(), ".cache", "cc-termux", "gateway.pid");
     try { process.kill(Number(fs.readFileSync(pidf, "utf8").trim())); } catch {}
+    try {
+      for (const d of fs.readdirSync("/proc")) {
+        if (!/^\d+$/.test(d)) continue;
+        try {
+          const cmd = fs.readFileSync("/proc/" + d + "/cmdline", "utf8");
+          if (cmd.includes("proxy/server.mjs") && Number(d) !== process.pid) process.kill(Number(d));
+        } catch (e) { }
+      }
+    } catch (e) { }
     console.log("gateway stopped; restarts on the next claude run");
     break;
   }
