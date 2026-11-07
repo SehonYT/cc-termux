@@ -117,6 +117,24 @@ async function doctor(fix) {
     if (fix) { settings.model = expectedModel; fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n"); fixed++; pass("settings.model set to " + expectedModel); }
     else warn("settings.model is " + (sm2 || "empty") + " - should be " + expectedModel + " (doctor --fix)");
   }
+  {
+    const rc = resolvedClaude();
+    if (!rc) warn("no claude command on PATH (re-run the installer)");
+    else if (!isOurShim(rc)) {
+      const others = claudeCandidates().filter((p) => !isOurShim(p));
+      if (fix) {
+        for (const p of others) {
+          try {
+            fs.renameSync(p, p + ".official-backup");
+            fs.writeFileSync(p, "#!/bin/sh\nexec \"" + process.execPath + "\" \"" + path.join(ROOT, "bin", "cc-launcher.mjs") + "\" \"$@\"\n");
+            fs.chmodSync(p, 0o755);
+            fixed++;
+          } catch (e) { }
+        }
+        pass("replaced foreign claude binary with the cc-termux shim (" + others.join(", ") + ")");
+      } else warn("claude resolves to " + rc + " (official install, not the cc-termux shim) - doctor --fix replaces it");
+    } else pass("claude resolves to the cc-termux shim");
+  }
   const envKeys = Object.keys((settings.env) || {}).filter((k) => /^ANTHROPIC_/.test(k) || k === "CLAUDE_CODE_MAX_CONTEXT_TOKENS");
   if (envKeys.length) {
     if (fix) {
@@ -190,6 +208,44 @@ async function doctor(fix) {
   console.log("");
   console.log(issues === 0 ? "all checks passed" : issues + " issue(s)" + (fix ? ", " + fixed + " fixed" : " (run: cc-termux doctor --fix)"));
 }
+function claudeCandidates() {
+  const dirs = String(process.env.PATH || '').split(path.delimiter).filter(Boolean);
+  const out = [];
+  for (const d of dirs) {
+    const p = path.join(d, process.platform === 'win32' ? 'claude.cmd' : 'claude');
+    try { if (fs.existsSync(p)) out.push(p); } catch (e) { }
+  }
+  return [...new Set(out)];
+}
+function isOurShim(p) {
+  try { return /cc-launcher\.mjs/.test(fs.readFileSync(p, 'utf8')); } catch (e) { return false; }
+}
+function resolvedClaude() {
+  const c = claudeCandidates();
+  return c.length ? c[0] : null;
+}
+async function checkProviderKey(name, p) {
+  const key = loadKeys()[name];
+  if (!key) return { ok: false, detail: 'no key stored' };
+  const timeout = (ms) => AbortSignal.timeout(ms);
+  try {
+    if (/generativelanguage/.test(p.baseUrl || '')) {
+      const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models?key=' + encodeURIComponent(key), { signal: timeout(8000) });
+      return r.ok ? { ok: true, detail: 'models endpoint 200' } : { ok: false, detail: 'models endpoint HTTP ' + r.status };
+    }
+    const base = String(p.baseUrl).replace(/\/$/, '');
+    const urls = [...new Set([base + '/models', base.replace(/\/v1.*$/, '') + '/v1/models', base + '/v1/models'])];
+    let last = '';
+    for (const u of urls) {
+      try {
+        const r = await fetch(u, { headers: { authorization: 'Bearer ' + key }, signal: timeout(8000) });
+        if (r.ok) return { ok: true, detail: u.replace(/^https?:\/\//, '').slice(0, 60) + ' 200' };
+        last = 'HTTP ' + r.status + ' @ ' + u.replace(/^https?:\/\//, '').slice(0, 50);
+      } catch (e) { last = e.name || e.code; }
+    }
+    return { ok: false, detail: last || 'unreachable' };
+  } catch (e) { return { ok: false, detail: e.name || e.code }; }
+}
 async function diagnose() {
   const c = (() => { try { return load(); } catch (e) { return null; } })();
   const hdr = (s) => console.log("\n" + s);
@@ -203,6 +259,11 @@ async function diagnose() {
     const ks = loadKeys();
     console.log("  providers " + (vis.length ? vis.map(([n, p]) => n + "(" + (ks[n] ? "key" : "no key") + ")").join(", ") : "none"));
     console.log("  active    " + (c.active || "(none)") + "  override=" + JSON.stringify(c.override || null));
+  {
+    const rc = resolvedClaude();
+    console.log("  claude    " + (rc || "(not found on PATH)") + (rc ? (isOurShim(rc) ? "  [our shim]" : "  [NOT ours - official install?]") : ""));
+    for (const p of claudeCandidates().slice(1)) console.log("            also: " + p + (isOurShim(p) ? " [ours]" : " [not ours]"));
+  }
   try {
     const st = JSON.parse(fs.readFileSync(path.join(os.homedir(), ".claude", "settings.json"), "utf8"));
     console.log("  settings  model=" + (st.model || "(none)"));
@@ -210,6 +271,12 @@ async function diagnose() {
     if (ek.length) console.log("  settings  env overrides=" + ek.join(", "));
   } catch (e) { console.log("  settings  (unreadable)"); }
     console.log("  port      " + ((c.listen && c.listen.port) || 8788));
+  }
+  if (c) {
+    for (const [name, p] of Object.entries(c.providers || {}).filter(([, q]) => !q.hidden)) {
+      const res = await checkProviderKey(name, p);
+      console.log("  key " + name.padEnd(10) + (res.ok ? "OK   " : "FAIL ") + res.detail);
+    }
   }
   const bin = path.join(ROOT, "bin", process.platform === "win32" ? "claude.exe" : "claude.bin");
   let bstat = null; try { bstat = fs.statSync(bin); } catch (e) {}
