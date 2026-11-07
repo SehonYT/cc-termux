@@ -14,7 +14,7 @@
   "scripts": {
     "check": "node scripts/check.mjs",
     "install:check": "node install.mjs --check",
-    "test": "node --test tests/*.test.mjs"
+    "test": "node tests/run-tests.mjs"
   },
   "keywords": [
     "claude-code",

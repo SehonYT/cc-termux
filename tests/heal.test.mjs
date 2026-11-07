@@ -27,8 +27,10 @@ test("heal repairs settings, foreign claude binaries and sample configs", () => 
   const cfgPath = path.join(home, ".config", "cc-termux", "config.json");
   fs.writeFileSync(cfgPath, JSON.stringify({
     active: "tokens",
-    providers: { tokens: { type: "openai", baseUrl: "https://tokens.bd", model: "deepseek/deepseek-v4.1-flash", modelsById: {} } },
+    providers: { tokens: { type: "openai", baseUrl: "https://tokens.bd", model: "deepseek/deepseek-v4.1-flash", modelsById: { "deepseek/deepseek-v4.1-flash": { name: "DeepSeek", contextTokens: 1000000 } } } },
+    routing: {},
   }));
+  fs.writeFileSync(path.join(home, ".config", "cc-termux", "keys.json"), JSON.stringify({ tokens: "test-key" }));
 
   const prevPath = process.env.PATH;
   const prevCfg = process.env.CC_TERMUX_CONFIG;
@@ -48,6 +50,12 @@ test("heal repairs settings, foreign claude binaries and sample configs", () => 
   assert.ok(fs.existsSync(foreign + ".official-backup"));
   assert.match(fs.readFileSync(foreign, "utf8"), /cc-launcher\.mjs/);
   const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
-  assert.deepEqual(cfg.providers, {});
+  assert.ok(cfg.providers.tokens, "configured provider must be preserved");
+  assert.ok(cfg.routing["prov/tokens/deepseek/deepseek-v4.1-flash"], "routing must be rebuilt");
+  const s2 = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+  assert.ok(Array.isArray(s2.modelPicker.options) && s2.modelPicker.options.length >= 2, "picker must be rebuilt");
+
+  const again = healEnvironment({ root, home });
+  assert.equal(again.length, 0, "heal must be idempotent");
   fs.rmSync(tmp, { recursive: true, force: true });
 });

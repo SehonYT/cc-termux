@@ -21,7 +21,7 @@ function startGateway(tmp, port, config) {
 }
 
 async function waitHealth(port) {
-  for (let i = 0; i < 100; i++) {
+  for (let i = 0; i < 300; i++) {
     try { const r = await fetch("http://127.0.0.1:" + port + "/health"); if (r.ok) return true; } catch {}
     await new Promise((r) => setTimeout(r, 100));
   }

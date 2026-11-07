@@ -72,6 +72,19 @@ Useful flags: `--root <dir>`, `--tarball <file>` (offline install), `--version <
 
 ## First run
 
+Non-interactive setup is available too:
+
+```bash
+cc-termux setup --preset openrouter --key sk-or-... [--test]
+cc-termux setup --provider tokens --key tok_live_... --model deepseek/deepseek-v4.1-flash
+cc-termux setup --provider custom --type openai --base-url https://host/v1 --key ...
+cc-termux setup --help
+```
+
+In the interactive wizard the model list supports **search** (type any part of a model id/name instead
+of a number), and after adding a provider it offers to send a small test request (`--test` forces it).
+
+
 After installing, a setup wizard runs. It asks for a provider, validates the key, fetches the
 model list (with context window and price where the provider exposes them) and writes the
 gateway configuration. Re-run it any time with `cc-termux setup`, or pick a built-in preset:
@@ -218,6 +231,11 @@ See `NOTICE` for the caveats.
 - replaces a stale `model` (`default`, `opus`/`sonnet`/`haiku`, bare `claude-*-<n>`) with the active provider model
 - replaces foreign `claude` binaries earlier in `PATH` with the cc-termux shim (original kept as `claude.official-backup`)
 - removes sample provider entries left by older releases (no key, no catalog)
+- repairs config sanity (active provider, override, routing table, 0600 permissions)
+- regenerates `/model` picker rows and `settings.model`
+- reinstalls missing launcher shims in `$PREFIX/bin`
+- clears stale session files / idle gateways and rotates logs over 5 MB
+- restores `~/.claude/commands/provider.md` when missing
 
 It is idempotent and also available on demand:
 

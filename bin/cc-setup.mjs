@@ -7,6 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
 import { fileURLToPath } from "node:url";
+import { spawnSync } from "node:child_process";
 
 const HOME = os.homedir();
 const CFG = process.env.CC_TERMUX_CONFIG || path.join(HOME, ".config", "cc-termux", "config.json");
@@ -171,6 +172,18 @@ async function pickModel(models, prompt) {
     sorted.slice(start, start + pageSize).forEach((m, i) => console.log("  " + String(start + i + 1).padStart(3) + ". " + describe(m)));
     console.log(dim("  page " + (page + 1) + "/" + pages + "   n = next page, p = prev page, or type a number"));
     const a = await ask(prompt + " > ");
+    if (a.length > 1 && !/^\d+$/.test(a)) {
+      const hits = sorted.filter((m) => (m.id + " " + (m.name || "")).toLowerCase().includes(a.toLowerCase()));
+      if (hits.length) {
+        console.log(cyan("  " + hits.length + " match(es) for \"" + a + "\""));
+        hits.slice(0, 15).forEach((m, i) => console.log("  " + String(i + 1).padStart(3) + ". " + describe(m)));
+        const pick = Number(await ask("Pick number (empty = search again) > "));
+        if (pick >= 1 && pick <= Math.min(hits.length, 15)) return hits[pick - 1];
+        continue;
+      }
+      console.log(cyan("  no match - try another search"));
+      continue;
+    }
     if ((a === "n" || a === "N") && page < pages - 1) { page++; continue; }
     if ((a === "p" || a === "P") && page > 0) { page--; continue; }
     const n = Number(a);
@@ -365,7 +378,33 @@ async function presetFlow(c, presetOverride) {
   return name;
 }
 
+function parseFlags() {
+  const a = process.argv.slice(2);
+  const val = (n) => { const i = a.indexOf(n); return i >= 0 && a[i + 1] && !a[i + 1].startsWith("-") ? a[i + 1] : ""; };
+  if (a.includes("--help") || a.includes("-h")) {
+    console.log("usage: cc-termux setup [--preset id] [--provider tokens|openrouter|gemini|custom]");
+    console.log("                         [--key KEY] [--model ID] [--base-url URL] [--type openai|anthropic]");
+    console.log("                         [--name NAME] [--test]");
+    process.exit(0);
+  }
+  const map = {
+    "--preset": "CC_SETUP_PRESET", "--provider": "CC_SETUP_PROVIDER", "--key": "CC_SETUP_KEY",
+    "--model": "CC_SETUP_MODEL", "--background": "CC_SETUP_BACKGROUND", "--base-url": "CC_SETUP_BASE_URL",
+    "--type": "CC_SETUP_TYPE", "--path": "CC_SETUP_PATH", "--context": "CC_SETUP_CONTEXT",
+  };
+  for (const [flag, env] of Object.entries(map)) { const v = val(flag); if (v) process.env[env] = v; }
+  return { test: a.includes("--test"), hasFlags: Object.keys(map).some((f) => a.includes(f)) };
+}
+
+async function runSmokeTest() {
+  console.log("\n  sending a small test request through the gateway...");
+  const r = spawnSync(process.execPath, [path.join(ROOT, "bin", "cc-termux"), "test", "Reply with exactly: OK"], { encoding: "utf8", timeout: 120000 });
+  const out = ((r.stdout || "") + (r.stderr || "")).trim();
+  console.log("  " + (r.status === 0 ? "\u2714 " : "\u2716 ") + (out.split("\n").pop() || "no output"));
+}
+
 async function envMode() {
+  const opts = parseFlags();
   if (process.env.CC_SETUP_PRESET) {
     const preset = (loadPresets().free || []).find((p) => p.id === process.env.CC_SETUP_PRESET);
     if (!preset) throw new Error("unknown preset " + process.env.CC_SETUP_PRESET);
@@ -381,6 +420,7 @@ async function envMode() {
       aliases: { opus: main.id, sonnet: main.id, haiku: main.id, subagent: main.id },
     });
     summary(c, name);
+    if (opts.test) await runSmokeTest();
     return;
   }
   const kind = process.env.CC_SETUP_PROVIDER || "tokens";
@@ -451,6 +491,7 @@ async function addFlow(c) {
   const name = providerName(c, f.family);
   addProvider(c, name, { family: f.family, type: f.type, baseUrl: f.baseUrl, path: f.path, key, models: f.models, main: main.id, contextWindow: ctx, aliases: aliasModels });
   summary(c, name);
+  if ((await ask("\nSend a small test request now? (y/N) > ")).toLowerCase().startsWith("y")) await runSmokeTest();
   return name;
 }
 
