@@ -60,7 +60,7 @@ test("stale backups are refreshed for a different binary and never reverted onto
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
-test("patcher refuses to patch a patched binary with a stale backup", () => {
+test("patcher refreshes a stale backup from an already-patched binary", () => {
   const root = setup("Switch between Claude models");
   const bin = path.join(root, "bin", process.platform === "win32" ? "claude.exe" : "claude.bin");
   try {
@@ -68,7 +68,10 @@ test("patcher refuses to patch a patched binary with a stale backup", () => {
     fs.writeFileSync(bin + ".orig", Buffer.from("tiny stale backup"));
     fs.rmSync(bin + ".orig.json", { force: true });
     const r = run(root, "--apply");
-    assert.notEqual(r.status, 0);
-    assert.match(r.stderr, /belongs to a different build/);
+    assert.equal(r.status, 0);
+    assert.match(r.stderr, /refreshing it from the installed/);
+    const meta = JSON.parse(fs.readFileSync(bin + ".orig.json", "utf8"));
+    assert.equal(meta.patched, true);
+    assert.equal(run(root, "--revert").status, 0);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });

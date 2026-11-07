@@ -15,7 +15,8 @@ const BIN = path.join(ROOT, "bin", process.platform === "win32" ? "claude.exe" :
 const BACKUP = BIN + ".orig";
 const BACKUP_META = BACKUP + ".json";
 const sha256 = (b) => crypto.createHash("sha256").update(b).digest("hex");
-const PATTERN_HINT = /Switch between AI providers|Provider rows switch provider|name:"provider"/;
+const HINT_BUFFERS = [Buffer.from("Switch between AI providers"), Buffer.from("Provider rows switch provider"), Buffer.from('name:"provider"')];
+const isPatched = (buf) => HINT_BUFFERS.some((h) => buf.indexOf(h) >= 0);
 const DEFS = path.join(ROOT, "patches.json");
 
 function loadDefs() {
@@ -82,9 +83,10 @@ function atomicWrite(file, data, mode) {
   fs.renameSync(tmp, file);
 }
 
-function writeBackup(buf) {
+function writeBackup(buf, extra = {}) {
   atomicWrite(BACKUP, Buffer.from(buf), 0o755);
-  fs.writeFileSync(BACKUP_META, JSON.stringify({ size: buf.length, sha256: sha256(buf), at: new Date().toISOString() }, null, 2) + "\n");
+  const meta = { size: buf.length, sha256: sha256(buf), at: new Date().toISOString(), ...extra };
+  fs.writeFileSync(BACKUP_META, JSON.stringify(meta, null, 2) + "\n");
 }
 
 function ensureBackup(buf) {
@@ -95,10 +97,13 @@ function ensureBackup(buf) {
   try { backupBuf = fs.readFileSync(BACKUP); } catch (e) { backupBuf = null; }
   const valid = meta && backupBuf && meta.size === backupBuf.length && meta.sha256 === sha256(backupBuf);
   if (valid && meta.size === buf.length) return;
-  if (PATTERN_HINT.test(buf.toString("utf8"))) {
-    console.error("cc-patch: the saved backup belongs to a different build and this binary is already patched.");
-    console.error("cc-patch: refusing to patch; run: cc-termux update --redownload");
-    process.exit(1);
+  if (isPatched(buf)) {
+    // The installed binary is already patched (e.g. an older .orig from a previous build).
+    // Refresh the backup from the current patched binary instead of forcing a 310 MB reinstall.
+    console.error("cc-patch: stale backup detected; refreshing it from the installed (already patched) binary.");
+    console.error("cc-patch: note: --revert will restore this patched build, not an unpatched one.");
+    writeBackup(buf, { patched: true });
+    return;
   }
   // Current binary is unpatched and differs from the stale backup: refresh it.
   writeBackup(buf);
@@ -149,6 +154,7 @@ function revert() {
   try { meta = JSON.parse(fs.readFileSync(BACKUP_META, "utf8")); } catch (e) { meta = null; }
   try { backup = fs.readFileSync(BACKUP); } catch (e) { backup = null; }
   const force = process.argv.includes("--force");
+  const wasPatchedBackup = !!(meta && meta.patched);
   if (!meta || !backup || meta.size !== backup.length || meta.sha256 !== sha256(backup)) {
     if (!force) { console.error("cc-patch: backup metadata is missing or does not match the backup file; refusing to revert (use --force to override)"); process.exit(1); }
   }
@@ -156,7 +162,7 @@ function revert() {
     const tmp = BIN + ".revert." + process.pid;
     fs.writeFileSync(tmp, backup, { mode: 0o755 });
     fs.renameSync(tmp, BIN);
-    console.log("cc-patch: reverted to the unpatched binary");
+    console.log(wasPatchedBackup ? "cc-patch: reverted to the previous patched build (backup was created from a patched binary)" : "cc-patch: reverted to the unpatched binary");
   } catch (e) { console.error("cc-patch: revert failed: " + e.message); process.exit(1); }
 }
 
