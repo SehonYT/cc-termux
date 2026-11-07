@@ -33,8 +33,14 @@ async function ensureGateway() {
   });
   child.unref();
   try { fs.writeFileSync(path.join(CACHE, "gateway.pid"), String(child.pid)); } catch {}
-  for (let i = 0; i < 100; i++) { if (await healthy()) return; await new Promise((r) => setTimeout(r, 100)); }
-  console.error("cc-launcher: gateway failed to start, see " + path.join(CACHE, "gateway.log"));
+  for (let i = 0; i < 300; i++) { if (await healthy()) return; await new Promise((r) => setTimeout(r, 100)); }
+  const logFile = path.join(CACHE, "gateway.log");
+  console.error("cc-launcher: gateway failed to start");
+  try {
+    const tail = fs.readFileSync(logFile, "utf8").trim().split("\n").slice(-15).join("\n");
+    if (tail) console.error("--- gateway.log ---\n" + tail + "\n-----------------");
+  } catch {}
+  console.error("check: cc-termux doctor | curl http://127.0.0.1:" + port + "/health");
   process.exit(1);
 }
 

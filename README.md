@@ -230,6 +230,9 @@ cc-termux logs
 | setup lists providers with `no key` | an older install copied the sample config. Remove them with `cc-termux setup` -> `r`, or delete `~/.config/cc-termux/config.json` and re-run setup. New installs start empty |
 | provider does not appear in `/model` | `cc-termux sync-picker`, then reopen the picker |
 | gateway down | `cc-termux restart`, then run `claude` again |
+| `can't connect to the API server` | the local gateway is not reachable. Check `cc-termux status`, `curl http://127.0.0.1:8788/health` and `tail -30 ~/.cache/cc-termux/gateway.log`. If no provider is configured, run `cc-termux setup`. Launcher now prints the gateway log tail when startup fails |
+| `no provider configured on this machine` | expected on a fresh install: run `cc-termux setup` and add a provider key |
+| proxy variables break localhost | if `HTTP_PROXY`/`HTTPS_PROXY` are set, add `127.0.0.1` to `NO_PROXY` |
 
 ## Project layout
 

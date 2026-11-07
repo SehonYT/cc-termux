@@ -457,8 +457,20 @@ async function addFlow(c) {
 async function ttyMode() {
   console.log();
   console.log(bold("  Claude Code on Termux - provider setup"));
-  const c = loadCfg();
-  const list = visible(c);
+  let c = loadCfg();
+  let list = visible(c);
+  const ks0 = loadKeys();
+  const sample = list.filter(([name, p]) => !ks0[name] && !p.apiKeyEnv && !Object.keys(p.modelsById || {}).length);
+  if (list.length && sample.length === list.length) {
+    console.log();
+    console.log(cyan("  " + list.length + " provider entries look like sample data from an older install (no keys, no models)."));
+    if ((await ask("Remove them and start clean? (Y/n) > ")).toLowerCase() !== "n") {
+      for (const [name] of sample) delete c.providers[name];
+      c.active = ""; delete c.override;
+      saveCfg(c);
+      list = visible(c);
+    }
+  }
   if (list.length) {
     console.log();
     console.log("  Configured providers:");

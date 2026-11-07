@@ -607,6 +607,8 @@ const server = http.createServer(async (req, res) => {
       return res.end(JSON.stringify({ input_tokens: estimate(body.messages) + estimate(body.system) + estimate(body.tools) }));
     }
     if (u.pathname === '/v1/messages') {
+      const hasProviders = Object.keys(CONFIG.providers || {}).some((n) => !CONFIG.providers[n].hidden);
+      if (!CONFIG.active || !hasProviders) return anthropicError(res, 400, 'invalid_request_error', 'no provider configured on this machine - run: cc-termux setup');
       let model = body.model || '';
       if (model.startsWith('provswitch/')) {
         const name = model.slice('provswitch/'.length);

@@ -19,6 +19,7 @@ const CFG = process.env.CC_TERMUX_CONFIG || path.join(os.homedir(), ".config", "
 const CHECK = has("--check");
 const NO_SETUP = has("--no-setup");
 const NO_SHIMS = has("--no-shims");
+const RESET_CONFIG = has("--reset-config");
 const TARBALL = argVal("--tarball", "");
 const VERSION_ARG = argVal("--version", "");
 
@@ -206,7 +207,7 @@ function installShims(t) {
   }
 
   const cfgPath = CFG;
-  if (!fs.existsSync(cfgPath)) {
+  if (!fs.existsSync(cfgPath) || RESET_CONFIG) {
     fs.mkdirSync(path.dirname(cfgPath), { recursive: true });
     fs.writeFileSync(cfgPath, JSON.stringify({
       listen: { host: "127.0.0.1", port: 8788 },
