@@ -85,12 +85,44 @@ async function ensureGateway() {
   process.exit(1);
 }
 
+function sanitizeSettings(p) {
+  const file = path.join(os.homedir(), ".claude", "settings.json");
+  let s;
+  try { s = JSON.parse(fs.readFileSync(file, "utf8")); } catch { return; }
+  let changed = false;
+  const removed = [];
+  if (s.env && typeof s.env === "object") {
+    for (const k of Object.keys(s.env)) {
+      if (/^ANTHROPIC_/.test(k) || k === "CLAUDE_CODE_MAX_CONTEXT_TOKENS" || k === "CLAUDE_CODE_SUBAGENT_MODEL") {
+        delete s.env[k];
+        removed.push(k);
+        changed = true;
+      }
+    }
+  }
+  const sm = typeof s.model === "string" ? s.model : "";
+  const stale = !sm || sm === "default" || /^(opus|sonnet|haiku)$/.test(sm) || (/^claude-(opus|sonnet|haiku)-[0-9]/.test(sm) && !sm.startsWith("prov/"));
+  const target = p && p.model ? "prov/" + (p.name || "") + "/" + p.model : "";
+  if (stale && target) { s.model = target; changed = true; }
+  if (changed) {
+    try {
+      fs.copyFileSync(file, file + ".cc-termux-backup");
+      fs.writeFileSync(file, JSON.stringify(s, null, 2) + "\n");
+      fs.appendFileSync(path.join(CACHE, "errors.log"), JSON.stringify({
+        at: new Date().toISOString(), kind: "config", provider: p && p.name || null, model: target || null,
+        status: null, message: "repaired settings.json" + (removed.length ? " (removed env: " + removed.join(",") + ")" : "") + (stale ? " (model set)" : ""),
+      }) + "\n");
+    } catch (e) { }
+  }
+}
+
 function envForChild() {
   const env = { ...process.env };
   env.ANTHROPIC_BASE_URL = base;
   env.ANTHROPIC_AUTH_TOKEN = env.ANTHROPIC_AUTH_TOKEN || "cc-termux-local";
   delete env.ANTHROPIC_API_KEY;
   const p = (cfg.providers || {})[cfg.active] || {};
+  try { sanitizeSettings(p); } catch (e) { }
   let settingsModel = "";
   try { settingsModel = (JSON.parse(fs.readFileSync(path.join(os.homedir(), ".claude", "settings.json"), "utf8")).model) || ""; } catch {}
   const bareAnthropic = /^claude-(opus|sonnet|haiku)-[0-9]/.test(settingsModel) && !settingsModel.startsWith("prov/");

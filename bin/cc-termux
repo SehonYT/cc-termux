@@ -117,6 +117,23 @@ async function doctor(fix) {
     if (fix) { settings.model = expectedModel; fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n"); fixed++; pass("settings.model set to " + expectedModel); }
     else warn("settings.model is " + (sm2 || "empty") + " - should be " + expectedModel + " (doctor --fix)");
   }
+  const envKeys = Object.keys((settings.env) || {}).filter((k) => /^ANTHROPIC_/.test(k) || k === "CLAUDE_CODE_MAX_CONTEXT_TOKENS");
+  if (envKeys.length) {
+    if (fix) {
+      for (const k of envKeys) delete settings.env[k];
+      fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n");
+      fixed++; pass("removed conflicting settings.env keys: " + envKeys.join(", "));
+    } else warn("settings.env overrides the launcher: " + envKeys.join(", ") + " (doctor --fix)");
+  }
+  const projCfgs = [path.join(process.cwd(), ".claude", "settings.json"), path.join(process.cwd(), ".claude", "settings.local.json")];
+  for (const f of projCfgs) {
+    try {
+      const ps = JSON.parse(fs.readFileSync(f, "utf8"));
+      if (ps.model) warn("project settings set model: " + ps.model + "  (" + f + ")");
+      const pe = Object.keys(ps.env || {}).filter((k) => /^ANTHROPIC_|^CLAUDE_CODE_MAX_CONTEXT/.test(k));
+      if (pe.length) warn("project settings env overrides: " + pe.join(", ") + "  (" + f + ")");
+    } catch (e) { }
+  }
   const expected = vis.length + vis.reduce((n, [, p]) => n + Object.keys(p.modelsById || {}).length, 0);
   const have = ((settings.modelPicker || {}).options || []).length;
   if (have === expected) pass("model picker in sync (" + have + " rows)");
@@ -185,7 +202,12 @@ async function diagnose() {
     const ks = loadKeys();
     console.log("  providers " + (vis.length ? vis.map(([n, p]) => n + "(" + (ks[n] ? "key" : "no key") + ")").join(", ") : "none"));
     console.log("  active    " + (c.active || "(none)") + "  override=" + JSON.stringify(c.override || null));
-  try { console.log("  settings  model=" + (JSON.parse(fs.readFileSync(path.join(os.homedir(), ".claude", "settings.json"), "utf8")).model || "(none)")); } catch (e) { console.log("  settings  model=(unreadable)"); }
+  try {
+    const st = JSON.parse(fs.readFileSync(path.join(os.homedir(), ".claude", "settings.json"), "utf8"));
+    console.log("  settings  model=" + (st.model || "(none)"));
+    const ek = Object.keys(st.env || {}).filter((k) => /^ANTHROPIC_|^CLAUDE_CODE_MAX_CONTEXT/.test(k));
+    if (ek.length) console.log("  settings  env overrides=" + ek.join(", "));
+  } catch (e) { console.log("  settings  (unreadable)"); }
     console.log("  port      " + ((c.listen && c.listen.port) || 8788));
   }
   const bin = path.join(ROOT, "bin", process.platform === "win32" ? "claude.exe" : "claude.bin");
