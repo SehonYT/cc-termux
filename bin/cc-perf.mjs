@@ -31,14 +31,12 @@ export function isMobileLike({ platform = process.platform, env = process.env, p
   return false;
 }
 
-export function resolvePerf({ mode = "auto", platform = process.platform, env = process.env, prefix = process.env.PREFIX } = {}) {
+export function resolvePerf({ mode = "off", platform = process.platform, env = process.env, prefix = process.env.PREFIX } = {}) {
   const override = String(env.CC_TERMUX_PERF || "").toLowerCase();
   if (override === "1" || override === "on" || override === "mobile") return { enabled: true, mode: "mobile", reason: "CC_TERMUX_PERF" };
   if (override === "0" || override === "off" || override === "normal") return { enabled: false, mode: "off", reason: "CC_TERMUX_PERF" };
-  if (mode === "mobile" || mode === "on") return { enabled: true, mode: "mobile", reason: "config" };
-  if (mode === "off" || mode === "normal") return { enabled: false, mode: "off", reason: "config" };
-  const mobile = isMobileLike({ platform, env, prefix });
-  return { enabled: mobile, mode: "auto", reason: mobile ? "mobile device detected" : "desktop auto" };
+  if (mode === "mobile" || mode === "on") return { enabled: true, mode: "mobile", reason: "chosen by you" };
+  return { enabled: false, mode: "off", reason: "off" };
 }
 
 export function applyPerfEnv(env, resolved) {
@@ -46,6 +44,37 @@ export function applyPerfEnv(env, resolved) {
   return { ...env, ...PERF_ENV };
 }
 
+export const PERF_PROMPT_LINES = [
+  "Speed mode: makes Claude Code smoother on phones and slow computers.",
+  "",
+  "If you turn it on, these things will be turned OFF:",
+  "  - clicking with the mouse",
+  "  - fancy window title updates",
+  "  - undo checkpoints (rewinding a file)",
+  "  - work that runs in the background",
+  "  - scheduled tasks",
+  "  - extra git text added to prompts",
+  "  - animations",
+  "",
+  "You can change this anytime: cc-termux tune on / cc-termux tune off",
+];
+
+export function perfDefaultAnswer({ mode } = {}) {
+  return mode === "mobile" || mode === "on" ? "yes" : "no";
+}
+
+// Ask once per installation: only when no choice has ever been recorded.
+export function shouldAskPerf(mode) {
+  return !mode || mode === "auto";
+}
+
+export async function savePerfMode(cfgPath, mode) {
+  let cfg = {};
+  try { cfg = JSON.parse(fs.readFileSync(cfgPath, "utf8")); } catch (e) { cfg = {}; }
+  cfg.performance = { ...(cfg.performance || {}), mode };
+  fs.mkdirSync(path.dirname(cfgPath), { recursive: true });
+  fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2) + "\n", { mode: 0o600 });
+}
 export function setReducedMotion(home = os.homedir(), enabled = true) {
   const file = path.join(home, ".claude.json");
   let cfg = {};

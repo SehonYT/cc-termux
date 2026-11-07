@@ -299,29 +299,39 @@ The installer shows this explicitly and displays a live progress bar:
 `cc-termux update` shows the same styling and keeps the installed binary when Claude Code
 is already current (code-only update), so no unnecessary 150 MB re-download happens.
 
-## Mobile / low-end tuning
+## Speed mode (phones and slow computers)
 
-Claude Code's TUI redraws and background work are expensive on phones. cc-termux enables a
-performance profile **automatically on Termux/Android**, and you can switch it manually on any OS:
+During install - and once more when updating from an older cc-termux to the version that
+introduces this option - the installer **asks you** (on every OS, phone or PC):
 
-```bash
-cc-termux tune            # show status
-cc-termux tune on         # force on (e.g. an old laptop or a PC)
-cc-termux tune auto       # default: on for Termux/Android only
-cc-termux tune off        # disable on mobile
-CC_TERMUX_PERF=1 claude   # one-off override
+```
+  Speed mode (optional)
+  Speed mode: makes Claude Code smoother on phones and slow computers.
+
+  If you turn it on, these things will be turned OFF:
+    - clicking with the mouse
+    - fancy window title updates
+    - undo checkpoints (rewinding a file)
+    - work that runs in the background
+    - scheduled tasks
+    - extra git text added to prompts
+    - animations
+
+  You can change this anytime: cc-termux tune on / cc-termux tune off
+  Turn on speed mode? [y/N] >
 ```
 
-When active it sets reduced motion (`prefersReducedMotion` in `~/.claude.json`) and these Claude Code
-flags, which turn off expensive UI/IO work while leaving models and providers untouched:
+- **Nothing is enabled automatically.** The default answer is `no`, on every device.
+- Your answer is saved; later installs and updates will **not ask again**.
+- Change your mind anytime:
 
-- `CLAUDE_CODE_DISABLE_MOUSE`, `..._MOUSE_CLICKS` (no mouse reporting/escape traffic)
-- `CLAUDE_CODE_DISABLE_TERMINAL_TITLE`, `..._WORKING_SYNC_WATCH`, `..._STARTUP_WORK_GATE`
-- `CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS`, `..._FILE_CHECKPOINTING`, `..._AGENT_VIEW`
-- `CLAUDE_CODE_DISABLE_CRON`, `..._AUTO_MEMORY`, `..._BACKGROUND_TASKS`
+```bash
+cc-termux tune on      # turn speed mode on
+cc-termux tune off     # turn it off
+cc-termux tune         # show status
+```
 
-Feature tradeoffs while tuned: no file rewind checkpoints, no background tasks/cron, no git
-instructions in prompts, no agent view. Run `cc-termux tune off` if you need those back.
+One-off for a single run: `CC_TERMUX_PERF=1 claude`.
 
 ## Platform support
 

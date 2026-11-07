@@ -144,7 +144,7 @@ function envForChild() {
     env.CLAUDE_CODE_SUBAGENT_MODEL = composite(a.subagent || model);
   }
   try {
-    const resolved = resolvePerf({ mode: (cfg.performance && cfg.performance.mode) || "auto" });
+    const resolved = resolvePerf({ mode: (cfg.performance && cfg.performance.mode) || "off" });
     if (resolved.enabled) {
       Object.assign(env, applyPerfEnv({}, resolved));
       try { setReducedMotion(os.homedir(), true); } catch (e) { }

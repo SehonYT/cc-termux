@@ -8,10 +8,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 import { detectTarget, nodeVersionOk, glibcTooOld } from "./bin/cc-platform.mjs";
 import { extractTgz } from "./bin/cc-tar.mjs";
 import { createProgress, banner, step, info, isTty } from "./bin/cc-ui.mjs";
+import { PERF_PROMPT_LINES, perfDefaultAnswer, savePerfMode, shouldAskPerf } from "./bin/cc-perf.mjs";
 
 const SRC = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -120,6 +122,30 @@ function copyAssets() {
     for (const f of fs.readdirSync(cmds)) fs.copyFileSync(path.join(cmds, f), path.join(dst, f));
   }
 }
+async function askPerformance() {
+  if (process.env.CC_TERMUX_NO_PROMPT === "1" || process.env.CC_TERMUX_NO_TUNE === "1") return;
+  if (!process.stdin.isTTY || !process.stdout.isTTY) return;
+  const cfgPath = CFG;
+  let mode = "";
+  try { mode = (JSON.parse(fs.readFileSync(cfgPath, "utf8")).performance || {}).mode || ""; } catch (e) { }
+  if (!shouldAskPerf(mode)) return; // already answered on install/first update
+  const def = perfDefaultAnswer({ mode });
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    console.log();
+    banner(["Speed mode (optional)"], { stream: process.stdout, tty: true });
+    for (const line of PERF_PROMPT_LINES) console.log("  " + line);
+    console.log();
+    const hint = def === "yes" ? "[Y/n]" : "[y/N]";
+    const a = (await rl.question("  Turn on speed mode? " + hint + " > ")).trim().toLowerCase();
+    const yes = a === "" ? def === "yes" : a.startsWith("y");
+    savePerfMode(cfgPath, yes ? "mobile" : "off");
+    step(yes ? "Speed mode is ON (change later: cc-termux tune off)" : "Speed mode is off (change later: cc-termux tune on)", { stream: process.stdout, tty: true });
+  } finally {
+    rl.close();
+  }
+}
+
 function installShims(t) {
   const node = process.execPath;
   const scripts = {
@@ -300,6 +326,7 @@ function installShims(t) {
     const version = short ? pkg.version + "+" + short : pkg.version;
     fs.writeFileSync(path.join(ROOT, "cc-termux.json"), JSON.stringify({ version, baseVersion: pkg.version, sha, installedAt: new Date().toISOString() }, null, 2) + "\n");
   } catch (e) { }
+  await askPerformance();
   if (!NO_SHIMS) installShims(t);
   try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
   log((CODE_ONLY ? "updated " : "installed into ") + ROOT);
