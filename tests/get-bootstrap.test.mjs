@@ -25,7 +25,7 @@ test("get.sh works without a controlling terminal (CI/pipe)", () => {
     const root = path.join(tmp, "root");
     fs.mkdirSync(root, { recursive: true });
     const env = { ...process.env, CC_TERMUX_ARCHIVE: archive, HOME: tmp };
-    const r = spawnSync("sh", [path.join(repo, "get.sh"), "--root", root], { env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    const r = spawnSync("setsid", ["sh", path.join(repo, "get.sh"), "--root", root], { env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
     assert.equal(r.status, 0, "stderr: " + r.stderr);
     assert.ok(fs.existsSync(path.join(root, "marker")), "installer did not run");
   } finally { fs.rmSync(tmp, { recursive: true, force: true }); }

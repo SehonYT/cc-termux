@@ -35,6 +35,9 @@ ensure_node() {
       case "$arch" in
         x86_64|amd64) plat=linux-x64 ;;
         aarch64|arm64) plat=linux-arm64 ;;
+        armv7l|armv6l) plat=linux-armv7l ;;
+        ppc64le) plat=linux-ppc64le ;;
+        s390x) plat=linux-s390x ;;
         *) plat= ;;
       esac ;;
     Darwin)
@@ -79,8 +82,8 @@ ensure_node() {
   mkdir -p "$dir" || return 1
   tmp="$dir/.download.$$"
   if command -v curl >/dev/null 2>&1; then
-    if [ -t 2 ]; then curl -fL --progress-bar "$url" -o "$tmp.tar.gz" || return 1; else curl -fsSL "$url" -o "$tmp.tar.gz" || return 1; fi
-  elif command -v wget >/dev/null 2>&1; then wget -qO "$tmp.tar.gz" "$url" || return 1
+    if [ -t 2 ]; then curl -fL --progress-bar --connect-timeout 15 --max-time 600 "$url" -o "$tmp.tar.gz" || return 1; else curl -fsSL --connect-timeout 15 --max-time 600 "$url" -o "$tmp.tar.gz" || return 1; fi
+  elif command -v wget >/dev/null 2>&1; then wget -q --timeout=30 --tries=3 -O "$tmp.tar.gz" "$url" || return 1
   else echo "cc-termux: curl or wget is required to download Node.js" >&2; return 1; fi
   if ! command -v tar >/dev/null 2>&1; then echo "cc-termux: tar is required to unpack Node.js" >&2; return 1; fi
   tar -xzf "$tmp.tar.gz" -C "$dir" || return 1

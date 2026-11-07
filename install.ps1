@@ -10,11 +10,15 @@ function Ensure-Node {
   $arch = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "x64" }
   $ver = if ($env:CC_NODE_VERSION) { $env:CC_NODE_VERSION } else { "v22.14.0" }
   $dir = Join-Path $HOME ".local\share\cc-termux\runtime"
+  $cachedNode = Join-Path $dir "node-$ver-win-$arch\node.exe"
+  if (Test-Path $cachedNode) {
+    try { $cv = [int]((& $cachedNode -p "process.versions.node.split('.')[0]")); if ($cv -ge 18) { return $cachedNode } } catch { }
+  }
   New-Item -ItemType Directory -Path $dir -Force | Out-Null
   $zip = Join-Path $env:TEMP ("node-" + [guid]::NewGuid().ToString("N") + ".zip")
   $url = "https://nodejs.org/dist/$ver/node-$ver-win-$arch.zip"
   Write-Host "cc-termux: downloading Node.js from $url" -ForegroundColor Cyan
-  Invoke-WebRequest $url -OutFile $zip -UseBasicParsing
+  Invoke-WebRequest $url -OutFile $zip -UseBasicParsing -TimeoutSec 600
   Expand-Archive -Path $zip -DestinationPath $dir -Force
   Remove-Item $zip -Force
   return (Join-Path $dir "node-$ver-win-$arch\node.exe")

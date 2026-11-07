@@ -7,7 +7,8 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
-const base = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")).version;
+const baseArg = (() => { const i = process.argv.indexOf("--base"); return i > 0 ? process.argv[i + 1] : ""; })();
+const base = baseArg || JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")).version;
 
 function shaArg() {
   const i = process.argv.indexOf("--sha");

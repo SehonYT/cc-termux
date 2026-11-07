@@ -137,7 +137,7 @@ function copyAssets() {
   if (fs.existsSync(cmds)) {
     const dst = path.join(os.homedir(), ".claude", "commands");
     fs.mkdirSync(dst, { recursive: true });
-    for (const f of fs.readdirSync(cmds)) fs.copyFileSync(path.join(cmds, f), path.join(dst, f));
+    fs.cpSync(cmds, dst, { recursive: true, force: true });
   }
 }
 async function askPerformance() {
@@ -273,7 +273,7 @@ function installShims(t) {
     if (t.js && t.reason) console.log("  fallback : " + t.reason);
     console.log("  root     : " + ROOT);
     console.log("  config   : " + CFG);
-    console.log("  shims    : " + (t.win ? ROOT + "\\bin\\*.cmd" : (process.env.PREFIX || (t.termux ? "/data/data/com.termux/files/usr" : "/usr/local")) + "/bin/{claude,cc-termux,ccp}"));
+    console.log("  shims    : " + (t.win ? ROOT + "\\bin\\*.cmd" : "~/.local/bin/claude and " + (process.env.PREFIX || (t.termux ? "/data/data/com.termux/files/usr" : "/usr/local")) + "/bin/{cc-termux,ccp}"));
     return;
   }
   fs.mkdirSync(ROOT, { recursive: true });
@@ -318,7 +318,6 @@ function installShims(t) {
     fs.mkdirSync(path.dirname(dst), { recursive: true });
     fs.copyFileSync(srcBin, dst);
     fs.chmodSync(dst, 0o755);
-    fs.writeFileSync(path.join(ROOT, "VERSION"), ver + "\n");
     for (const stale of [dst + ".orig", dst + ".orig.json"]) { try { fs.rmSync(stale, { force: true }); } catch (e) { } }
     step("Claude Code " + ver + " installed into your device (" + dst + ")");
     log("source: registry.npmjs.org/@anthropic-ai/claude-code-" + t.pkg + " (official Anthropic package)");
@@ -344,6 +343,8 @@ function installShims(t) {
       if (patched.status === 0) { fs.writeFileSync(path.join(ROOT, ".direct-exec"), ""); log("ELF interpreter patched (direct exec)"); }
       else log("patchelf unavailable: loader mode (self-relaunch may be limited)");
     }
+    // Only record success after the binary and its loader are in place.
+    fs.writeFileSync(path.join(ROOT, "VERSION"), ver + "\n");
   }
 
   const cfgPath = CFG;
