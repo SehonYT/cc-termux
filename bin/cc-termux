@@ -1,0 +1,432 @@
+#!/usr/bin/env node
+// Control CLI: providers, models, keys, diagnostics, patches.
+
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { execFileSync } from "node:child_process";
+
+const ROOT = process.env.CC_TERMUX_ROOT || path.join(os.homedir(), ".local", "share", "cc-termux");
+const CFG = process.env.CC_TERMUX_CONFIG || path.join(os.homedir(), ".config", "cc-termux", "config.json");
+const CATALOG = path.join(os.homedir(), ".cache", "cc-termux", "catalog.json");
+const load = () => JSON.parse(fs.readFileSync(CFG, "utf8"));
+const save = (c) => { fs.mkdirSync(path.dirname(CFG), { recursive: true }); fs.writeFileSync(CFG, JSON.stringify(c, null, 2) + "\n", { mode: 0o600 }); };
+const port = (c) => (c.listen && c.listen.port) || 8788;
+const KEYS_PATH = path.join(path.dirname(CFG), 'keys.json');
+const loadKeys = () => { try { return JSON.parse(fs.readFileSync(KEYS_PATH, 'utf8')); } catch { return {}; } };
+const saveKeys = (k) => { fs.mkdirSync(path.dirname(KEYS_PATH), { recursive: true }); fs.writeFileSync(KEYS_PATH, JSON.stringify(k, null, 2) + '\n', { mode: 0o600 }); };
+const mask = (k) => !k ? "(not set)" : k.startsWith("env:") ? k : k.slice(0, 6) + "..." + k.slice(-4);
+
+const SETTINGS_PATH = path.join(os.homedir(), ".claude", "settings.json");
+const visibleProviders = (c) => Object.entries(c.providers || {}).filter(([, p]) => !p.hidden);
+const composite = (p, id) => (id ? "prov/" + p + "/" + id : id);
+const fmtCtx = (n) => (!n ? "?" : n >= 1e6 ? (n / 1e6).toFixed(n % 1e6 ? 1 : 0) + "M" : n >= 1e3 ? Math.round(n / 1e3) + "K" : String(n));
+
+function rebuild(c) {
+  c.routing = {};
+  for (const [name, p] of visibleProviders(c)) {
+    for (const id of Object.keys(p.modelsById || {})) {
+      const native = id.startsWith("claude-") || id.startsWith("anthropic/");
+      c.routing[composite(name, id)] = ((native && c.providers[name + "~native"]) ? name + "~native" : name) + "::" + id;
+    }
+  }
+}
+function writePicker(c) {
+  let settings = {};
+  try { settings = JSON.parse(fs.readFileSync(SETTINGS_PATH, "utf8")); } catch (e) { settings = {}; }
+  const switchRows = visibleProviders(c).map(([name, p]) => ({
+    model: "provswitch/" + name,
+    label: "\u21c4  Switch to " + name,
+    description: "use " + (p.model || "default") + " \u00b7 " + p.type + (name === c.active ? " \u00b7 current" : ""),
+  }));
+  const options = [];
+  for (const [name, p] of visibleProviders(c)) {
+    for (const [id, info] of Object.entries(p.modelsById || {})) {
+      const isActive = name === c.active && id === (p.model || p.defaultModel);
+      options.push({
+        model: composite(name, id),
+        label: (info.name && info.name !== id ? info.name : id) + "  [" + name + "]",
+        description: (info.contextTokens ? fmtCtx(info.contextTokens) + " ctx" : "ctx unknown") +
+          (info.inUsd == null ? "" : " - $" + info.inUsd + " in / $" + info.outUsd + " out per Mtok") +
+          (isActive ? " - current" : ""),
+      });
+    }
+  }
+  settings.modelPicker = { replaceBuiltInOptions: true, options: [...switchRows, ...options] };
+  fs.mkdirSync(path.dirname(SETTINGS_PATH), { recursive: true });
+  fs.writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2) + "\n");
+  return { switchRows, options };
+}
+
+async function doctor(fix) {
+  const c = load();
+  const settingsPath = SETTINGS_PATH;
+  const ks = loadKeys();
+  const lines = [];
+  let issues = 0, fixed = 0;
+  const pass = (m) => lines.push("  \u2714 " + m);
+  const warn = (m) => { issues++; lines.push("  \u26a0 " + m); };
+  const fail = (m) => { issues++; lines.push("  \u2716 " + m); };
+
+  lines.push("cc-termux doctor" + (fix ? "  (--fix)" : ""));
+  const vis = visibleProviders(c);
+  if (!vis.length) fail("no providers configured (run: cc-termux setup)"); else pass(vis.length + " provider(s): " + vis.map(([n]) => n).join(", "));
+
+  for (const [name, p] of vis) {
+    if (!ks[name] && !p.apiKeyEnv) fail("provider " + name + " has no API key (cc-termux key " + name + " <key>)");
+    const mc = Object.keys(p.modelsById || {}).length;
+    if (!mc) warn("provider " + name + " has no cached models (run: cc-termux setup)");
+    else pass("provider " + name + ": " + p.model + "  (" + mc + " models, retries " + (p.retries || 5) + ")");
+  }
+
+  const portv = (c.listen && c.listen.port) || 8788;
+  let health = null;
+  try { health = await (await fetch("http://127.0.0.1:" + portv + "/health")).json(); } catch (e) {}
+  if (health && health.ok) pass("gateway up on " + portv + " (active: " + health.active + ")");
+  else warn("gateway not running (starts automatically on next claude run)");
+
+  let settings = {};
+  try { settings = JSON.parse(fs.readFileSync(settingsPath, "utf8")); } catch (e) {}
+  const active = c.providers[c.active] || {};
+  const wantModel = composite(c.active, active.model || active.defaultModel);
+  const sm = settings.model || "";
+  const smProv = (sm.match(/^prov\/([^/]+)\//) || [])[1];
+  if (!sm) warn("settings.model is not set (default model falls back to aliases)");
+  else if (sm.startsWith("provswitch/")) {
+    if (fix && wantModel) { settings.model = wantModel; fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n"); fixed++; pass("settings.model was a switch marker; set to " + wantModel); }
+    else warn("settings.model is a provider-switch marker (" + sm + ")");
+  } else if (smProv && !c.providers[smProv]) warn("settings.model points to removed provider " + smProv);
+  else pass("settings.model: " + sm);
+
+  const expected = vis.length + vis.reduce((n, [, p]) => n + Object.keys(p.modelsById || {}).length, 0);
+  const have = ((settings.modelPicker || {}).options || []).length;
+  if (have === expected) pass("model picker in sync (" + have + " rows)");
+  else if (fix) { const r = writePicker(c); fixed++; pass("picker rebuilt: " + r.switchRows.length + " switch rows + " + r.options.length + " models"); }
+  else fail("picker out of sync: has " + have + " rows, expected " + expected + " (cc-termux sync-picker)");
+
+  const ov = c.override;
+  if (ov) {
+    const p = c.providers[ov.provider];
+    const okModel = p && (!p.modelsById || !Object.keys(p.modelsById).length || p.modelsById[ov.model] || ov.model === p.model);
+    if (!p) { if (fix) { delete c.override; save(c); fixed++; pass("removed invalid override"); } else warn("override points to missing provider " + ov.provider); }
+    else if (!okModel) { if (fix) { c.override = { provider: ov.provider, model: p.model }; save(c); fixed++; pass("override model repaired to " + p.model); } else warn("override model " + ov.model + " is not in the catalog"); }
+    else pass("override: " + ov.provider + " -> " + (ov.model || "default"));
+  }
+
+  const gem = vis.find(([n, p]) => n === "gemini" || /generativelanguage/.test(p.baseUrl || ""));
+  if (gem) {
+    const badIds = Object.keys(gem[1].modelsById || {}).filter((id) => /tts|embedding|imagen|veo|live|aqa|native-audio/i.test(id));
+    if (!badIds.length) pass("gemini catalog has no non-chat models");
+    else if (fix) { for (const id of badIds) delete gem[1].modelsById[id]; rebuild(c); save(c); writePicker(c); fixed++; pass("pruned " + badIds.length + " non-chat gemini models"); }
+    else warn(badIds.length + " non-chat gemini models in picker (cc-termux doctor --fix)");
+  }
+
+  try {
+    const out = execFileSync(process.execPath, [path.join(ROOT, "bin", "cc-patch.mjs"), "--status"], { encoding: "utf8" });
+    const applied = (out.match(/applied/g) || []).length;
+    const pending = (out.match(/pending/g) || []).length;
+    if (pending) warn(pending + " TUI patches pending (cc-termux patch)"); else pass("TUI patches applied (" + applied + ")");
+  } catch (e) { warn("could not read patch status"); }
+
+  const ccpPath = (process.env.PREFIX || "/data/data/com.termux/files/usr") + "/bin/ccp";
+  if (fs.existsSync(ccpPath)) pass("ccp picker installed"); else warn("ccp not installed (run install.sh)");
+  try {
+    const log = path.join(os.homedir(), ".cache", "cc-termux", "gateway.log");
+    const tail = fs.readFileSync(log, "utf8").split("\n").slice(-300).join("\n");
+    let qc = {}; try { qc = JSON.parse(fs.readFileSync(path.join(os.homedir(), ".cache", "cc-termux", "quota.json"), "utf8")); } catch (e) { }
+    for (const [provider, q] of Object.entries(qc)) {
+      const age = Date.now() - new Date(q.at).getTime();
+      if (age < 7 * 24 * 3600 * 1000) warn("provider " + provider + ": recent " + q.status + (q.limit != null ? " (limit " + q.limit + ")" : "") + " at " + q.at);
+    }
+  } catch (e) { }
+  const deny = (settings.permissions && settings.permissions.deny) || [];
+  if (deny.length >= 4) pass("secret deny rules: " + deny.length); else warn("secret deny rules missing (re-run install.sh)");
+
+  try {
+    const log = path.join(os.homedir(), ".cache", "cc-termux", "gateway.log");
+    const sz = fs.statSync(log).size;
+    if (sz > 5 * 1024 * 1024) { if (fix) { fs.writeFileSync(log, ""); fixed++; pass("gateway.log truncated (" + (sz / 1e6).toFixed(1) + " MB)"); } else warn("gateway.log is " + (sz / 1e6).toFixed(1) + " MB (--fix truncates)"); }
+    else pass("gateway.log " + (sz / 1024).toFixed(0) + " KB");
+  } catch (e) {}
+
+  console.log(lines.join("\n"));
+  console.log("");
+  console.log(issues === 0 ? "all checks passed" : issues + " issue(s)" + (fix ? ", " + fixed + " fixed" : " (run: cc-termux doctor --fix)"));
+}
+const cmd = process.argv[2];
+const args = process.argv.slice(3);
+
+const HELP = [
+  "cc-termux - Claude Code on Termux with third-party providers",
+  "",
+  "  cc-termux status                 gateway + provider + model summary",
+  "  cc-termux provider [name|list|off]  list providers (\u2714 = active) or switch instantly",
+  "  cc-termux key <provider> <key>   store an API key",
+  "  cc-termux models [--all]         catalog: id, context window, price (--all includes models the key cannot use)",
+  "  cc-termux use <model-id>         switch model; sets context limit + opus/sonnet/haiku aliases automatically",
+  "  cc-termux sync                   refresh the model catalog (context windows + prices)",
+  "  cc-termux doctor [--fix]         self-check install/config/picker/secrets; --fix repairs",
+  "  cc-termux sync-picker            rebuild the /model picker from configured providers",
+  "  cc-termux setup                  add/change provider, key, models (interactive)",
+  "  cc-termux presets [--json]       list built-in free/local provider presets",
+  "  cc-termux patch [status|revert]   re-apply / inspect the TUI patches",
+  "  cc-termux test [prompt]          headless request through the gateway",
+  "  cc-termux logs                   tail gateway log",
+  "  cc-termux usage [provider]       show quota/spend (tokens.bd) or quota links",
+  "  cc-termux restart                stop the gateway (restarts on next run)",
+  "  cc-termux update                 reinstall the latest Claude Code binary",
+  "  cc-termux path                   print install/config paths",
+].join("\n");
+
+function decode(s) {
+  return s.replace(/<[^>]+>/g, " ").replace(/&amp;/g, "&").replace(/&nbsp;/g, " ").replace(/&#x27;/g, "'").replace(/\s+/g, " ").trim();
+}
+function ctxTokens(s) {
+  const m = String(s || "").match(/^([\d.]+)\s*([KMG])$/i);
+  if (!m) return null;
+  const mult = { K: 1e3, M: 1e6, G: 1e9 }[m[2].toUpperCase()];
+  return Math.round(parseFloat(m[1]) * mult);
+}
+
+async function fetchCatalog() {
+  const r = await fetch("https://tokens.bd/models");
+  const html = await r.text();
+  const rows = html.split("<tr").slice(1);
+  const models = [];
+  for (const row of rows) {
+    const cells = [...row.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map(m => decode(m[1]));
+    if (cells.length < 6) continue;
+    const idm = cells[1].match(/([A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9._-]+|[a-z0-9][a-z0-9._-]{4,})$/);
+    if (!idm) continue;
+    const id = idm[1];
+    const name = cells[1].slice(0, cells[1].length - id.length).trim();
+    const ctx = cells[3];
+    const inUsd = parseFloat((cells[4] || "").replace(/[^0-9.]/g, ""));
+    const outUsd = parseFloat((cells[5] || "").replace(/[^0-9.]/g, ""));
+    models.push({ id, name, provider: cells[2], context: ctx, contextTokens: ctxTokens(ctx), inUsd, outUsd, plans: cells[6] });
+  }
+  const r2 = await fetch("https://tokens.bd/v1/models", { headers: { authorization: "Bearer " + keyFor() } }).catch(() => null);
+  let usable = null;
+  if (r2 && r2.ok) { try { const j = await r2.json(); usable = new Set((j.data || j || []).map(m => m.id)); } catch {} }
+  for (const m of models) m.usable = usable ? usable.has(m.id) : null;
+  const out = { fetchedAt: new Date().toISOString(), models };
+  fs.mkdirSync(path.dirname(CATALOG), { recursive: true });
+  fs.writeFileSync(CATALOG, JSON.stringify(out, null, 1));
+  return out;
+}
+
+function keyFor() {
+  const c = load();
+  const p = c.providers[c.active] || {};
+  if (p.apiKey) return p.apiKey.startsWith("env:") ? (process.env[p.apiKey.slice(4)] || "") : p.apiKey;
+  return p.apiKeyEnv ? (process.env[p.apiKeyEnv] || "") : "";
+}
+
+async function catalog(force) {
+  if (!force && fs.existsSync(CATALOG)) {
+    const c = JSON.parse(fs.readFileSync(CATALOG, "utf8"));
+    if (Date.now() - new Date(c.fetchedAt).getTime() < 6 * 3600 * 1000) return c;
+  }
+  return await fetchCatalog();
+}
+
+async function health() {
+  try {
+    const c = load();
+    const r = await fetch("http://127.0.0.1:" + port(c) + "/health");
+    return await r.json();
+  } catch { return null; }
+}
+
+switch (cmd) {
+  case "status": {
+    const c = load();
+    const h = await health();
+    console.log("gateway : " + (h ? "UP  http://127.0.0.1:" + port(c) : "DOWN"));
+    console.log("active  : " + c.active);
+    for (const [name, p] of Object.entries(c.providers || {})) {
+      const model = p.model || p.defaultModel || "-";
+      const ctx = p.contextWindow ? "  ctx=" + p.contextWindow : "";
+      console.log("  " + (name === c.active ? "*" : " ") + name.padEnd(12) + String(p.type).padEnd(10) + "model=" + model + ctx + "  key=" + mask(loadKeys()[name] || (p.apiKeyEnv ? "env:" + p.apiKeyEnv : "")));
+    }
+    break;
+  }
+  case "provider": {
+    const c = load();
+    const settingsPath = path.join(os.homedir(), ".claude", "settings.json");
+    const setDefaultModel = (composite) => {
+      try {
+        const s = fs.existsSync(settingsPath) ? JSON.parse(fs.readFileSync(settingsPath, "utf8")) : {};
+        s.model = composite;
+        fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+        fs.writeFileSync(settingsPath, JSON.stringify(s, null, 2) + "\n");
+      } catch (e) { console.error("could not update settings.json:", e.message); }
+    };
+    const composite = (name, model) => model ? "prov/" + name + "/" + model : model;
+    if (args[0] === "--json") {
+      const ks = loadKeys();
+      const rows = Object.entries(c.providers || {}).filter(([, p]) => !p.hidden).map(([name, p]) => ({
+        name, active: name === c.active, model: p.model || p.defaultModel || null, type: p.type, key: mask(ks[name] || ""),
+      }));
+      console.log(JSON.stringify(rows, null, 1));
+      break;
+    }
+    if (!args[0] || args[0] === "list") {
+      for (const [name, p] of Object.entries(c.providers || {})) {
+        if (p.hidden) continue;
+        const model = p.model || p.defaultModel || "-";
+        console.log((name === c.active ? " \u2714 " : "   ") + name.padEnd(14) + String(p.type).padEnd(10) + model + "  key=" + mask(loadKeys()[name] || (p.apiKeyEnv ? "env:" + p.apiKeyEnv : "")));
+      }
+      if (c.override) console.log("override: " + c.override.provider + " -> " + (c.override.model || "default"));
+      break;
+    }
+    if (args[0] === "off") { delete c.override; save(c); console.log("override cleared; active provider: " + c.active); break; }
+    const name = args[0];
+    if (!c.providers[name]) { console.error("unknown provider:", name); console.error("known: " + Object.keys(c.providers || {}).join(", ")); process.exit(1); }
+    const p = c.providers[name];
+    c.active = name;
+    c.override = { provider: name, model: p.model || p.defaultModel || null };
+    save(c);
+    if (p.model) setDefaultModel(composite(name, p.model));
+    console.log("active provider -> " + name + " (" + (p.model || p.defaultModel) + ")");
+    console.log("the running Claude Code session switches on its next request");
+    break;
+  }
+  case "key": {
+    const c = load();
+    const [name, key] = args;
+    if (!name || !key) { console.error("usage: cc-termux key <provider> <key>"); process.exit(1); }
+    if (!c.providers[name]) { console.error("unknown provider:", name); process.exit(1); }
+    const ks = loadKeys(); ks[name] = key; saveKeys(ks);
+    console.log("stored key for " + name + " in keys.json");
+    break;
+  }
+  case "model":
+  case "use": {
+    const c = load();
+    let id = args[0];
+    if (!id) { console.error("usage: cc-termux use <model-id>   (see: cc-termux models)"); process.exit(1); }
+    const cat = await catalog(false);
+    const entry = cat.models.find(m => m.id === id);
+    if (!entry) { console.error("model not found in catalog: " + id); process.exit(1); }
+    const p = c.providers[c.active];
+    p.model = entry.id;
+    p.defaultModel = entry.id;
+    p.contextWindow = entry.contextTokens || p.contextWindow || 128000;
+    p.aliases = { opus: entry.id, sonnet: entry.id, haiku: entry.id, subagent: entry.id };
+    save(c);
+    console.log("active model -> " + entry.id + "  (" + entry.name + ", ctx " + entry.context + " = " + p.contextWindow + " tokens, $" + entry.inUsd + "/$" + entry.outUsd + " per 1M)");
+    console.log("aliases opus/sonnet/haiku/subagent -> " + entry.id);
+    console.log("restart Claude Code to apply.");
+    break;
+  }
+  case "sync": {
+    const cat = await catalog(true);
+    console.log("catalog refreshed: " + cat.models.length + " models at " + cat.fetchedAt);
+    break;
+  }
+  case "models": {
+    const cat = await catalog(false);
+    const list = cat.models.filter(m => args.includes("--all") || m.usable !== false);
+    list.sort((a, b) => a.inUsd - b.inUsd || a.outUsd - b.outUsd);
+    console.log("catalog " + cat.fetchedAt + "  (" + list.length + " models; usable by this key unless marked *)");
+    console.log("id".padEnd(44) + "ctx".padEnd(8) + "in/1M".padEnd(9) + "out/1M".padEnd(9) + "availability");
+    for (const m of list) {
+      const mark = m.usable === false ? "*" : " ";
+      console.log(mark + m.id.padEnd(43) + String(m.context).padEnd(8) + ("$" + m.inUsd).padEnd(9) + ("$" + m.outUsd).padEnd(9) + String(m.plans || ""));
+    }
+    break;
+  }
+  case "map": {
+    const c = load();
+    const [name, from, to] = args;
+    if (!name || !from || !to) { console.error("usage: cc-termux map <provider> <claude-model> <upstream-model>"); process.exit(1); }
+    if (!c.providers[name]) { console.error("unknown provider:", name); process.exit(1); }
+    c.providers[name].models = c.providers[name].models || {};
+    c.providers[name].models[from] = to; save(c);
+    console.log(name + ": " + from + " -> " + to);
+    break;
+  }
+  case "test": {
+    const prompt = args.join(" ") || "Reply with exactly: GATEWAY OK";
+    const out = execFileSync(path.join(ROOT, "bin", "claude"), ["-p", "--output-format", "json", prompt], { encoding: "utf8", timeout: 180000 });
+    try { const j = JSON.parse(out); console.log(j.result || JSON.stringify(j)); } catch { console.log(out); }
+    break;
+  }
+  case "logs": {
+    const f = path.join(os.homedir(), ".cache", "cc-termux", "gateway.log");
+    console.log(fs.readFileSync(f, "utf8").split("\n").slice(-60).join("\n"));
+    break;
+  }
+  case "restart": {
+    const pidf = path.join(os.homedir(), ".cache", "cc-termux", "gateway.pid");
+    try { process.kill(Number(fs.readFileSync(pidf, "utf8").trim())); } catch {}
+    console.log("gateway stopped; restarts on the next claude run");
+    break;
+  }
+  case "patch": {
+    const sub = args[0] === "revert" ? "--revert" : args[0] === "status" ? "--status" : "--apply";
+    execFileSync("node", [path.join(ROOT, "bin", "cc-patch.mjs"), sub], { stdio: "inherit" });
+    break;
+  }
+  case "setup": {
+    execFileSync("node", [path.join(ROOT, "bin", "cc-setup.mjs")], { stdio: "inherit" });
+    break;
+  }
+  case "update": {
+    execFileSync("bash", [path.join(ROOT, "install.sh"), "--update"], { stdio: "inherit" });
+    break;
+  }
+  case "path": {
+    console.log("root   : " + ROOT);
+    console.log("config : " + CFG);
+    break;
+  }
+  case "doctor": {
+    await doctor(args.includes("--fix"));
+    break;
+  }
+  case "sync-picker": {
+    const c = load();
+    const r = writePicker(c);
+    console.log("picker rebuilt: " + r.switchRows.length + " switch rows + " + r.options.length + " models");
+    break;
+  }
+  case "usage": {
+    const c = load();
+    const name = args[0] || c.active;
+    const p = c.providers[name];
+    if (!p) { console.error("unknown provider:", name); process.exit(1); }
+    const key = loadKeys()[name];
+    if (!key) { console.error("no key stored for " + name); process.exit(1); }
+    if (/tokens\.bd/.test(p.baseUrl || "")) {
+      const r = await fetch("https://tokens.bd/v1/tokens/usage", { headers: { authorization: "Bearer " + key } });
+      const j = await r.json();
+      console.log("provider: " + name + "  plan: " + (j.plan && j.plan.name));
+      for (const w of j.windows || []) console.log("  " + w.label + ": $" + Number(w.used).toFixed(4) + " / $" + w.limit + "  (" + w.percentUsed + "%)");
+      if (j.key) console.log("  key: monthly cap $" + j.key.monthlySpendCapUsd);
+      break;
+    }
+    console.log("provider: " + name + "  (" + p.baseUrl + ")");
+    console.log("  no usage endpoint known for this provider");
+    try {
+      const q = JSON.parse(fs.readFileSync(path.join(os.homedir(), ".cache", "cc-termux", "quota.json"), "utf8"))[name];
+      if (q) {
+        console.log("  observed upstream limit (" + q.at + "):");
+        console.log("    status " + q.status + (q.model ? "  model " + q.model : "") + (q.limit != null ? "  limit " + q.limit : "") + (q.quotaId ? "  " + q.quotaId : ""));
+        console.log("    " + q.message.slice(0, 200));
+      } else console.log("  no quota observations yet (limits are read from real 429/503 responses)");
+    } catch (e) { }
+    break;
+  }
+  case "presets": {
+    const p = JSON.parse(fs.readFileSync(path.join(ROOT, "presets.json"), "utf8"));
+    const list = p.free || [];
+    if (args.includes("--json")) { console.log(JSON.stringify(list, null, 2)); break; }
+    for (const x of list) console.log(x.id.padEnd(16) + x.name.padEnd(34) + (x.local ? "(local) " : "") + (x.noKey ? "(no key)" : "") + "  " + x.baseUrl);
+    console.log("\nadd one: cc-termux setup -> 6   (or CC_SETUP_PRESET=<id> for scripted)");
+    break;
+  }
+  default:
+    console.log(HELP);
+}

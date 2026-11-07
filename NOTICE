@@ -1,0 +1,14 @@
+cc-termux is an unofficial, community tool. It is not affiliated with, endorsed by,
+or supported by Anthropic.
+
+Claude Code is a product of Anthropic PBC and is distributed under Anthropic's
+terms. This project downloads the official package from the npm registry and runs
+it unmodified by default. It does not redistribute the Claude Code binary.
+
+The optional UI patches in bin/cc-patch.mjs modify bytes inside the locally installed
+binary so the terminal UI matches this project's provider workflow. They are
+disabled with CC_TERMUX_NO_UI_PATCH=1 and can be reverted with
+`cc-termux patch revert`. Review Anthropic's terms before using patched builds.
+
+Nothing in this repository grants a license to Claude Code or any model provider.
+Users are responsible for complying with the terms of the services they connect.

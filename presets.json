@@ -1,0 +1,127 @@
+{
+  "version": 1,
+  "free": [
+    {
+      "id": "openrouter",
+      "name": "OpenRouter (free models)",
+      "kind": "openai",
+      "baseUrl": "https://openrouter.ai/api/v1",
+      "path": "/chat/completions",
+      "keyUrl": "https://openrouter.ai/keys",
+      "filterSuffix": ":free",
+      "notes": "Free models end with :free"
+    },
+    {
+      "id": "gemini",
+      "name": "Google Gemini (AI Studio)",
+      "kind": "gemini",
+      "baseUrl": "https://generativelanguage.googleapis.com/v1beta/openai",
+      "path": "/chat/completions",
+      "keyUrl": "https://aistudio.google.com/apikey",
+      "notes": "Free tier is per-key; quota is detected from 429 responses"
+    },
+    {
+      "id": "groq",
+      "name": "Groq",
+      "kind": "openai",
+      "baseUrl": "https://api.groq.com/openai/v1",
+      "path": "/chat/completions",
+      "keyUrl": "https://console.groq.com/keys"
+    },
+    {
+      "id": "cerebras",
+      "name": "Cerebras",
+      "kind": "openai",
+      "baseUrl": "https://api.cerebras.ai/v1",
+      "path": "/chat/completions",
+      "keyUrl": "https://cloud.cerebras.ai"
+    },
+    {
+      "id": "mistral",
+      "name": "Mistral",
+      "kind": "openai",
+      "baseUrl": "https://api.mistral.ai/v1",
+      "path": "/chat/completions",
+      "keyUrl": "https://console.mistral.ai/api-keys"
+    },
+    {
+      "id": "nvidia",
+      "name": "NVIDIA NIM",
+      "kind": "openai",
+      "baseUrl": "https://integrate.api.nvidia.com/v1",
+      "path": "/chat/completions",
+      "keyUrl": "https://build.nvidia.com"
+    },
+    {
+      "id": "sambanova",
+      "name": "SambaNova",
+      "kind": "openai",
+      "baseUrl": "https://api.sambanova.ai/v1",
+      "path": "/chat/completions",
+      "keyUrl": "https://cloud.sambanova.ai"
+    },
+    {
+      "id": "huggingface",
+      "name": "HuggingFace Router",
+      "kind": "openai",
+      "baseUrl": "https://router.huggingface.co/v1",
+      "path": "/chat/completions",
+      "keyUrl": "https://huggingface.co/settings/tokens"
+    },
+    {
+      "id": "github-models",
+      "name": "GitHub Models",
+      "kind": "openai",
+      "baseUrl": "https://models.github.ai/inference",
+      "path": "/chat/completions",
+      "keyUrl": "https://github.com/settings/tokens"
+    },
+    {
+      "id": "together",
+      "name": "Together AI",
+      "kind": "openai",
+      "baseUrl": "https://api.together.xyz/v1",
+      "path": "/chat/completions",
+      "keyUrl": "https://api.together.xyz/settings/api-keys"
+    },
+    {
+      "id": "ollama",
+      "name": "Ollama (local)",
+      "kind": "openai",
+      "baseUrl": "http://127.0.0.1:11434/v1",
+      "path": "/chat/completions",
+      "local": true,
+      "noKey": true,
+      "notes": "Install Ollama, run a model, then pick it here"
+    },
+    {
+      "id": "lmstudio",
+      "name": "LM Studio (local)",
+      "kind": "openai",
+      "baseUrl": "http://127.0.0.1:1234/v1",
+      "path": "/chat/completions",
+      "local": true,
+      "noKey": true,
+      "notes": "Start the LM Studio local server first"
+    },
+    {
+      "id": "llamacpp",
+      "name": "llama.cpp server (local)",
+      "kind": "openai",
+      "baseUrl": "http://127.0.0.1:8080/v1",
+      "path": "/chat/completions",
+      "local": true,
+      "noKey": true,
+      "notes": "Run llama-server --port 8080"
+    },
+    {
+      "id": "tokens",
+      "name": "tokens.bd",
+      "kind": "openai",
+      "baseUrl": "https://tokens.bd",
+      "path": "/v1/chat/completions",
+      "keyUrl": "https://tokens.bd/dashboard/keys",
+      "notes": "Anthropic-compatible endpoint also available"
+    }
+  ]
+}
