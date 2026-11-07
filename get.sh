@@ -13,14 +13,8 @@ set -eu
 REPO="${CC_TERMUX_REPO:-SehonYT/cc-termux}"
 REF="${CC_TERMUX_REF:-main}"
 
-if [ -z "${CC_TERMUX_ARCHIVE:-}" ]; then
-  case "$REPO" in
-    SehonYT/*) echo "cc-termux: set CC_TERMUX_REPO=owner/repo (this copy still has the placeholder)" >&2; exit 1 ;;
-  esac
-fi
-
 if ! command -v node >/dev/null 2>&1; then
-  echo "cc-termux: Node.js 18+ is required (https://nodejs.org, or 'pkg install nodejs' on Termux)" >&2
+  echo "cc-termux: Node.js 18+ is required (https://nodejs.org, or pkg install nodejs on Termux)" >&2
   exit 1
 fi
 
