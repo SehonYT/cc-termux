@@ -14,7 +14,8 @@ function tmpRoot(version, sha) {
 function fakeFetch(remoteSha, remoteVersion) {
   return async (url) => ({
     ok: true,
-    json: async () => url.includes("/commits/main") ? { sha: remoteSha } : { version: remoteVersion },
+    headers: { get: (name) => (name.toLowerCase() === "etag" ? '"' + remoteSha + '"' : null) },
+    json: async () => (url.includes("package.json") ? { version: remoteVersion } : { sha: remoteSha }),
   });
 }
 
@@ -31,7 +32,7 @@ test("check detects a newer commit and caches the result", async () => {
     const first = await check({ root, fetchImpl: fakeFetch("newsha", "0.1.0"), cacheTtlMs: 0 });
     assert.equal(first.available, true);
     assert.equal(first.local.sha, "oldsha");
-    assert.equal(first.remote.sha, "newsha");
+    assert.equal(first.remote.sha, '"newsha"');
     assert.ok(fs.existsSync(path.join(root, "update-check.json")));
     const throwing = async () => { throw new Error("network down"); };
     const cached = await check({ root, fetchImpl: throwing });

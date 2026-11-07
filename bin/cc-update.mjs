@@ -35,19 +35,28 @@ export function isNewer(local, remote) {
 
 export async function remoteInfo({ repo = DEFAULT_REPO, fetchImpl = fetch } = {}) {
   const headers = { "user-agent": "cc-termux" };
-  const commit = await (async () => {
-    const r = await fetchImpl("https://api.github.com/repos/" + repo + "/commits/main", { headers, signal: AbortSignal.timeout(5000) });
-    if (!r.ok) throw new Error("commits HTTP " + r.status);
-    return (await r.json()).sha || null;
-  })();
+  let sha = null;
   let version = null;
+  // Unauthenticated, rate-limit-free update marker: the archive ETag/Last-Modified on main.
+  try {
+    const r = await fetchImpl("https://codeload.github.com/" + repo + "/tar.gz/refs/heads/main", { method: "HEAD", headers, signal: AbortSignal.timeout(5000) });
+    const etag = r.headers && typeof r.headers.get === "function" ? r.headers.get("etag") : null;
+    const modified = r.headers && typeof r.headers.get === "function" ? r.headers.get("last-modified") : null;
+    sha = (etag || modified || "").replace(/^W\//, "").replace(/"/g, "") || null;
+  } catch (e) { }
   try {
     const r = await fetchImpl("https://raw.githubusercontent.com/" + repo + "/main/package.json", { headers, signal: AbortSignal.timeout(5000) });
     if (r.ok) version = (await r.json()).version || null;
   } catch (e) { }
-  return { sha: commit, version };
+  if (!sha) {
+    // API fallback (subject to unauthenticated rate limits).
+    try {
+      const r = await fetchImpl("https://api.github.com/repos/" + repo + "/commits/main", { headers, signal: AbortSignal.timeout(5000) });
+      if (r.ok) sha = (await r.json()).sha || null;
+    } catch (e) { }
+  }
+  return { sha, version };
 }
-
 export async function check({ root = DEFAULT_ROOT, repo = DEFAULT_REPO, fetchImpl = fetch, cacheTtlMs = 12 * 3600 * 1000 } = {}) {
   const local = localInfo(root);
   const cacheFile = path.join(root, "update-check.json");

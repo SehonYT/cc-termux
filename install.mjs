@@ -225,12 +225,12 @@ function installShims(t) {
   try { spawnSync(process.execPath, [path.join(ROOT, "bin", "cc-patch.mjs"), "--apply"], { stdio: "inherit", env: { ...process.env, CC_TERMUX_ROOT: ROOT } }); } catch {}
   try { spawnSync(process.execPath, [path.join(ROOT, "bin", "cc-heal.mjs"), "--root", ROOT], { stdio: "inherit" }); } catch (e) { }
   try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(SRC, "package.json"), "utf8"));
     let sha = null;
     try {
-      const r = await fetch("https://api.github.com/repos/" + (process.env.CC_TERMUX_REPO || "SehonYT/cc-termux") + "/commits/main", { headers: { "user-agent": "cc-termux" }, signal: AbortSignal.timeout(5000) });
-      if (r.ok) sha = (await r.json()).sha || null;
+      const { remoteInfo } = await import(path.join(ROOT, "bin", "cc-update.mjs"));
+      sha = (await remoteInfo({})).sha;
     } catch (e) { }
-    const pkg = JSON.parse(fs.readFileSync(path.join(SRC, "package.json"), "utf8"));
     fs.writeFileSync(path.join(ROOT, "cc-termux.json"), JSON.stringify({ version: pkg.version, sha, installedAt: new Date().toISOString() }, null, 2) + "\n");
   } catch (e) { }
   if (!NO_SHIMS) installShims(t);
