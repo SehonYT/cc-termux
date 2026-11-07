@@ -5,6 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
+import { resolvePerf, PERF_ENV, setReducedMotion } from "./cc-perf.mjs";
 
 const ROOT = process.env.CC_TERMUX_ROOT || path.join(os.homedir(), ".local", "share", "cc-termux");
 const CFG = process.env.CC_TERMUX_CONFIG || path.join(os.homedir(), ".config", "cc-termux", "config.json");
@@ -332,6 +333,7 @@ const HELP = [
   "  cc-termux doctor [--fix]         self-check install/config/picker/secrets; --fix repairs",
   "  cc-termux diagnose               deep check: config, keys, binary, loader, gateway start",
   "  cc-termux heal                   fix PATH/settings/sample-config issues automatically",
+  "  cc-termux tune [on|off|auto]     mobile/low-end performance profile (auto on Termux)",
   "  cc-termux sync-picker            rebuild the /model picker from configured providers",
   "  cc-termux setup                  add/change provider, key, models (interactive)",
   "  cc-termux presets [--json]       list built-in free/local provider presets",
@@ -627,6 +629,23 @@ switch (cmd) {
   }
   case "heal": {
     execFileSync(process.execPath, [path.join(ROOT, "bin", "cc-heal.mjs"), "--root", ROOT], { stdio: "inherit" });
+    break;
+  }
+  case "tune": {
+    const mode = (args[0] || "status").toLowerCase();
+    const allowed = { on: "mobile", mobile: "mobile", off: "off", normal: "normal", auto: "auto", status: "status" };
+    if (!(mode in allowed)) { console.log("usage: cc-termux tune [on|off|auto|status]"); break; }
+    const c = load();
+    c.performance = { ...(c.performance || {}), mode: allowed[mode] };
+    save(c);
+    const r = resolvePerf({ mode: c.performance.mode });
+    if (mode !== "status") { setReducedMotion(os.homedir(), r.enabled); }
+    console.log("cc-termux performance: " + (r.enabled ? "ON  (" : "off (") + r.reason + ")");
+    if (r.enabled) {
+      console.log("  reduced motion: on");
+      console.log("  flags: " + Object.keys(PERF_ENV).join(", "));
+    }
+    console.log("  restart running claude sessions to apply");
     break;
   }
   default:

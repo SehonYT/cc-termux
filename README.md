@@ -299,6 +299,30 @@ The installer shows this explicitly and displays a live progress bar:
 `cc-termux update` shows the same styling and keeps the installed binary when Claude Code
 is already current (code-only update), so no unnecessary 150 MB re-download happens.
 
+## Mobile / low-end tuning
+
+Claude Code's TUI redraws and background work are expensive on phones. cc-termux enables a
+performance profile **automatically on Termux/Android**, and you can switch it manually on any OS:
+
+```bash
+cc-termux tune            # show status
+cc-termux tune on         # force on (e.g. an old laptop or a PC)
+cc-termux tune auto       # default: on for Termux/Android only
+cc-termux tune off        # disable on mobile
+CC_TERMUX_PERF=1 claude   # one-off override
+```
+
+When active it sets reduced motion (`prefersReducedMotion` in `~/.claude.json`) and these Claude Code
+flags, which turn off expensive UI/IO work while leaving models and providers untouched:
+
+- `CLAUDE_CODE_DISABLE_MOUSE`, `..._MOUSE_CLICKS` (no mouse reporting/escape traffic)
+- `CLAUDE_CODE_DISABLE_TERMINAL_TITLE`, `..._WORKING_SYNC_WATCH`, `..._STARTUP_WORK_GATE`
+- `CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS`, `..._FILE_CHECKPOINTING`, `..._AGENT_VIEW`
+- `CLAUDE_CODE_DISABLE_CRON`, `..._AUTO_MEMORY`, `..._BACKGROUND_TASKS`
+
+Feature tradeoffs while tuned: no file rewind checkpoints, no background tasks/cron, no git
+instructions in prompts, no agent view. Run `cc-termux tune off` if you need those back.
+
 ## Platform support
 
 | Host | Build used |

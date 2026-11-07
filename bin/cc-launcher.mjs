@@ -6,6 +6,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
+import { resolvePerf, applyPerfEnv, setReducedMotion } from "./cc-perf.mjs";
 
 const ROOT = process.env.CC_TERMUX_ROOT || path.join(os.homedir(), ".local", "share", "cc-termux");
 const CFG = process.env.CC_TERMUX_CONFIG || path.join(os.homedir(), ".config", "cc-termux", "config.json");
@@ -142,6 +143,14 @@ function envForChild() {
     env.ANTHROPIC_DEFAULT_HAIKU_MODEL = composite(a.haiku || model);
     env.CLAUDE_CODE_SUBAGENT_MODEL = composite(a.subagent || model);
   }
+  try {
+    const resolved = resolvePerf({ mode: (cfg.performance && cfg.performance.mode) || "auto" });
+    if (resolved.enabled) {
+      Object.assign(env, applyPerfEnv({}, resolved));
+      try { setReducedMotion(os.homedir(), true); } catch (e) { }
+      if (process.env.CC_TERMUX_PERF_VERBOSE === "1") process.stderr.write("cc-termux: performance profile: " + resolved.reason + "\n");
+    }
+  } catch (e) { }
   if (p.contextWindow) env.CLAUDE_CODE_MAX_CONTEXT_TOKENS = String(p.contextWindow);
   env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS = "1";
   env.TMPDIR = env.TMPDIR || os.tmpdir();
