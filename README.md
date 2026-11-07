@@ -209,6 +209,19 @@ CC_TERMUX_NO_UI_PATCH=1 bash install.sh   # skip on install
 
 See `NOTICE` for the caveats.
 
+## Gateway lifecycle
+
+The gateway is not a daemon. It starts when `claude` runs and stops when the last Claude Code
+session exits:
+
+- `claude` / `claude -p` -> launcher registers a session file in `~/.cache/cc-termux/sessions/`,
+  starts `proxy/server.mjs` if it is not already up, then execs Claude Code. `--version` and
+  `--help` do not start it.
+- on exit the launcher removes its session file; when no sessions remain it stops the gateway.
+- the gateway also self-exits after ~10s without live session files (managed mode).
+- concurrent sessions share one gateway; the last one to exit stops it.
+- stale instances are killed before a new gateway starts, and `cc-termux restart` stops all of them.
+
 ## Diagnostics
 
 ```bash

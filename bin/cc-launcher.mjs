@@ -16,6 +16,10 @@ function loadConfig() { try { return JSON.parse(fs.readFileSync(CFG, "utf8")); }
 const cfg = loadConfig();
 const port = (cfg.listen && cfg.listen.port) || 8788;
 const base = "http://127.0.0.1:" + port;
+const SESSIONS = path.join(CACHE, "sessions");
+fs.mkdirSync(SESSIONS, { recursive: true });
+const sessionFile = path.join(SESSIONS, process.pid + ".session");
+let sessionRegistered = false;
 let gwLog = null;
 try { gwLog = fs.openSync(path.join(CACHE, "gateway.log"), "a"); } catch {}
 
@@ -23,13 +27,50 @@ async function healthy() {
   try { const r = await fetch(base + "/health", { signal: AbortSignal.timeout(1000) }); return r.ok; } catch { return false; }
 }
 
+function gatewayPids() {
+  const out = [];
+  try {
+    for (const d of fs.readdirSync("/proc")) {
+      if (!/^\d+$/.test(d)) continue;
+      try {
+        const cmd = fs.readFileSync("/proc/" + d + "/cmdline", "utf8");
+        if (cmd.includes("proxy/server.mjs") && Number(d) !== process.pid) out.push(Number(d));
+      } catch {}
+    }
+  } catch {}
+  return out;
+}
+
+function stopGateway() {
+  try { const pid = Number(fs.readFileSync(path.join(CACHE, "gateway.pid"), "utf8").trim()); process.kill(pid, "SIGTERM"); } catch {}
+  for (const pid of gatewayPids()) { try { process.kill(pid, "SIGTERM"); } catch {} }
+  try { fs.unlinkSync(path.join(CACHE, "gateway.pid")); } catch {}
+}
+
+function hasLiveSessions() {
+  try {
+    return fs.readdirSync(SESSIONS).some((f) => {
+      if (!f.endsWith(".session")) return false;
+      try {
+        const pid = Number(fs.readFileSync(path.join(SESSIONS, f), "utf8").trim());
+        process.kill(pid, 0);
+        return true;
+      } catch { try { fs.unlinkSync(path.join(SESSIONS, f)); } catch {} ; return false; }
+    });
+  } catch { return false; }
+}
+
 async function ensureGateway() {
   if (await healthy()) return;
+  // remove stale instances so a fresh one can bind the port
+  for (const pid of gatewayPids()) { try { process.kill(pid, "SIGKILL"); } catch {} }
   const server = path.join(ROOT, "proxy", "server.mjs");
   if (!fs.existsSync(server)) { console.error("cc-launcher: gateway missing at " + server); process.exit(1); }
+  fs.writeFileSync(sessionFile, String(process.pid));
+  sessionRegistered = true;
   const child = spawn(process.execPath, [server], {
     detached: true, stdio: ["ignore", gwLog ?? "ignore", gwLog ?? "ignore"],
-    env: { ...process.env, CC_TERMUX_CONFIG: CFG },
+    env: { ...process.env, CC_TERMUX_CONFIG: CFG, CC_TERMUX_MANAGED: "1" },
   });
   child.unref();
   try { fs.writeFileSync(path.join(CACHE, "gateway.pid"), String(child.pid)); } catch {}
@@ -78,7 +119,9 @@ function envForChild() {
 }
 
 (async () => {
-  await ensureGateway();
+  const argv = process.argv.slice(2);
+  const trivial = argv.some((a) => a === "--version" || a === "-v" || a === "--help" || a === "-h");
+  if (!trivial) await ensureGateway();
   const env = envForChild();
   const isWin = process.platform === "win32";
   const bin = path.join(ROOT, "bin", isWin ? "claude.exe" : "claude.bin");
@@ -91,7 +134,14 @@ function envForChild() {
       if (loader) { args = [bin, ...args]; cmd = path.join(ROOT, "lib", loader); }
     } catch {}
   }
+  const cleanup = () => {
+    if (!sessionRegistered) return;
+    try { fs.unlinkSync(sessionFile); } catch {}
+    if (!hasLiveSessions()) stopGateway();
+  };
+  process.on("exit", cleanup);
+  for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"]) process.on(sig, () => { cleanup(); process.exit(130); });
   const child = spawn(cmd, args, { stdio: "inherit", env });
-  child.on("exit", (code, signal) => process.exit(signal ? 1 : code ?? 0));
-  child.on("error", (e) => { console.error("cc-launcher: " + e.message); process.exit(1); });
+  child.on("exit", (code, signal) => { cleanup(); process.exit(signal ? 1 : code ?? 0); });
+  child.on("error", (e) => { console.error("cc-launcher: " + e.message); cleanup(); process.exit(1); });
 })();

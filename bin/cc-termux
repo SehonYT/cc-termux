@@ -164,6 +164,60 @@ async function doctor(fix) {
   console.log("");
   console.log(issues === 0 ? "all checks passed" : issues + " issue(s)" + (fix ? ", " + fixed + " fixed" : " (run: cc-termux doctor --fix)"));
 }
+async function diagnose() {
+  const c = (() => { try { return load(); } catch (e) { return null; } })();
+  const hdr = (s) => console.log("\n" + s);
+  hdr("cc-termux diagnose");
+  console.log("  node      " + process.version + "  " + process.platform + "/" + process.arch);
+  console.log("  root      " + ROOT + "  exists=" + fs.existsSync(ROOT));
+  console.log("  config    " + CFG + "  exists=" + fs.existsSync(CFG));
+  if (!c) console.log("  config    INVALID JSON");
+  else {
+    const vis = Object.entries(c.providers || {}).filter(([, p]) => !p.hidden);
+    const ks = loadKeys();
+    console.log("  providers " + (vis.length ? vis.map(([n, p]) => n + "(" + (ks[n] ? "key" : "no key") + ")").join(", ") : "none"));
+    console.log("  active    " + (c.active || "(none)") + "  override=" + JSON.stringify(c.override || null));
+    console.log("  port      " + ((c.listen && c.listen.port) || 8788));
+  }
+  const bin = path.join(ROOT, "bin", process.platform === "win32" ? "claude.exe" : "claude.bin");
+  let bstat = null; try { bstat = fs.statSync(bin); } catch (e) {}
+  console.log("  binary    " + bin + (bstat ? "  " + (bstat.size / 1e6).toFixed(1) + " MB" : "  MISSING"));
+  console.log("  direct    " + fs.existsSync(path.join(ROOT, ".direct-exec")));
+  try { console.log("  loader    " + fs.readdirSync(path.join(ROOT, "lib")).join(", ")); } catch (e) { console.log("  loader    none"); }
+  console.log("  LD_PRELOAD " + (process.env.LD_PRELOAD || "(none)"));
+  for (const k of ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY"]) if (process.env[k]) console.log("  " + k + " " + process.env[k]);
+  const port = (c && c.listen && c.listen.port) || 8788;
+  let health = null;
+  try { health = await (await fetch("http://127.0.0.1:" + port + "/health", { signal: AbortSignal.timeout(1500) })).json(); } catch (e) {}
+  let pids = [];
+  try {
+    for (const d of fs.readdirSync("/proc")) {
+      if (!/^\d+$/.test(d)) continue;
+      try { const cmd = fs.readFileSync("/proc/" + d + "/cmdline", "utf8"); if (cmd.includes("proxy/server.mjs") && Number(d) !== process.pid) pids.push(Number(d)); } catch (e) {}
+    }
+  } catch (e) {}
+  console.log("  gateway   " + (health ? "UP active=" + health.active : "DOWN") + "  pids=" + JSON.stringify(pids));
+  if (!health) {
+    hdr("gateway start attempt");
+    const { spawn } = await import("node:child_process");
+    const child = spawn(process.execPath, [path.join(ROOT, "proxy", "server.mjs")], { env: { ...process.env, CC_TERMUX_CONFIG: CFG }, stdio: ["ignore", "pipe", "pipe"] });
+    let buf = ""; child.stdout.on("data", (d) => buf += d); child.stderr.on("data", (d) => buf += d);
+    let started = false;
+    for (let i = 0; i < 30; i++) {
+      try { health = await (await fetch("http://127.0.0.1:" + port + "/health", { signal: AbortSignal.timeout(500) })).json(); started = true; break; } catch (e) {}
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    console.log("  started: " + (started ? "yes" : "no"));
+    if (buf.trim()) console.log((buf.trim()).split("\n").slice(-8).join("\n"));
+    try { child.kill(); } catch (e) {}
+  }
+  hdr("hints");
+  if (!c || !Object.keys(c.providers || {}).length) console.log("  - no provider configured: run: cc-termux setup");
+  if (process.env.HTTP_PROXY || process.env.HTTPS_PROXY) console.log("  - proxy env is set; add 127.0.0.1 to NO_PROXY");
+  if (!bstat) console.log("  - binary missing: re-run the installer");
+  if (pids.length > 1) console.log("  - duplicate gateways: cc-termux restart");
+}
+
 const cmd = process.argv[2];
 const args = process.argv.slice(3);
 
@@ -177,6 +231,7 @@ const HELP = [
   "  cc-termux use <model-id>         switch model; sets context limit + opus/sonnet/haiku aliases automatically",
   "  cc-termux sync                   refresh the model catalog (context windows + prices)",
   "  cc-termux doctor [--fix]         self-check install/config/picker/secrets; --fix repairs",
+  "  cc-termux diagnose               deep check: config, keys, binary, loader, gateway start",
   "  cc-termux sync-picker            rebuild the /model picker from configured providers",
   "  cc-termux setup                  add/change provider, key, models (interactive)",
   "  cc-termux presets [--json]       list built-in free/local provider presets",
@@ -445,6 +500,10 @@ switch (cmd) {
     if (args.includes("--json")) { console.log(JSON.stringify(list, null, 2)); break; }
     for (const x of list) console.log(x.id.padEnd(16) + x.name.padEnd(34) + (x.local ? "(local) " : "") + (x.noKey ? "(no key)" : "") + "  " + x.baseUrl);
     console.log("\nadd one: cc-termux setup -> 6   (or CC_SETUP_PRESET=<id> for scripted)");
+    break;
+  }
+  case "diagnose": {
+    await diagnose();
     break;
   }
   default:

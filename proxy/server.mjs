@@ -637,6 +637,23 @@ const server = http.createServer(async (req, res) => {
 });
 
 const port = (CONFIG.listen && CONFIG.listen.port) || 8788;
+if (process.env.CC_TERMUX_MANAGED === '1') {
+  const SESS = path.join(os.homedir(), '.cache', 'cc-termux', 'sessions');
+  let idle = 0;
+  setInterval(() => {
+    let alive = 0;
+    try {
+      for (const f of fs.readdirSync(SESS)) {
+        if (!f.endsWith('.session')) continue;
+        try { process.kill(Number(fs.readFileSync(path.join(SESS, f), 'utf8').trim()), 0); alive++; }
+        catch (e) { try { fs.unlinkSync(path.join(SESS, f)); } catch (e2) { } }
+      }
+    } catch (e) { }
+    idle = alive === 0 ? idle + 1 : 0;
+    if (idle >= 2) { LOG('no sessions left, shutting down'); process.exit(0); }
+  }, 5000).unref();
+}
+
 server.listen(port, (CONFIG.listen && CONFIG.listen.host) || '127.0.0.1', () => {
   LOG('gateway listening on', port, 'active=' + CONFIG.active, 'config=' + CONFIG_PATH);
 });
