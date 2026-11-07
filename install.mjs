@@ -87,7 +87,7 @@ function pkgTarballUrl(pkg, ver) {
 }
 
 function copyAssets() {
-  const files = ["proxy/server.mjs", "bin/cc-launcher.mjs", "bin/cc-setup.mjs", "bin/cc-termux", "bin/cc-env.mjs", "bin/cc-patch.mjs", "bin/ccp.mjs", "bin/cc-heal.mjs", "bin/cc-platform.mjs", "bin/cc-tar.mjs", "bin/cc-update.mjs", "patches.json", "presets.json", "config.example.json", "install.mjs", "install.sh", "install.ps1", "get.sh", "get.ps1", "README.md", "LICENSE", "NOTICE"];
+  const files = ["proxy/server.mjs", "bin/cc-launcher.mjs", "bin/cc-setup.mjs", "bin/cc-termux", "bin/cc-env.mjs", "bin/cc-patch.mjs", "bin/ccp.mjs", "bin/cc-heal.mjs", "bin/cc-platform.mjs", "bin/cc-tar.mjs", "bin/cc-update.mjs", "patches.json", "presets.json", "config.example.json", "install.mjs", "install.sh", "install.ps1", "get.sh", "get.ps1", "scripts/ensure-node.sh", "package.json", "README.md", "LICENSE", "NOTICE"];
   for (const f of files) {
     const from = path.join(SRC, f);
     const to = path.join(ROOT, f);
