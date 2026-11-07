@@ -29,7 +29,7 @@ test("patcher applies known anchors, is idempotent and skips unknown ones", () =
     assert.equal(run(root, "--apply").status, 0);
     const patched = fs.readFileSync(path.join(root, "bin", process.platform === "win32" ? "claude.exe" : "claude.bin"), "utf8");
     assert.match(patched, /Switch between AI providers/);
-    assert.ok(fs.existsSync(path.join(root, "bin", "claude.bin.orig")));
+    assert.ok(fs.existsSync(path.join(root, "bin", (process.platform === "win32" ? "claude.exe" : "claude.bin") + ".orig")));
     assert.match(run(root, "--apply").stdout, /nothing to do/);
     assert.equal(run(root, "--revert").status, 0);
     assert.match(fs.readFileSync(path.join(root, "bin", process.platform === "win32" ? "claude.exe" : "claude.bin"), "utf8"), /Switch between Claude models/);
