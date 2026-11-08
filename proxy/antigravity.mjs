@@ -1,6 +1,9 @@
 // Google Antigravity (Cloud Code API) adapter for the local gateway.
 // Translates Anthropic Messages <-> Gemini generateContent and streams SSE.
 import crypto from "node:crypto";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { ensureAccessToken, loadCredentials, GENERATE_URL, antigravityHeaders } from "../bin/cc-antigravity.mjs";
 
 const MODEL_ALIASES = {
@@ -34,18 +37,28 @@ function textOf(content) {
   return content.filter((b) => b && b.type === "text").map((b) => b.text || "").join("");
 }
 
+const SCHEMA_DENY = new Set([
+  "$schema", "$defs", "definitions", "$ref", "$comment", "$id", "$anchor", "additionalProperties",
+  "propertyNames", "patternProperties", "title", "const", "default", "examples", "exclusiveMinimum",
+  "exclusiveMaximum", "minimum", "maximum", "multipleOf", "minLength", "maxLength", "pattern", "format",
+  "uniqueItems", "minItems", "maxItems", "minProperties", "maxProperties", "readOnly", "writeOnly",
+  "deprecated", "if", "then", "else", "not", "oneOf", "anyOf", "allOf", "dependencies", "dependentRequired",
+  "dependentSchemas", "contains", "unevaluatedProperties", "unevaluatedItems", "$dynamicRef", "$recursiveRef",
+]);
 function cleanSchema(schema) {
   if (!schema || typeof schema !== "object") return schema;
   if (Array.isArray(schema)) return schema.map(cleanSchema);
   const out = {};
   for (const [k, v] of Object.entries(schema)) {
-    if (["$schema", "$defs", "definitions", "$ref", "$comment", "additionalProperties", "title", "x-" ].some((x) => (x.endsWith("-") ? k.startsWith(x) : k === x))) continue;
+    if (SCHEMA_DENY.has(k) || k.startsWith("x-")) continue;
     if (k === "properties" && v && typeof v === "object") {
       out.properties = {};
       for (const [pk, pv] of Object.entries(v)) out.properties[pk] = cleanSchema(pv);
     } else if (k === "items") out.items = cleanSchema(v);
-    else if (k === "type" && typeof v === "string") out.type = v.toLowerCase();
-    else out[k] = cleanSchema(v);
+    else if (k === "type") {
+      if (Array.isArray(v)) { out.type = String(v[0] || "string").toLowerCase(); if (v.includes("null")) out.nullable = true; }
+      else out.type = String(v).toLowerCase();
+    } else out[k] = cleanSchema(v);
   }
   return out;
 }
@@ -147,6 +160,13 @@ export async function proxyAntigravity(req, res, route, body, { anthropicError }
   let token = creds.access_token;
   try { token = await ensureAccessToken(creds); } catch (e) { return anthropicError(res, 401, "authentication_error", e.message); }
   const envelope = anthropicToGemini(body, upstreamModel(route.model), creds);
+  if (process.env.CC_TERMUX_ANTIGRAVITY_DEBUG === "1") {
+    try {
+      const dir = path.join(os.homedir(), ".cache", "cc-termux");
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, "antigravity-request.json"), JSON.stringify(envelope, null, 2) + "\n");
+    } catch (e) { }
+  }
   const sendUpstream = async (accessToken) => fetch(GENERATE_URL, {
     method: "POST",
     headers: antigravityHeaders(accessToken, { accept: "text/event-stream" }),
@@ -164,10 +184,14 @@ export async function proxyAntigravity(req, res, route, body, { anthropicError }
   }
   if (!upstream.ok) {
     const text = await upstream.text();
+    console.error(new Date().toISOString(), "antigravity upstream", upstream.status, text.slice(0, 500));
     let msg = text.slice(0, 600);
     try { const j = JSON.parse(text); msg = (j.error && (j.error.message || j.error.status)) || msg; } catch (e) { }
-    const type = upstream.status === 401 ? "authentication_error" : upstream.status === 429 ? "rate_limit_error" : "api_error";
-    return anthropicError(res, upstream.status, type, "Antigravity upstream " + upstream.status + ": " + msg);
+    const quota = upstream.status === 429 && /RESOURCE_EXHAUSTED|quota|exhausted|rate.?limit/i.test(text);
+    const status = quota ? 400 : upstream.status;
+    const type = upstream.status === 401 ? "authentication_error" : quota ? "invalid_request_error" : upstream.status === 429 ? "rate_limit_error" : "api_error";
+    const suffix = quota ? " (Antigravity quota for this model is exhausted/reset; choose another model with /model)" : "";
+    return anthropicError(res, status, type, "Antigravity upstream " + upstream.status + ": " + msg + suffix);
   }
   const reader = upstream.body.getReader();
   const dec = new TextDecoder();

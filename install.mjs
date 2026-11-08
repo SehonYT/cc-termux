@@ -186,6 +186,24 @@ function looksLikeShim(file) {
   } catch (e) { return false; }
 }
 
+function stopManagedGateway() {
+  const target = path.join(ROOT, "proxy", "server.mjs");
+  let pids = [];
+  try {
+    for (const d of fs.readdirSync("/proc")) {
+      if (!/^\d+$/.test(d)) continue;
+      try {
+        const cmd = fs.readFileSync("/proc/" + d + "/cmdline", "utf8");
+        const pid = Number(d);
+        if (pid !== process.pid && pid !== process.ppid && cmd.split("\0").includes(target)) pids.push(pid);
+      } catch (e) { }
+    }
+  } catch (e) { }
+  for (const pid of pids) { try { process.kill(pid, "SIGTERM"); } catch (e) { } }
+  try { fs.unlinkSync(path.join(os.homedir(), ".cache", "cc-termux", "gateway.pid")); } catch (e) { }
+  if (pids.length) log("stopped running gateway so the new code loads on next launch");
+}
+
 function installShims(t) {
   const node = process.execPath;
   const scripts = {
@@ -413,6 +431,7 @@ function installShims(t) {
     if (commitDate) stamp.updatedAt = commitDate;
     fs.writeFileSync(path.join(ROOT, "cc-termux.json"), JSON.stringify(stamp, null, 2) + "\n");
   } catch (e) { }
+  stopManagedGateway();
   await askPerformance();
   if (!NO_SHIMS) installShims(t);
   try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}

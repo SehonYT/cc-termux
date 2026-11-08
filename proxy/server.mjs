@@ -380,8 +380,8 @@ function abortOnClose(req, res) {
   const ac = new AbortController();
   const onClose = () => { if (!res.writableEnded) { try { ac.abort(); } catch (e) { } } };
   res.once('close', onClose);
-  req.once('aborted', onClose);
-  return { signal: ac.signal, cleanup: () => { try { res.removeListener('close', onClose); req.removeListener('aborted', onClose); } catch (e) { } } };
+  if (req) req.once('aborted', onClose);
+  return { signal: ac.signal, cleanup: () => { try { res.removeListener('close', onClose); if (req) req.removeListener('aborted', onClose); } catch (e) { } } };
 }
 
 function anthropicError(res, status, type, message) {
@@ -748,6 +748,7 @@ const server = http.createServer(async (req, res) => {
       let route;
       try { route = pickRoute(model); } catch (e) { return anthropicError(res, 400, 'invalid_request_error', e.message); }
       LOG('REQ', route.name, '->', route.model, 'stream=' + !!body.stream, 'tools=' + (body.tools || []).length);
+      if (route.provider.type === 'antigravity') return await proxyAntigravity(req, res, route, body, { anthropicError });
       if (route.provider.type === 'anthropic') return await proxyAnthropic(res, route, body, req);
       if (responsesApi(route.provider, route.model) === 'responses') return await proxyResponses(res, route, body);
       return await proxyOpenAI(res, route, body);

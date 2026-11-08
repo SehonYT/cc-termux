@@ -193,7 +193,7 @@ function describe(m) {
   return (m.name && m.name !== m.id ? bold(m.name) + "  " : "") + dim(m.id) + "  " + ctx + price;
 }
 
-async function pickModel(models, prompt) {
+async function pickModel(models, prompt, defaultId) {
   const sorted = sortModels(models);
   const pageSize = 15;
   let page = 0;
@@ -202,8 +202,10 @@ async function pickModel(models, prompt) {
     const start = page * pageSize;
     console.log();
     sorted.slice(start, start + pageSize).forEach((m, i) => console.log("  " + String(start + i + 1).padStart(3) + ". " + describe(m)));
-    console.log(dim("  page " + (page + 1) + "/" + pages + "   n = next page, p = prev page, or type a number"));
-    const a = await ask(prompt + " > ");
+    const def = defaultId ? sorted.find((m) => m.id === defaultId) : null;
+    console.log(dim("  page " + (page + 1) + "/" + pages + "   n = next page, p = prev page, or type a number" + (def ? "   Enter = " + def.id : "")));
+    const a = await ask(prompt + (def ? " [" + def.id + "]" : "") + " > ");
+    if (!a && def) return def;
     if (a.length > 1 && !/^\d+$/.test(a)) {
       const hits = sorted.filter((m) => (m.id + " " + (m.name || "")).toLowerCase().includes(a.toLowerCase()));
       if (hits.length) {
@@ -410,7 +412,7 @@ async function presetFlow(c, presetOverride) {
     const amodels = presetStaticModels(preset);
     if (!amodels.length) { console.log(cyan("  no Antigravity models configured")); return null; }
     console.log(cyan("  \u2714 " + amodels.length + " Antigravity models available" + (creds.email ? " for " + creds.email : "")));
-    const amain = await pickModel(amodels, "Main model");
+    const amain = await pickModel(amodels, "Main model", "claude-sonnet-4-6");
     const existingA = visible(c).find(([n, p]) => p.type === "antigravity" || n === "antigravity");
     const aname = existingA ? existingA[0] : providerName(c, "antigravity");
     addProvider(c, aname, {
@@ -486,7 +488,7 @@ async function envMode() {
       creds = await antigravityEnsureProject({ log: () => { } });
       const amodels = presetStaticModels(preset);
       const want = process.env.CC_SETUP_MODEL || "";
-      const main = (want && amodels.find((m) => m.id === want)) || amodels[0];
+      const main = (want && amodels.find((m) => m.id === want)) || amodels.find((m) => m.id === "claude-sonnet-4-6") || amodels[0];
       if (!main) throw new Error("no antigravity models");
       const c0 = loadCfg();
       const existing = visible(c0).find(([n, p]) => p.type === "antigravity" || n === "antigravity");

@@ -14,6 +14,7 @@ fs.mkdirSync(cfgDir, { recursive: true });
 let server;
 let port;
 let lastEnvelope = null;
+let generateMode = 'ok';
 
 test.before(async () => {
   server = http.createServer((req, res) => {
@@ -40,6 +41,10 @@ test.before(async () => {
       }
       if (u.pathname === "/generate") {
         lastEnvelope = json();
+        if (generateMode === "quota") {
+          res.writeHead(429, { "content-type": "application/json" });
+          return res.end(JSON.stringify({ error: { code: 429, message: "Resource has been exhausted (e.g. check quota).", status: "RESOURCE_EXHAUSTED" } }));
+        }
         res.writeHead(200, { "content-type": "text/event-stream" });
         res.write("data: " + JSON.stringify({ response: { candidates: [{ content: { parts: [{ text: "hello " }, { text: "world" }] }, finishReason: "STOP" }], usageMetadata: { promptTokenCount: 7, candidatesTokenCount: 2 } } }) + "\n\n");
         return res.end();
@@ -89,7 +94,7 @@ test("request translation maps text, system and tools", async () => {
       { role: "assistant", content: [{ type: "tool_use", id: "toolu_1", name: "read", input: { path: "/x" } }] },
       { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_1", content: "ok" }] },
     ],
-    tools: [{ name: "read", description: "read a file", input_schema: { type: "object", properties: { path: { type: "string" } }, required: ["path"], additionalProperties: false } }],
+    tools: [{ name: "read", description: "read a file", input_schema: { type: "object", properties: { path: { type: "string", minLength: 1, exclusiveMinimum: 0 } }, required: ["path"], additionalProperties: false } }],
   }, "claude-sonnet-4-6", { project_id: "project-123" });
   assert.equal(envelope.project, "project-123");
   assert.equal(envelope.model, "claude-sonnet-4-6");
@@ -97,6 +102,8 @@ test("request translation maps text, system and tools", async () => {
   assert.equal(envelope.request.systemInstruction.parts[0].text, "be brief");
   assert.equal(envelope.request.generationConfig.maxOutputTokens, 1234);
   assert.equal(envelope.request.tools[0].functionDeclarations[0].name, "read");
+  assert.equal(envelope.request.tools[0].functionDeclarations[0].parameters.properties.path.exclusiveMinimum, undefined);
+  assert.equal(envelope.request.tools[0].functionDeclarations[0].parameters.properties.path.minLength, undefined);
   assert.ok(envelope.request.contents.some((c) => c.role === "model" && c.parts.some((p) => p.functionCall)));
   assert.ok(envelope.request.contents.some((c) => c.role === "user" && c.parts.some((p) => p.functionResponse)));
 });
@@ -162,4 +169,18 @@ test("login completes from a pasted/authorization code with mocked Google endpoi
   } finally {
     if (old === undefined) delete process.env.CC_TERMUX_ANTIGRAVITY_CODE; else process.env.CC_TERMUX_ANTIGRAVITY_CODE = old;
   }
+});
+test("quota exhaustion is reported as a fast 400, not a retryable 429", async () => {
+  const ant = await import("../bin/cc-antigravity.mjs?t=" + Date.now());
+  ant.saveCredentials({ access_token: "access-new", refresh_token: "refresh-new", expires_at: Date.now() + 3600_000, project_id: "project-123" });
+  const adapter = await import("../proxy/antigravity.mjs?t=" + Date.now());
+  generateMode = "quota";
+  const errors = [];
+  const res = { writeHead() { }, flushHeaders() { }, write() { }, end() { }, destroy() { } };
+  try {
+    await adapter.proxyAntigravity({}, res, { name: "antigravity", model: "claude-sonnet-4-6", provider: { type: "antigravity" } }, { max_tokens: 10, messages: [{ role: "user", content: "hi" }] }, { anthropicError: (_r, status, type, message) => errors.push([status, type, message]) });
+  } finally { generateMode = "ok"; }
+  assert.equal(errors.length, 1);
+  assert.equal(errors[0][0], 400);
+  assert.match(errors[0][2], /quota/i);
 });
