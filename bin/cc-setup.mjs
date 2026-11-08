@@ -326,7 +326,8 @@ async function fetchFor(kind, key, base) {
   try {
     return { models: await fetchCustomModels(norm, key, type), type, baseUrl: norm, path: type === "anthropic" ? "/v1/messages" : "/v1/chat/completions", family: "custom" };
   } catch (e) {
-    const manual = process.env.CC_SETUP_MODEL;
+    let manual = process.env.CC_SETUP_MODEL;
+    if (!manual && process.stdin.isTTY) manual = (await ask("Model ID (empty = abort; the endpoint has no /models) > ")).trim();
     if (manual) return { models: [{ id: manual, name: manual, contextTokens: Number(process.env.CC_SETUP_CONTEXT) || 128000, inUsd: null, outUsd: null }], type, baseUrl: norm, path: process.env.CC_SETUP_PATH || (type === "anthropic" ? "/v1/messages" : "/v1/chat/completions"), family: "custom" };
     throw e;
   }
@@ -541,7 +542,7 @@ async function envMode() {
   const same = visible(c).find(([, p]) => p.baseUrl === f.baseUrl);
   if (same) name = same[0];
   delete c.providers["native"];
-  addProvider(c, name, { family: f.family, type: f.type, baseUrl: f.baseUrl, path: f.path, key, models: f.models, main: main.id, contextWindow: ctx,
+  addProvider(c, name, { family: f.family, type: f.type, baseUrl: f.baseUrl, path: f.path, key, noKey: !key, models: f.models, main: main.id, contextWindow: ctx,
     aliases: { opus: main.id, sonnet: main.id, haiku: bg.id, subagent: bg.id } });
   summary(c, name);
 }
@@ -568,9 +569,9 @@ async function addFlow(c) {
     while (!base) base = await ask("Base URL is required > ");
   }
   console.log();
-  const key = await askHidden("API key (hidden) > ");
-  if (!key) { console.log(cyan("  no key entered")); return null; }
-  console.log(dim("  validating key and fetching models..."));
+  const key = await askHidden("API key (hidden, empty = no key / local gateway) > ");
+  if (!key) console.log(dim("  no key - calling the endpoint without Authorization"));
+  console.log(dim("  fetching models..."));
   let f;
   try { f = await fetchFor(kind, key, base); }
   catch (e) { console.log(cyan("  " + errText(e))); return null; }

@@ -192,6 +192,15 @@ account is entitled (paid Pro/Ultra; free/Jio AI Pro accounts do not get Argon).
 Requires an account with Antigravity access; if project discovery fails, run `agy login` once or
 add a GCP project ID. Tokens are never sent anywhere except Google.
 
+### Local gateway without an API key
+
+Yes. Run the gateway locally (or on your LAN), then `cc-termux setup` →
+**4. Custom OpenAI-compatible endpoint** (or 5 for Anthropic-compatible), enter its
+base URL (e.g. `http://127.0.0.1:8080/v1`), and leave the API key blank. If the endpoint
+has no `/models`, enter the model id manually. Claude Code then talks to cc-termux's local
+gateway, which forwards to your server. A dummy key (`local`) also works if the server
+requires any Authorization header.
+
 ## Usage
 
 ```bash
