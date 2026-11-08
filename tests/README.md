@@ -14,6 +14,8 @@ Individual suite: `node --test tests/<name>.test.mjs`.
 | File | Covers |
 |---|---|
 | `antigravity.test.mjs` | Antigravity OAuth/code paste, request translation, SSE proxy, live model/quota parsing |
+| `cli-ux.test.mjs` | first-run `status` is friendly without config/providers |
+| `statusline.test.mjs` | status line install, idempotency, custom-line preservation |
 | `assets.test.mjs` | installer ships every runtime file and every relative import |
 | `gateway.test.mjs` | empty-config error, auth, failure logging, image-aware count_tokens |
 | `get-bootstrap.test.mjs` | no-TTY piped bootstrap runs the installer |

@@ -80,7 +80,8 @@ export async function refreshStatusLine({ force = false } = {}) {
     writeStatusLine(line);
     return line;
   } catch (e) {
-    const line = "antigravity · " + model.name + " · usage ?";
+    const old = readStatusLine();
+    const line = old && old.includes("· " + model.name + " ·") ? old : "antigravity · " + model.name + " · usage ?";
     writeStatusLine(line);
     return line;
   }
@@ -119,7 +120,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     installStatusLine();
     refreshStatusLine({ force: true }).then(() => {
       console.log("status line installed in " + path.join(claudeDir(), "settings.json"));
-      console.log("full usage: /antigravity-usage");
+      console.log("restart Claude Code to see it  \u00b7  full usage: /antigravity-usage");
     }).catch((e) => { console.log("status line installed (usage refresh pending)"); });
   } else if (process.argv.includes("--refresh")) {
     refreshStatusLine({ force: true }).then((l) => console.log(l)).catch(() => { });

@@ -19,7 +19,10 @@ function atomicWrite(file, text, mode = 0o600) {
   fs.renameSync(tmp, file);
   try { fs.chmodSync(file, mode); } catch (e) { }
 }
-const load = () => JSON.parse(fs.readFileSync(CFG, "utf8"));
+const load = () => {
+  try { return JSON.parse(fs.readFileSync(CFG, "utf8")); }
+  catch (e) { return { version: 1, providers: {}, active: "", routing: {} }; }
+};
 const save = (c) => { atomicWrite(CFG, JSON.stringify(c, null, 2) + "\n", 0o600); };
 const port = (c) => (c.listen && c.listen.port) || 8788;
 const KEYS_PATH = path.join(path.dirname(CFG), 'keys.json');
@@ -68,6 +71,15 @@ function writePicker(c) {
   return { switchRows, options };
 }
 
+function antigravityState() {
+  try {
+    const f = path.join(path.dirname(CFG), "antigravity.json");
+    const c = JSON.parse(fs.readFileSync(f, "utf8"));
+    if (c && c.access_token) return { ok: true, detail: "OAuth" + (c.email ? " " + c.email : "") + (c.project_id ? " · project " + c.project_id : "") };
+    return { ok: false, detail: "not logged in (run: cc-termux antigravity login)" };
+  } catch (e) { return { ok: false, detail: "not logged in (run: cc-termux antigravity login)" }; }
+}
+
 async function doctor(fix) {
   const c = load();
   const settingsPath = SETTINGS_PATH;
@@ -83,7 +95,12 @@ async function doctor(fix) {
   if (!vis.length) fail("no providers configured (run: cc-termux setup)"); else pass(vis.length + " provider(s): " + vis.map(([n]) => n).join(", "));
 
   for (const [name, p] of vis) {
-    if (!ks[name] && !p.apiKeyEnv) fail("provider " + name + " has no API key (cc-termux key " + name + " <key>)");
+    if (p.type === "antigravity") {
+      const st = antigravityState();
+      if (!st.ok) fail("provider " + name + ": " + st.detail); else pass("provider " + name + ": " + st.detail);
+    } else if (!p.noKey && !ks[name] && !p.apiKeyEnv) {
+      fail("provider " + name + " has no API key (cc-termux key " + name + " <key>)");
+    }
     const mc = Object.keys(p.modelsById || {}).length;
     if (!mc) warn("provider " + name + " has no cached models (run: cc-termux setup)");
     else pass("provider " + name + ": " + p.model + "  (" + mc + " models, retries " + (p.retries || 5) + ")");
@@ -235,6 +252,8 @@ function resolvedClaude() {
   return c.length ? c[0] : null;
 }
 async function checkProviderKey(name, p) {
+  if (p.type === "antigravity") return antigravityState();
+  if (p.noKey) return { ok: true, detail: 'no key required' };
   const key = loadKeys()[name];
   if (!key) return { ok: false, detail: 'no key stored' };
   const timeout = (ms) => AbortSignal.timeout(ms);
@@ -267,7 +286,7 @@ async function diagnose() {
   else {
     const vis = Object.entries(c.providers || {}).filter(([, p]) => !p.hidden);
     const ks = loadKeys();
-    console.log("  providers " + (vis.length ? vis.map(([n, p]) => n + "(" + (ks[n] ? "key" : "no key") + ")").join(", ") : "none"));
+    console.log("  providers " + (vis.length ? vis.map(([n, p]) => n + "(" + (p.type === "antigravity" ? "OAuth" : p.noKey ? "no key" : (ks[n] ? "key" : "no key")) + ")").join(", ") : "none"));
     console.log("  active    " + (c.active || "(none)") + "  override=" + JSON.stringify(c.override || null));
   {
     const rc = resolvedClaude();
@@ -285,12 +304,16 @@ async function diagnose() {
   if (c) {
     for (const [name, p] of Object.entries(c.providers || {}).filter(([, q]) => !q.hidden)) {
       const res = await checkProviderKey(name, p);
-      console.log("  key " + name.padEnd(10) + (res.ok ? "OK   " : "FAIL ") + res.detail);
+      console.log("  key " + name.padEnd(12) + (res.ok ? "OK   " : "FAIL ") + res.detail);
     }
   }
   const bin = path.join(ROOT, "bin", process.platform === "win32" ? "claude.exe" : "claude.bin");
   let bstat = null; try { bstat = fs.statSync(bin); } catch (e) {}
   console.log("  binary    " + bin + (bstat ? "  " + (bstat.size / 1e6).toFixed(1) + " MB" : "  MISSING"));
+  if (!bstat) {
+    console.log("  next      install Claude Code: cc-termux update");
+    return;
+  }
   console.log("  direct    " + fs.existsSync(path.join(ROOT, ".direct-exec")));
   try { console.log("  loader    " + fs.readdirSync(path.join(ROOT, "lib")).join(", ")); } catch (e) { console.log("  loader    none"); }
   console.log("  LD_PRELOAD " + (process.env.LD_PRELOAD || "(none)"));
@@ -331,33 +354,41 @@ const cmd = process.argv[2];
 const args = process.argv.slice(3);
 
 const HELP = [
-  "cc-termux - Claude Code on Termux with third-party providers",
+  "cc-termux \u2014 Claude Code with any provider",
   "",
-  "  cc-termux status                 gateway + provider + model summary",
-  "  cc-termux provider [name|list|off]  list providers (\u2714 = active) or switch instantly",
-  "  cc-termux key <provider> <key>   store an API key",
-  "  cc-termux models [--all]         catalog: id, context window, price (--all includes models the key cannot use)",
-  "  cc-termux use <model-id>         switch model; sets context limit + opus/sonnet/haiku aliases automatically",
-  "  cc-termux sync                   refresh the model catalog (context windows + prices)",
-  "  cc-termux doctor [--fix]         self-check install/config/picker/secrets; --fix repairs",
-  "  cc-termux diagnose               deep check: config, keys, binary, loader, gateway start",
-  "  cc-termux heal                   fix PATH/settings/sample-config issues automatically",
-  "  cc-termux tune [on|off]          performance mode for phones / slow computers",
-  "  cc-termux antigravity [login]     Google Antigravity OAuth (login/status/logout/usage/models)",
-  "  cc-termux statusline [--install]  Claude Code status line (model + Antigravity quota)",
-  "  cc-termux sync-picker            rebuild the /model picker from configured providers",
-  "  cc-termux setup                  add/change provider, key, models (interactive)",
-  "  cc-termux presets [--json]       list built-in free/local provider presets",
-  "  cc-termux patch [status|revert]   re-apply / inspect the TUI patches",
-  "  cc-termux test [prompt]          headless request through the gateway",
-  "  cc-termux logs                   tail gateway log",
-  "  cc-termux errors [n]             last gateway/provider failures (structured)",
-  "  cc-termux usage [provider]       show quota/spend (tokens.bd) or quota links",
-  "  cc-termux restart                stop the gateway (restarts on next run)",
-  "  cc-termux update [--check]      update cc-termux; skips the Claude Code download when it is current",
-  "  cc-termux update --redownload  force reinstall of the Claude Code binary + patches",
-  "  cc-termux update-claude         reinstall the latest Claude Code binary only",
-  "  cc-termux path                   print install/config paths",
+  "Getting started",
+  "  setup                 interactive provider wizard (OpenRouter, Gemini, Antigravity, local...)",
+  "  status                dashboard: gateway, active provider/model, quotas",
+  "  doctor [--fix]        self-check install, config, picker, secrets",
+  "  test [prompt]         headless request through the gateway",
+  "",
+  "Providers & models",
+  "  provider [name|list]  list or switch provider",
+  "  models [--all]        model catalog with context window and price",
+  "  use <model-id>        switch model and aliases",
+  "  key <provider> <key>  store an API key",
+  "  presets [--json]      built-in provider presets",
+  "  sync-picker           rebuild the /model picker",
+  "  sync                  refresh context windows and prices",
+  "",
+  "Google Antigravity",
+  "  antigravity login     Google OAuth login",
+  "  antigravity usage     live 5h/weekly quota",
+  "  antigravity models --update   refresh models from Google",
+  "  statusline [--install]        Claude Code status line (model + quota)",
+  "",
+  "Maintenance",
+  "  update [--check]      update cc-termux (and Claude Code when needed)",
+  "  update-claude         reinstall latest Claude Code binary",
+  "  patch [status|revert] inspect or revert TUI patches",
+  "  heal                  auto-repair PATH/settings",
+  "  restart               stop the gateway (restarts on next run)",
+  "  logs / errors [n]     gateway log / recent failures",
+  "  diagnose              deep install + gateway check",
+  "  tune [on|off]         performance mode for phones",
+  "  path                  print install/config paths",
+  "",
+  "Run cc-termux <command> --help where available.",
 ].join("\n");
 
 function decode(s) {
@@ -424,14 +455,49 @@ switch (cmd) {
   case "status": {
     const c = load();
     const h = await health();
-    try { const st = JSON.parse(fs.readFileSync(path.join(ROOT, "cc-termux.json"), "utf8")); console.log("cc-termux: " + (st.version || "unknown")); } catch (e) { }
-    console.log("gateway : " + (h ? "UP  http://127.0.0.1:" + port(c) : "DOWN"));
-    console.log("active  : " + c.active);
+    const color = (code, s) => process.stdout.isTTY ? "\x1b[" + code + "m" + s + "\x1b[0m" : s;
+    const dim = (s) => color("2", s);
+    const bold = (s) => color("1", s);
+    const strip = (s) => String(s).replace(/\x1b\[[0-9;]*m/g, "");
+    const pad = (s, n) => strip(s).padEnd(n);
+    let stamp = {};
+    try { stamp = JSON.parse(fs.readFileSync(path.join(ROOT, "cc-termux.json"), "utf8")); } catch (e) { }
+    const active = c.providers && c.providers[c.active];
+    const activeModel = active && (active.modelsById && active.modelsById[active.model] ? active.modelsById[active.model].name : active.model || active.defaultModel || "-");
+    const keyState = active ? (active.type === "antigravity" ? "OAuth" : active.noKey ? "no key" : ((loadKeys()[c.active] || active.apiKeyEnv) ? "key set" : "no key")) : "";
+    console.log();
+    console.log(bold("  cc-termux") + dim("  " + (stamp.version || "dev") + "  " + process.platform + " " + process.arch));
+    console.log();
+    console.log("  gateway   " + (h ? color("32", "● UP") + dim("  http://127.0.0.1:" + port(c)) : color("33", "○ DOWN") + dim("  starts automatically with claude")));
+    console.log("  active    " + (c.active ? bold(c.active) + (active && active.type !== c.active ? dim("  " + active.type) : "") : dim("none")));
+    console.log("  model     " + (activeModel || "-") + (active && active.contextWindow ? dim("  " + Math.round(active.contextWindow / 1000) + "K ctx") : "") + dim(keyState ? "  " + keyState : ""));
+    try {
+      const sf = path.join(os.homedir(), ".cache", "cc-termux", "antigravity-status.txt");
+      if (active && active.type === "antigravity") {
+        const line = fs.readFileSync(sf, "utf8").trim();
+        if (line) console.log("  quota     " + line.replace(/^antigravity · [^·]+ · /, ""));
+      }
+    } catch (e) { }
+    console.log();
+    console.log(dim("  providers"));
     for (const [name, p] of Object.entries(c.providers || {})) {
+      if (p.hidden) continue;
       const model = p.model || p.defaultModel || "-";
-      const ctx = p.contextWindow ? "  ctx=" + p.contextWindow : "";
-      console.log("  " + (name === c.active ? "*" : " ") + name.padEnd(12) + String(p.type).padEnd(10) + "model=" + model + ctx + "  key=" + mask(loadKeys()[name] || (p.apiKeyEnv ? "env:" + p.apiKeyEnv : "")));
+      const isActive = name === c.active;
+      const marker = isActive ? color("32", "●") : dim("○");
+      const key = p.type === "antigravity" ? "OAuth" : p.noKey ? "no key" : ((loadKeys()[name] || p.apiKeyEnv) ? "key set" : "no key");
+      console.log("   " + marker + " " + pad(name, 15) + dim(pad(p.type, 12)) + pad(model, 32) + dim(key));
     }
+    if (!Object.keys(c.providers || {}).filter((n) => !c.providers[n].hidden).length) {
+      console.log(dim("   no providers yet - run: cc-termux setup"));
+    }
+    console.log();
+    if (Object.keys(c.providers || {}).filter((n) => !c.providers[n].hidden).length) {
+      console.log(dim("  next: ") + "claude" + dim("   |   /model to switch   |   /provider to switch provider   |   cc-termux doctor"));
+    } else {
+      console.log(dim("  next: ") + "cc-termux setup" + dim("   adds a provider (OpenRouter, Gemini, Antigravity, local...) "));
+    }
+    console.log();
     break;
   }
   case "provider": {
@@ -455,11 +521,14 @@ switch (cmd) {
       break;
     }
     if (!args[0] || args[0] === "list") {
+      let shown = 0;
       for (const [name, p] of Object.entries(c.providers || {})) {
         if (p.hidden) continue;
         const model = p.model || p.defaultModel || "-";
         console.log((name === c.active ? " \u2714 " : "   ") + name.padEnd(14) + String(p.type).padEnd(10) + model + "  key=" + mask(loadKeys()[name] || (p.apiKeyEnv ? "env:" + p.apiKeyEnv : "")));
+        shown++;
       }
+      if (!shown) console.log("no providers configured - run: cc-termux setup");
       if (c.override) console.log("override: " + c.override.provider + " -> " + (c.override.model || "default"));
       break;
     }

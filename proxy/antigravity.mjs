@@ -303,7 +303,7 @@ export async function proxyAntigravity(req, res, route, body, { anthropicError }
         blockKind = null; stop = "tool_use"; sawContent = true;
       }
     }
-    if (cand && cand.finishReason) stop = stopReason(cand.finishReason);
+    if (cand && cand.finishReason && stop !== "tool_use") stop = stopReason(cand.finishReason);
   };
   try {
     for (;;) {

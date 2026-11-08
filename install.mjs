@@ -295,12 +295,16 @@ function installShims(t) {
   if (!CHECK && !process.env.CC_TERMUX_NO_BANNER) {
     banner([
       "cc-termux installer",
-      "Claude Code is downloaded from Anthropic's official npm registry",
-      "(registry.npmjs.org). cc-termux does not host or redistribute it.",
+      "Claude Code + any provider  \u00b7  Termux, Linux, macOS, Windows",
     ]);
+    info("Claude Code is downloaded from Anthropic's official npm registry (registry.npmjs.org); cc-termux does not redistribute it.");
   }
   if (CHECK) {
     console.log("cc-termux install plan");
+    let ver = "?";
+    try { ver = JSON.parse(fs.readFileSync(path.join(SRC, "package.json"), "utf8")).version || "?"; } catch (e) { }
+    console.log("  version  : " + ver);
+    console.log("  node     : " + process.versions.node);
     console.log("  platform : " + process.platform + " " + process.arch);
     console.log("  termux   : " + (t.termux ? "yes" : "no"));
     console.log("  mode     : " + (t.js ? "JS fallback (2.1.112)" : "native " + t.pkg));
@@ -443,10 +447,18 @@ function installShims(t) {
   log((CODE_ONLY ? "updated " : "installed into ") + ROOT);
   if (!NO_SETUP && process.stdin.isTTY && process.stdout.isTTY) {
     console.log("starting provider setup...");
-    spawnSync(process.execPath, [path.join(ROOT, "bin", "cc-setup.mjs")], { stdio: "inherit" });
+    const setup = spawnSync(process.execPath, [path.join(ROOT, "bin", "cc-setup.mjs")], { stdio: "inherit" });
+    console.log("");
+    if (setup.status === 0) {
+      step("Ready. Start Claude Code with: claude");
+      info("Dashboard: cc-termux status   ·   repair: cc-termux doctor   ·   update: cc-termux update");
+    } else {
+      info("Setup was not completed. Run \"cc-termux setup\" when ready.");
+    }
   } else if (CODE_ONLY || NO_SETUP) {
     step("Update complete. Run \"claude\" when ready.");
+    info("Add a provider with: cc-termux setup");
   } else {
-    console.log("next: run \"claude\" (or \"cc-termux setup\") to configure a provider");
+    console.log("next: run \"cc-termux setup\" to add a provider, then \"claude\"");
   }
 })().catch((e) => fail(e.message));

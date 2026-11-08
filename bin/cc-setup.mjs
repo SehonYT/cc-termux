@@ -18,6 +18,7 @@ const SETTINGS = path.join(HOME, ".claude", "settings.json");
 const CACHE_DIR = path.join(HOME, ".cache", "cc-termux");
 const CATALOG = path.join(CACHE_DIR, "catalog.json");
 const PRESETS_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "presets.json");
+const fetchT = (url, opts = {}) => fetch(url, { ...opts, signal: AbortSignal.timeout(10000) });
 function loadPresets() { try { return JSON.parse(fs.readFileSync(PRESETS_PATH, "utf8")); } catch (e) { return { free: [] }; } }
 const ESC = String.fromCharCode(27);
 const color = (code, str) => process.stdout.isTTY ? ESC + "[" + code + "m" + str + ESC + "[0m" : str;
@@ -78,13 +79,13 @@ function parseCatalogHtml(html) {
 }
 
 async function fetchTokensModels(key) {
-  const r = await fetch("https://tokens.bd/v1/models", { headers: { authorization: "Bearer " + key } });
+  const r = await fetchT("https://tokens.bd/v1/models", { headers: { authorization: "Bearer " + key } });
   if (!r.ok) throw new Error("tokens.bd /v1/models HTTP " + r.status + " - check the API key");
   const j = await r.json();
   const ids = new Set((j.data || j || []).map(m => m.id));
   let models = [];
   try {
-    const page = await fetch("https://tokens.bd/models");
+    const page = await fetchT("https://tokens.bd/models");
     models = parseCatalogHtml(await page.text()).filter(m => ids.has(m.id));
     fs.mkdirSync(CACHE_DIR, { recursive: true });
     fs.writeFileSync(CATALOG, JSON.stringify({ fetchedAt: new Date().toISOString(), models }, null, 1));
@@ -94,7 +95,7 @@ async function fetchTokensModels(key) {
 }
 
 async function fetchOpenRouterModels(key) {
-  const r = await fetch("https://openrouter.ai/api/v1/models", { headers: key ? { authorization: "Bearer " + key } : {} });
+  const r = await fetchT("https://openrouter.ai/api/v1/models", { headers: key ? { authorization: "Bearer " + key } : {} });
   if (!r.ok) throw new Error("OpenRouter /models HTTP " + r.status);
   const j = await r.json();
   const arr = (j.data || []).map(m => ({ id: m.id, name: m.name || m.id, contextTokens: m.context_length || null,
@@ -106,7 +107,7 @@ async function fetchOpenRouterModels(key) {
 }
 
 async function fetchGeminiModels(key) {
-  const r = await fetch("https://generativelanguage.googleapis.com/v1beta/models?key=" + encodeURIComponent(key) + "&pageSize=200");
+  const r = await fetchT("https://generativelanguage.googleapis.com/v1beta/models?key=" + encodeURIComponent(key) + "&pageSize=200");
   if (!r.ok) throw new Error("Gemini models HTTP " + r.status + " - check the API key");
   const j = await r.json();
   const arr = (j.models || []).filter(m => (m.supportedGenerationMethods || []).includes("generateContent"))
@@ -128,7 +129,7 @@ async function fetchPresetModels(preset, key) {
   if (preset.modelsPath === null && (preset.models || []).length) return presetStaticModels(preset);
   const url = String(preset.baseUrl).replace(/\/$/, "") + (preset.modelsPath || "/models");
   try {
-    const r = await fetch(url, { headers: key ? { authorization: "Bearer " + key } : {} });
+    const r = await fetchT(url, { headers: key ? { authorization: "Bearer " + key } : {} });
     if (!r.ok) throw new Error(preset.name + " /models HTTP " + r.status + " - check the key");
     let j;
     try { j = await r.json(); } catch (e) { throw new Error(preset.name + " /models did not return JSON"); }
@@ -158,12 +159,12 @@ function normalizeBase(base) {
 
 async function fetchCustomModels(baseUrl, key, type) {
   const headers = key ? { authorization: "Bearer " + key } : {};
-  if (key && type === "anthropic") { headers["x-api-key"] = key; headers["anthropic-version"] = "2023-06-01"; }
+  if (type === "anthropic") { headers["anthropic-version"] = "2023-06-01"; if (key) headers["x-api-key"] = key; }
   const base = baseUrl.replace(/\/$/, "");
   let last = null;
   for (const url of [base + "/v1/models", base + "/models"]) {
     try {
-      const r = await fetch(url, { headers });
+      const r = await fetchT(url, { headers });
       if (!r.ok) { last = new Error("custom /models HTTP " + r.status); continue; }
       const j = await r.json();
       const arr = j.data || j.models || j;
@@ -314,17 +315,27 @@ function addProvider(c, name, opts) {
   return p;
 }
 
+async function ensureStatusLine() {
+  try { installStatusLine(); await refreshStatusLine({ force: true }); } catch (e) { }
+}
+
 function summary(c, name) {
   const p = c.providers[name];
   const total = visible(c).reduce((n, [, q]) => n + Object.keys(q.modelsById || {}).length, 0);
+  const model = (p.modelsById && p.modelsById[p.model] && p.modelsById[p.model].name) || p.model || "-";
+  const keyState = (p.noKey || p.type === "antigravity") ? "not required" : ((loadKeys()[name] || p.apiKeyEnv) ? "saved" : "missing");
   console.log();
-  console.log(cyan("provider: ") + name + (p.hidden ? "" : "") + "   " + p.type + "   " + p.baseUrl);
-  console.log(cyan("model   : ") + p.model + "   ctx " + p.contextWindow);
-  console.log(cyan("picker  : ") + total + " models from " + visible(c).length + " provider(s)");
+  console.log("  " + cyan("✔ Provider ready"));
+  console.log("  " + dim("provider") + "  " + bold(name) + dim("  " + p.type));
+  console.log("  " + dim("model") + "     " + model + (p.contextWindow ? dim("  " + fmtCtx(p.contextWindow) + " context") : ""));
+  console.log("  " + dim("key") + "       " + keyState);
+  console.log("  " + dim("picker") + "    " + total + " models from " + visible(c).length + " provider(s)");
   console.log();
-  console.log("run " + bold("claude") + " - the gateway restarts on next launch.");
-  console.log(dim("switch later in a session: /provider <name>   |   add more: cc-termux setup"));
+  console.log("  " + bold("Next:") + " run " + cyan("claude"));
+  console.log("  " + dim("Switch later: /model or /provider inside Claude  ·  add another: cc-termux setup"));
+  console.log();
 }
+
 
 async function fetchFor(kind, key, base) {
   if (kind === "tokens") return { models: await fetchTokensModels(key), type: "openai", baseUrl: "https://tokens.bd", path: "/v1/chat/completions", family: "tokens" };
@@ -344,6 +355,8 @@ async function fetchFor(kind, key, base) {
 
 function errText(e) {
   const m = String(e.message || e);
+  if (e && (e.name === "TimeoutError" || e.name === "AbortError" || /aborted|timeout/i.test(m))) return "request timed out - check the base URL and network";
+  if (/fetch failed|ENOTFOUND|ECONNREFUSED|EHOSTUNREACH|ENETUNREACH/i.test(m)) return "could not reach the endpoint - check the base URL, port and network";
   if (/HTTP 40[013]|API key not valid|API_KEY_INVALID/i.test(m)) return "invalid API key - check the key and its permissions (" + m + ")";
   return m;
 }
@@ -359,7 +372,7 @@ async function fetchAnyModels(p, key) {
   let lastErr;
   for (const url of candidates) {
     try {
-      const r = await fetch(url, { headers: key ? { authorization: "Bearer " + key } : {} });
+      const r = await fetchT(url, { headers: key ? { authorization: "Bearer " + key } : {} });
       if (!r.ok) { lastErr = new Error(url + " HTTP " + r.status); continue; }
       const j = await r.json();
       const arr = j.data || j.models || j;
@@ -375,7 +388,7 @@ async function fetchAnyModels(p, key) {
 }
 
 async function promptProviderKey(c, name, p) {
-  if (p.noKey) return true;
+  if (p.noKey || p.type === "antigravity") return true;
   if (p.apiKeyEnv && process.env[p.apiKeyEnv]) return true;
   if (loadKeys()[name]) return true;
   console.log();
@@ -404,10 +417,37 @@ async function presetFlow(c, presetOverride) {
   let preset = presetOverride;
   if (!preset) {
     console.log();
-    presets.forEach((p, i) => console.log("  " + String(i + 1).padStart(2) + ". " + p.name + (p.local ? "  (local)" : "") + (p.noKey ? "  (no key)" : "") + dim("  " + p.baseUrl)));
-    const a = await ask("Preset > ");
-    preset = presets[Number(a) - 1];
-    if (!preset) { console.log(cyan("  invalid preset")); return null; }
+    console.log("  " + bold("Choose a provider preset"));
+    const pageSize = 10;
+    let page = 0;
+    let query = "";
+    for (;;) {
+      const filtered = query
+        ? presets.filter((p) => (p.id + " " + p.name + " " + (p.baseUrl || "")).toLowerCase().includes(query.toLowerCase()))
+        : presets;
+      const pages = Math.max(1, Math.ceil(filtered.length / pageSize));
+      if (page >= pages) page = pages - 1;
+      const start = page * pageSize;
+      console.log();
+      filtered.slice(start, start + pageSize).forEach((p, i) => {
+        const tags = [
+          p.local ? "local" : "",
+          p.noKey ? "no key" : "",
+          p.auth === "antigravity" ? "OAuth" : "",
+        ].filter(Boolean).join(", ");
+        console.log("  " + String(start + i + 1).padStart(2) + ". " + p.name + (tags ? dim("  " + tags) : "") + dim("  " + (p.baseUrl || "")));
+      });
+      if (!filtered.length) console.log(cyan("  no matching provider"));
+      console.log(dim("  page " + (page + 1) + "/" + pages + "  ·  n/p = page  ·  type to search  ·  Enter = back"));
+      const a = await ask("Preset > ");
+      if (!a || a === "q" || a === "b") return null;
+      if (a === "n" || a === "N") { if (page < pages - 1) page++; continue; }
+      if (a === "p" || a === "P") { if (page > 0) page--; continue; }
+      const n = Number(a);
+      if (Number.isInteger(n) && n >= 1 && n <= filtered.length) { preset = filtered[n - 1]; break; }
+      query = a;
+      page = 0;
+    }
   }
   if (preset.notes) console.log(dim("  " + preset.notes));
   if (preset.auth === "antigravity") {
@@ -422,7 +462,7 @@ async function presetFlow(c, presetOverride) {
     catch (e) { console.log(cyan("  " + e.message)); return null; }
     let amodels = [];
     try { amodels = await fetchAvailableModels({ timeoutMs: 12000 }); } catch (e) { }
-    if (!amodels.length) amodels = presetStaticModels(preset);
+    if (!amodels.length) { console.log(dim("  could not fetch live models - using known catalog")); amodels = presetStaticModels(preset); }
     if (!amodels.length) { console.log(cyan("  no Antigravity models configured")); return null; }
     console.log(cyan("  \u2714 " + amodels.length + " Antigravity models available" + (creds.email ? " for " + creds.email : "")));
     const amain = await pickModel(amodels, "Main model", "claude-sonnet-4-6");
@@ -430,7 +470,7 @@ async function presetFlow(c, presetOverride) {
     const aname = existingA ? existingA[0] : providerName(c, "antigravity");
     addProvider(c, aname, {
       family: "antigravity", type: "antigravity", baseUrl: preset.baseUrl, path: preset.path,
-      key: "", models: amodels, main: amain.id, contextWindow: amain.contextTokens || 1048576,
+      key: "", noKey: true, models: amodels, main: amain.id, contextWindow: amain.contextTokens || 1048576,
       aliases: { opus: amain.id, sonnet: amain.id, haiku: amain.id, subagent: amain.id },
     });
     summary(c, aname);
@@ -462,6 +502,7 @@ async function presetFlow(c, presetOverride) {
     noKey: !!(preset.noKey || preset.local),
   });
   summary(c2, name);
+  await ensureStatusLine();
   if ((await ask("\nSend a small test request now? (y/N) > ")).toLowerCase().startsWith("y")) await runSmokeTest();
   return name;
 }
@@ -470,9 +511,29 @@ function parseFlags() {
   const a = process.argv.slice(2);
   const val = (n) => { const i = a.indexOf(n); return i >= 0 && a[i + 1] && !a[i + 1].startsWith("-") ? a[i + 1] : ""; };
   if (a.includes("--help") || a.includes("-h")) {
-    console.log("usage: cc-termux setup [--preset id] [--provider openrouter|gemini|tokens|custom]");
-    console.log("                         [--key KEY] [--model ID] [--base-url URL] [--type openai|anthropic]");
-    console.log("                         [--name NAME] [--test]");
+    console.log("usage: cc-termux setup [options]");
+    console.log("");
+    console.log("Connect Claude Code to a provider (interactive wizard by default).");
+    console.log("");
+    console.log("  Run with no arguments for the interactive wizard.");
+    console.log("");
+    console.log("  Options:");
+    console.log("    --preset <id>        use a built-in preset (openrouter, gemini, antigravity, groq, ollama...)");
+    console.log("    --provider <kind>    openrouter | gemini | tokens | custom-openai | custom-anthropic");
+    console.log("    --base-url <url>     custom endpoint (local gateway: http://127.0.0.1:8080/v1)");
+    console.log("    --key <key>          API key (omit for local/no-key gateways)");
+    console.log("    --model <id>         main model id");
+    console.log("    --background <id>    background/subagent model");
+    console.log("    --name <name>        provider name in config");
+    console.log("    --context <tokens>   context window override");
+    console.log("    --type openai|anthropic");
+    console.log("    --path <path>        request path override");
+    console.log("    --test               send a smoke-test request after setup");
+    console.log("");
+    console.log("  Examples:");
+    console.log("    cc-termux setup --preset antigravity");
+    console.log("    cc-termux setup --provider custom-openai --base-url http://127.0.0.1:8080/v1 --model local-model");
+    console.log("    cc-termux setup --preset groq --key gsk_... --test");
     process.exit(0);
   }
   const map = {
@@ -509,9 +570,9 @@ async function envMode() {
       const c0 = loadCfg();
       const existing = visible(c0).find(([n, p]) => p.type === "antigravity" || n === "antigravity");
       const name0 = process.env.CC_SETUP_NAME || (existing ? existing[0] : providerName(c0, "antigravity"));
-      addProvider(c0, name0, { family: "antigravity", type: "antigravity", baseUrl: preset.baseUrl, path: preset.path, key: "", models: amodels, main: main.id, contextWindow: main.contextTokens || 1048576, aliases: { opus: main.id, sonnet: main.id, haiku: main.id, subagent: main.id } });
+      addProvider(c0, name0, { family: "antigravity", type: "antigravity", baseUrl: preset.baseUrl, path: preset.path, key: "", noKey: true, models: amodels, main: main.id, contextWindow: main.contextTokens || 1048576, aliases: { opus: main.id, sonnet: main.id, haiku: main.id, subagent: main.id } });
       summary(c0, name0);
-      try { installStatusLine(); await refreshStatusLine({ force: true }); } catch (e) { }
+      await ensureStatusLine();
       if (opts.test) await runSmokeTest();
       return;
     }
@@ -558,20 +619,27 @@ async function envMode() {
 
 async function addFlow(c) {
   console.log();
-  console.log("  1. OpenRouter          (popular, free models available)");
-  console.log("  2. Google Gemini       (AI Studio key)");
-  console.log("  3. Free / online provider presets  (Groq, DeepSeek, xAI, NVIDIA, local Ollama...)");
-  console.log("  4. Custom OpenAI-compatible endpoint");
-  console.log("  5. Custom Anthropic-compatible endpoint");
-  console.log("  6. tokens.bd           (many models, cheap)");
+  console.log("  1. OpenRouter          " + dim("recommended - many free models"));
+  console.log("  2. Google Gemini       " + dim("AI Studio API key"));
+  console.log("  3. Free / local presets " + dim("Groq, DeepSeek, xAI, NVIDIA, Ollama, LM Studio..."));
+  console.log("  4. Custom OpenAI-compatible  " + dim("local gateway or any OpenAI endpoint"));
+  console.log("  5. Custom Anthropic-compatible  " + dim("local gateway or Anthropic endpoint"));
+  console.log("  6. tokens.bd           " + dim("many models, cheap"));
+  console.log("  7. Google Antigravity  " + dim("Google account OAuth - Gemini 3.8, Claude 4.6"));
   console.log();
   let kind = "";
   while (!kind) {
     const a = await ask("Provider [1] > ");
-    kind = ({ "": "openrouter", "1": "openrouter", "2": "gemini", "3": "preset", "p": "preset", "4": "custom-openai", "5": "custom-anthropic", "6": "tokens" })[a] || "";
-    if (!kind) console.log(cyan("  enter 1-6"));
+    kind = ({ "": "openrouter", "1": "openrouter", "2": "gemini", "3": "preset", "p": "preset", "4": "custom-openai", "5": "custom-anthropic", "6": "tokens", "7": "antigravity", "a": "antigravity" })[a] || "";
+    if (a === "b" || a === "0") return null;
+    if (!kind) console.log(cyan("  enter 1-7 (b = back)"));
   }
   if (kind === "preset") { await presetFlow(loadCfg()); return; }
+  if (kind === "antigravity") {
+    const preset = (loadPresets().free || []).find((p) => p.auth === "antigravity");
+    if (!preset) { console.log(cyan("  Antigravity preset missing")); return null; }
+    return await presetFlow(loadCfg(), preset);
+  }
   let base = "";
   if (kind.startsWith("custom")) {
     base = await ask("Base URL (e.g. https://api.example.com/v1) > ");
@@ -585,6 +653,10 @@ async function addFlow(c) {
   try { f = await fetchFor(kind, key, base); }
   catch (e) { console.log(cyan("  " + errText(e))); return null; }
   if (!f.models.length) { console.log(cyan("  no models returned - key may be invalid or have no access")); return null; }
+  if (kind.startsWith("custom")) {
+    const customPath = (await ask("Request path [" + f.path + "] > ")).trim();
+    if (customPath) f.path = customPath.startsWith("/") ? customPath : "/" + customPath;
+  }
   console.log(cyan("  \u2714 key valid - " + f.models.length + " models available"));
   const main = await pickModel(f.models, "Main model");
   const bgSame = (await ask("Use the same model for background tasks / subagents? (Y/n) > ")).toLowerCase();
@@ -601,7 +673,8 @@ async function addFlow(c) {
       if (v) aliasModels[a] = v;
     }
   }
-  const name = providerName(c, f.family);
+  const same = visible(c).find(([, p]) => p.baseUrl === f.baseUrl && p.type === f.type);
+  const name = same ? same[0] : providerName(c, f.family);
   addProvider(c, name, { family: f.family, type: f.type, baseUrl: f.baseUrl, path: f.path, key, noKey: !key, models: f.models, main: main.id, contextWindow: ctx, aliases: aliasModels });
   summary(c, name);
   if ((await ask("\nSend a small test request now? (y/N) > ")).toLowerCase().startsWith("y")) await runSmokeTest();
@@ -609,67 +682,85 @@ async function addFlow(c) {
 }
 
 async function ttyMode() {
+  let stamp = {};
+  try { stamp = JSON.parse(fs.readFileSync(path.join(ROOT, "cc-termux.json"), "utf8")); } catch (e) { }
   console.log();
-  console.log(bold("  Claude Code on Termux - provider setup"));
+  console.log(bold("  cc-termux setup"));
+  console.log(dim("  Claude Code + any provider  ·  " + (stamp.version || "dev") + "  ·  " + process.platform + " " + process.arch));
   let c = loadCfg();
-  let list = visible(c);
-  const ks0 = loadKeys();
-  const sample = list.filter(([name, p]) => !ks0[name] && !p.apiKeyEnv && !Object.keys(p.modelsById || {}).length);
-  if (list.length && sample.length === list.length) {
+  for (;;) {
+    let list = visible(c);
+    const ks0 = loadKeys();
+    const sample = list.filter(([name, p]) => !ks0[name] && !p.apiKeyEnv && !Object.keys(p.modelsById || {}).length);
+    if (list.length && sample.length === list.length) {
+      console.log();
+      console.log(cyan("  " + list.length + " provider entries look like stale sample data (no keys, no models)."));
+      if ((await ask("Remove them and start clean? (Y/n) > ")).toLowerCase() !== "n") {
+        for (const [name] of sample) delete c.providers[name];
+        c.active = ""; delete c.override;
+        saveCfg(c);
+        list = visible(c);
+      }
+    }
+    if (list.length) {
+      console.log();
+      console.log("  " + dim("#") + "  " + dim("provider".padEnd(15)) + dim("type".padEnd(12)) + dim("model"));
+      list.forEach(([name, p], i) => {
+        const model = p.model || p.defaultModel || "-";
+        const key = p.type === "antigravity" ? "Google OAuth" : p.noKey ? "no key" : ((ks0[name] || p.apiKeyEnv) ? "key saved" : "no key");
+        console.log("  " + String(i + 1).padStart(2) + (name === c.active ? color("32", " ✔ ") : "   ") + bold(name.padEnd(15)) + dim(String(p.type).padEnd(12)) + model + dim("   " + key));
+      });
+    } else {
+      console.log();
+      console.log(dim("  No providers configured yet - let's add one."));
+    }
     console.log();
-    console.log(cyan("  " + list.length + " provider entries look like sample data from an older install (no keys, no models)."));
-    if ((await ask("Remove them and start clean? (Y/n) > ")).toLowerCase() !== "n") {
-      for (const [name] of sample) delete c.providers[name];
-      c.active = ""; delete c.override;
+    console.log("  " + (list.length ? "number = switch provider   " : "") + "a = add provider   " + (list.length ? "r = remove   " : "") + "t = test   q = quit");
+    console.log();
+    const a = (await ask("Choice > ")).toLowerCase();
+    if (a === "q") return;
+    if (a === "t") { await runSmokeTest(); continue; }
+    if (a === "a" || !list.length) {
+      const added = await addFlow(c);
+      if (!added) continue;
+      if ((await ask("Add another provider? (y/N) > ")).toLowerCase().startsWith("y")) continue;
+      return;
+    }
+    if (a === "r") {
+      const pick = Number(await ask("Remove which provider? number > "));
+      const entry = list[pick - 1];
+      if (!entry) { console.log(cyan("  invalid choice")); continue; }
+      const [name] = entry;
+      if ((await ask("Remove " + name + "? (y/N) > ")).toLowerCase().startsWith("y")) {
+        delete c.providers[name];
+        delete c.providers[name + "~native"];
+        const ks = loadKeys(); delete ks[name]; delete ks[name + "~native"]; saveKeys(ks);
+        if (!c.providers[c.active]) { c.active = Object.keys(c.providers).filter((k) => !c.providers[k].hidden)[0] || ""; delete c.override; }
+        rebuild(c); saveCfg(c); writeSettings(c); stopGateway();
+        await ensureStatusLine();
+        console.log(cyan("\n  ✔ removed " + name + " - restarts on next launch"));
+      }
+      continue;
+    }
+    const n = Number(a);
+    if (Number.isInteger(n) && n >= 1 && n <= list.length) {
+      const name = list[n - 1][0];
+      const p = c.providers[name];
+      if (!(await promptProviderKey(c, name, p))) { console.log(cyan("  no key configured, provider not switched")); continue; }
+      c.active = name;
+      c.override = { provider: name, model: p.model || null };
+      rebuild(c);
       saveCfg(c);
-      list = visible(c);
+      writeSettings(c);
+      await ensureStatusLine();
+      console.log(cyan("\n  ✔ switched to ") + name + " (" + (p.model || "default") + ")");
+      console.log(dim("  running sessions switch on their next request; new sessions use this provider"));
+      return;
     }
+    console.log(cyan("  invalid choice"));
   }
-  if (list.length) {
-    console.log();
-    console.log("  Configured providers:");
-    list.forEach(([name, p], i) => {
-      console.log("   " + (i + 1) + ". " + (name === c.active ? color("32", "\u2714") : " ") + " " + bold(name.padEnd(14)) +
-        (p.model || "-") + dim("   " + p.type + "   " + ((loadKeys()[name] || p.apiKey) ? "key " + (loadKeys()[name] || p.apiKey).slice(0, 6) + "..." : "no key")));
-    });
-  }
-  console.log();
-  console.log("  " + (list.length ? "Enter a number to switch provider, " : "") + "a = add provider, r = remove provider, q = quit");
-  console.log();
-  const a = await ask("Choice > ");
-  if (a.toLowerCase() === "q") return;
-  if (a.toLowerCase() === "a" || !list.length) { await addFlow(c); return; }
-  if (a.toLowerCase() === "r") {
-    const pick = Number(await ask("Remove which provider? number > "));
-    const entry = list[pick - 1];
-    if (!entry) { console.log(cyan("  invalid choice")); return; }
-    const [name] = entry;
-    if ((await ask("Remove " + name + "? (y/N) > ")).toLowerCase().startsWith("y")) {
-      delete c.providers[name];
-      delete c.providers[name + "~native"];
-      const ks = loadKeys(); delete ks[name]; delete ks[name + "~native"]; saveKeys(ks);
-      if (!c.providers[c.active]) { c.active = Object.keys(c.providers).filter((k) => !c.providers[k].hidden)[0] || ""; delete c.override; }
-      rebuild(c); saveCfg(c); writeSettings(c); stopGateway();
-      console.log(cyan("\n  \u2714 removed " + name));
-    }
-    return;
-  }
-  const n = Number(a);
-  if (Number.isInteger(n) && n >= 1 && n <= list.length) {
-    const name = list[n - 1][0];
-    const p = c.providers[name];
-    if (!(await promptProviderKey(c, name, p))) { console.log(cyan("  no key configured, provider not switched")); return; }
-    c.active = name;
-    c.override = { provider: name, model: p.model || null };
-    rebuild(c);
-    saveCfg(c);
-    writeSettings(c);
-    console.log(cyan("\n  \u2714 switched to ") + name + " (" + (p.model || "default") + ")");
-    console.log(dim("  running sessions switch on their next request; new sessions use this provider"));
-    return;
-  }
-  console.log(cyan("  invalid choice"));
 }
+
 
 (async () => {
   try {
