@@ -225,3 +225,17 @@ test("official Antigravity catalog keeps only CLI-visible models and hides disab
   } });
   assert.deepEqual(models.map((m) => m.id).sort(), ["gemini-3.8-flash-high", "gemini-4-argon-high", "gpt-oss-120b-medium"].sort());
 });
+test("agentModelSorts drives the official list (paid Argon appears automatically)", async () => {
+  const ant = await import("../bin/cc-antigravity.mjs?t=" + Date.now());
+  const models = ant.parseAvailableModels({
+    models: {
+      "gemini-3.8-flash-high": { displayName: "Gemini 3.8 Flash (High)" },
+      "claude-sonnet-4-6": { displayName: "Claude Sonnet 4.6" },
+      "gpt-oss-120b-medium": { displayName: "GPT-OSS" },
+      "gemini-4-argon-high": { displayName: "Gemini 4 Argon (High)" },
+      "gemini-2.5-pro": { displayName: "Legacy" },
+    },
+    agentModelSorts: [{ groups: [{ modelIds: ["gemini-3.8-flash-high", "claude-sonnet-4-6", "gpt-oss-120b-medium", "gemini-4-argon-high"] }] }],
+  });
+  assert.deepEqual(models.map((m) => m.id), ["gemini-3.8-flash-high", "claude-sonnet-4-6", "gpt-oss-120b-medium", "gemini-4-argon-high"]);
+});

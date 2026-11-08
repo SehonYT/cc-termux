@@ -231,23 +231,32 @@ function closePrompt() { if (activePrompt) { try { activePrompt.close(); } catch
 const OFFICIAL_MODEL_RE = /^(claude-opus-4-6-thinking|claude-sonnet-4-6|gemini-3\.8-flash-(high|medium|low)|gpt-oss-120b-medium)$/;
 const ARGON_MODEL_RE = /^gemini-4-argon-(high|medium|low)$/;
 export function parseAvailableModels(data) {
-  const models = [];
   const src = (data && data.models) || {};
-  for (const [id, info] of Object.entries(src)) {
-    if (!info || typeof info !== "object") continue;
-    if (info.isInternal === true || info.disabled === true) continue;
-    const official = OFFICIAL_MODEL_RE.test(id) || ARGON_MODEL_RE.test(id);
-    if (!official && process.env.CC_TERMUX_ANTIGRAVITY_ALL_MODELS !== "1") continue;
-    if (/^(tab_|chat_)/i.test(id) || /(^|[-_])(image|imagen|tts|audio|embedding|embed|video|veo|transcribe|tab)([-_]|$)/i.test(id)) continue;
-    models.push({
-      id,
-      name: info.displayName || id,
-      contextTokens: Number(info.maxTokens) || 0,
-      maxOutputTokens: Number(info.maxOutputTokens) || 0,
-      recommended: info.recommended === true,
-    });
+  const models = [];
+  const seen = new Set();
+  const sortedIds = [];
+  for (const sort of (data && data.agentModelSorts) || []) {
+    for (const group of (sort && sort.groups) || []) {
+      for (const id of (group && group.modelIds) || []) if (typeof id === "string") sortedIds.push(id);
+    }
   }
-  return models.sort((a, b) => (Number(b.recommended) - Number(a.recommended)) || a.name.localeCompare(b.name));
+  const add = (id, info) => {
+    if (!id || seen.has(id) || !info || typeof info !== "object") return;
+    if (info.isInternal === true || info.disabled === true) return;
+    if (/^(tab_|chat_)/i.test(id) || /(^|[-_])(image|imagen|tts|audio|embedding|embed|video|veo|transcribe|tab)([-_]|$)/i.test(id)) return;
+    seen.add(id);
+    models.push({ id, name: info.displayName || id, contextTokens: Number(info.maxTokens) || 0, maxOutputTokens: Number(info.maxOutputTokens) || 0, recommended: info.recommended === true });
+  };
+  if (sortedIds.length) {
+    for (const id of sortedIds) add(id, src[id]);
+  } else {
+    for (const [id, info] of Object.entries(src)) {
+      const official = OFFICIAL_MODEL_RE.test(id) || ARGON_MODEL_RE.test(id);
+      if (!official && process.env.CC_TERMUX_ANTIGRAVITY_ALL_MODELS !== "1") continue;
+      add(id, info);
+    }
+  }
+  return models;
 }
 
 function quotaWindowOf(bucket) {
