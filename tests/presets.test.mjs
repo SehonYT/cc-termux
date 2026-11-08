@@ -49,12 +49,13 @@ test("every provider has a valid, properly configured endpoint", () => {
   for (const p of presets) {
     assert.match(p.id, /^[a-z0-9][a-z0-9-]*$/, "bad id " + p.id);
     assert.ok(p.name, "missing name for " + p.id);
-    assert.ok(["openai", "gemini"].includes(p.kind), "bad kind for " + p.id);
+    assert.ok(["openai", "gemini", "antigravity"].includes(p.kind), "bad kind for " + p.id);
     assert.match(p.baseUrl, /^https?:\/\//, "bad baseUrl for " + p.id);
     if (p.noKey) { assert.match(p.baseUrl, /^http:\/\/127\.0\.0\.1|^http:\/\/localhost/, p.id + " local preset must use loopback"); }
     else assert.match(p.baseUrl, /^https:\/\//, p.id + " remote preset must use https");
-    if (!p.noKey && ["openai", "gemini"].includes(p.kind)) assert.ok(p.keyUrl, "missing keyUrl for " + p.id);
-    if (p.kind !== "gemini") assert.match(p.path || "/chat/completions", /^\/.*completions$/, "bad path for " + p.id);
+    if (!p.noKey && p.auth !== "antigravity" && ["openai", "gemini"].includes(p.kind)) assert.ok(p.keyUrl, "missing keyUrl for " + p.id);
+    if (p.kind === "antigravity") assert.match(p.path, /v1internal:streamGenerateContent/);
+    else if (p.kind !== "gemini") assert.match(p.path || "/chat/completions", /^\/.*completions$/, "bad path for " + p.id);
     if (p.modelsPath === null) assert.ok(Array.isArray(p.models) && p.models.length, p.id + " needs static models");
   }
 });

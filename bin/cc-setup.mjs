@@ -8,6 +8,7 @@ import path from "node:path";
 import readline from "node:readline";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
+import { login as antigravityLogin, ensureProject as antigravityEnsureProject, loadCredentials as antigravityCreds } from "./cc-antigravity.mjs";
 
 const HOME = os.homedir();
 const ROOT = process.env.CC_TERMUX_ROOT || path.join(HOME, ".local", "share", "cc-termux");
@@ -396,6 +397,31 @@ async function presetFlow(c, presetOverride) {
     if (!preset) { console.log(cyan("  invalid preset")); return null; }
   }
   if (preset.notes) console.log(dim("  " + preset.notes));
+  if (preset.auth === "antigravity") {
+    let creds = antigravityCreds();
+    if (!creds || !creds.access_token) {
+      if (!process.stdin.isTTY) { console.log(cyan("  Antigravity OAuth needs a terminal; run: cc-termux antigravity login")); return null; }
+      console.log(dim("  starting Google OAuth login..."));
+      try { creds = await antigravityLogin({ log: (m) => console.log(m) }); }
+      catch (e) { console.log(cyan("  login failed: " + e.message)); return null; }
+    }
+    try { creds = await antigravityEnsureProject({ log: (m) => console.log(dim("  " + m)) }); }
+    catch (e) { console.log(cyan("  " + e.message)); return null; }
+    const amodels = presetStaticModels(preset);
+    if (!amodels.length) { console.log(cyan("  no Antigravity models configured")); return null; }
+    console.log(cyan("  \u2714 " + amodels.length + " Antigravity models available" + (creds.email ? " for " + creds.email : "")));
+    const amain = await pickModel(amodels, "Main model");
+    const existingA = visible(c).find(([n, p]) => p.type === "antigravity" || n === "antigravity");
+    const aname = existingA ? existingA[0] : providerName(c, "antigravity");
+    addProvider(c, aname, {
+      family: "antigravity", type: "antigravity", baseUrl: preset.baseUrl, path: preset.path,
+      key: "", models: amodels, main: amain.id, contextWindow: amain.contextTokens || 1048576,
+      aliases: { opus: amain.id, sonnet: amain.id, haiku: amain.id, subagent: amain.id },
+    });
+    summary(c, aname);
+    if ((await ask("\nSend a small test request now? (y/N) > ")).toLowerCase().startsWith("y")) await runSmokeTest();
+    return aname;
+  }
   let key = "";
   if (!preset.noKey) {
     if (preset.keyUrl) console.log(dim("  get a key: " + preset.keyUrl));
@@ -454,6 +480,22 @@ async function envMode() {
   if (process.env.CC_SETUP_PRESET) {
     const preset = (loadPresets().free || []).find((p) => p.id === process.env.CC_SETUP_PRESET);
     if (!preset) throw new Error("unknown preset " + process.env.CC_SETUP_PRESET);
+    if (preset.auth === "antigravity") {
+      let creds = antigravityCreds();
+      if (!creds) throw new Error("run: cc-termux antigravity login");
+      creds = await antigravityEnsureProject({ log: () => { } });
+      const amodels = presetStaticModels(preset);
+      const want = process.env.CC_SETUP_MODEL || "";
+      const main = (want && amodels.find((m) => m.id === want)) || amodels[0];
+      if (!main) throw new Error("no antigravity models");
+      const c0 = loadCfg();
+      const existing = visible(c0).find(([n, p]) => p.type === "antigravity" || n === "antigravity");
+      const name0 = process.env.CC_SETUP_NAME || (existing ? existing[0] : providerName(c0, "antigravity"));
+      addProvider(c0, name0, { family: "antigravity", type: "antigravity", baseUrl: preset.baseUrl, path: preset.path, key: "", models: amodels, main: main.id, contextWindow: main.contextTokens || 1048576, aliases: { opus: main.id, sonnet: main.id, haiku: main.id, subagent: main.id } });
+      summary(c0, name0);
+      if (opts.test) await runSmokeTest();
+      return;
+    }
     const c = loadCfg();
     const key = process.env.CC_SETUP_KEY || "";
     const models = await fetchPresetModels(preset, key);

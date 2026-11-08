@@ -21,6 +21,113 @@
       "notes": "Free tier is per-key; quota is detected from 429 responses"
     },
     {
+      "id": "antigravity",
+      "name": "Google Antigravity (OAuth)",
+      "kind": "antigravity",
+      "auth": "antigravity",
+      "baseUrl": "https://daily-cloudcode-pa.googleapis.com",
+      "path": "/v1internal:streamGenerateContent?alt=sse",
+      "modelsPath": null,
+      "models": [
+        {
+          "id": "gemini-3.8-flash-high",
+          "name": "Gemini 3.8 Flash (High)",
+          "contextTokens": 1048576
+        },
+        {
+          "id": "gemini-3.8-flash-medium",
+          "name": "Gemini 3.8 Flash (Medium)",
+          "contextTokens": 1048576
+        },
+        {
+          "id": "gemini-3.8-flash-low",
+          "name": "Gemini 3.8 Flash (Low)",
+          "contextTokens": 1048576
+        },
+        {
+          "id": "gemini-3.7-flash-tiered",
+          "name": "Gemini 3.7 Flash (Tiered)",
+          "contextTokens": 1048576
+        },
+        {
+          "id": "gemini-pro-agent",
+          "name": "Gemini 3.1 Pro (High)",
+          "contextTokens": 1048576
+        },
+        {
+          "id": "gemini-3.1-pro-low",
+          "name": "Gemini 3.1 Pro (Low)",
+          "contextTokens": 1048576
+        },
+        {
+          "id": "gemini-3.1-flash-lite",
+          "name": "Gemini 3.1 Flash Lite",
+          "contextTokens": 1048576
+        },
+        {
+          "id": "claude-opus-4-6-thinking",
+          "name": "Claude Opus 4.6 (Thinking)",
+          "contextTokens": 1048576
+        },
+        {
+          "id": "claude-sonnet-4-6",
+          "name": "Claude Sonnet 4.6 (Thinking)",
+          "contextTokens": 1048576
+        },
+        {
+          "id": "gpt-oss-120b-medium",
+          "name": "GPT-OSS 120B (Medium)",
+          "contextTokens": 131072
+        },
+        {
+          "id": "gemini-4-argon-high",
+          "name": "Gemini 4 Argon (High)",
+          "contextTokens": 1048576
+        },
+        {
+          "id": "gemini-4-argon-medium",
+          "name": "Gemini 4 Argon (Medium)",
+          "contextTokens": 1048576
+        },
+        {
+          "id": "gemini-4-argon-low",
+          "name": "Gemini 4 Argon (Low)",
+          "contextTokens": 1048576
+        },
+        {
+          "id": "claude-opus-5-5-high",
+          "name": "Claude Opus 5.5 (High)",
+          "contextTokens": 1048576
+        },
+        {
+          "id": "claude-opus-5-5-medium",
+          "name": "Claude Opus 5.5 (Medium)",
+          "contextTokens": 1048576
+        },
+        {
+          "id": "claude-opus-5-5-low",
+          "name": "Claude Opus 5.5 (Low)",
+          "contextTokens": 1048576
+        },
+        {
+          "id": "claude-sonnet-5-5-high",
+          "name": "Claude Sonnet 5.5 (High)",
+          "contextTokens": 1048576
+        },
+        {
+          "id": "claude-sonnet-5-5-medium",
+          "name": "Claude Sonnet 5.5 (Medium)",
+          "contextTokens": 1048576
+        },
+        {
+          "id": "claude-sonnet-5-5-low",
+          "name": "Claude Sonnet 5.5 (Low)",
+          "contextTokens": 1048576
+        }
+      ],
+      "notes": "Google account OAuth (Antigravity / Google One AI). Requires access to Antigravity; run cc-termux antigravity login"
+    },
+    {
       "id": "groq",
       "name": "Groq",
       "kind": "openai",

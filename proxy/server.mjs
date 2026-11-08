@@ -14,6 +14,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+import { proxyAntigravity } from "./antigravity.mjs";
+
 const CONFIG_PATH = process.env.CC_TERMUX_CONFIG || path.join(os.homedir(), '.config', 'cc-termux', 'config.json');
 const LOG = (...a) => {
   if (process.env.CC_TERMUX_QUIET) return;

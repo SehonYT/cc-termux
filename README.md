@@ -132,6 +132,7 @@ cc-termux setup        # choose "3" for free/online presets (tokens.bd is "6", l
 |---|---|---|---|
 | `openrouter` | OpenRouter (free models) | `https://openrouter.ai/api/v1` | yes  Free models end with :free |
 | `gemini` | Google Gemini (AI Studio) | `https://generativelanguage.googleapis.com/v1beta/openai` | yes  Free tier is per-key; quota is detected from 429 responses |
+| `antigravity` | Google Antigravity (OAuth) | `https://daily-cloudcode-pa.googleapis.com` | Google OAuth  Google account OAuth (Antigravity / Google One AI). Requires access to Antigravity; run cc-termux antigravity login |
 | `groq` | Groq | `https://api.groq.com/openai/v1` | yes |
 | `deepseek` | DeepSeek | `https://api.deepseek.com/v1` | yes |
 | `xai` | xAI (Grok) | `https://api.x.ai/v1` | yes |
@@ -141,7 +142,7 @@ cc-termux setup        # choose "3" for free/online presets (tokens.bd is "6", l
 | `together` | Together AI | `https://api.together.xyz/v1` | yes |
 | `fireworks` | Fireworks AI | `https://api.fireworks.ai/inference/v1` | yes |
 | `huggingface` | HuggingFace Router | `https://router.huggingface.co/v1` | yes |
-| `github-models` | GitHub Models | `https://models.github.ai/inference` | yes |
+| `github-models` | GitHub Models | `https://models.github.ai/inference` | yes  catalog endpoint is not JSON; fallback model list is used if discovery fails |
 | `sambanova` | SambaNova | `https://api.sambanova.ai/v1` | yes |
 | `novita` | Novita AI | `https://api.novita.ai/v3/openai` | yes |
 | `nebius` | Nebius AI Studio | `https://api.studio.nebius.ai/v1` | yes |
@@ -166,6 +167,23 @@ cc-termux setup        # choose "3" for free/online presets (tokens.bd is "6", l
 | `tokens` | tokens.bd | `https://tokens.bd` | yes  Anthropic-compatible endpoint also available |
 
 Custom OpenAI-compatible and Anthropic-compatible endpoints can be added by URL.
+
+## Google Antigravity (OAuth)
+
+Antigravity uses your Google account (Antigravity / Google One AI), not an API key.
+
+```bash
+cc-termux antigravity login    # opens Google consent, stores tokens + projectId
+cc-termux antigravity status
+cc-termux antigravity logout
+# or simply choose the preset in `cc-termux setup`
+```
+
+Credentials live in `~/.config/cc-termux/antigravity.json` (0600). The gateway refreshes
+the access token automatically and routes Anthropic Messages through Google Cloud Code
+(`v1internal:streamGenerateContent`). Models are exposed in `/model` as `prov/antigravity/...`.
+Requires an account with Antigravity access; if project discovery fails, run `agy login` once or
+add a GCP project ID. Tokens are never sent anywhere except Google.
 
 ## Usage
 
