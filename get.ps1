@@ -62,7 +62,16 @@ try {
       if ($Date) { $env:CC_TERMUX_COMMIT_DATE = $Date }
     } catch { }
     $archiveRef = if ($Sha) { $Sha } else { $Ref }
-    Invoke-WebRequest "https://codeload.github.com/$Repo/tar.gz/$archiveRef" -OutFile $Archive -UseBasicParsing -TimeoutSec 900
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+      try {
+        Invoke-WebRequest "https://codeload.github.com/$Repo/tar.gz/$archiveRef" -OutFile $Archive -UseBasicParsing -TimeoutSec 900
+        break
+      } catch {
+        if ($attempt -eq 3) { throw }
+        Write-Host "  download failed (attempt $attempt/3), retrying..." -ForegroundColor DarkGray
+        Start-Sleep -Seconds (2 * $attempt)
+      }
+    }
   }
   $Src = Join-Path $Tmp "src"
   New-Item -ItemType Directory -Path $Src | Out-Null

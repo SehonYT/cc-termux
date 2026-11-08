@@ -53,6 +53,19 @@ export function isNewer(local, remote) {
   return semverNewer(remote.version, local.version);
 }
 
+async function fetchTextRetry(url, opts = {}, fetchImpl = globalThis.fetch, attempts = 3) {
+  let lastErr = null;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const r = await fetchImpl(url, opts);
+      if (r.ok || (r.status >= 400 && r.status < 500)) return r;
+      lastErr = new Error("HTTP " + r.status);
+    } catch (e) { lastErr = e; }
+    if (i < attempts - 1) await new Promise((res) => setTimeout(res, 600 * (i + 1)));
+  }
+  throw lastErr || new Error("network unavailable");
+}
+
 async function remoteInfo({ repo = DEFAULT_REPO, fetchImpl = fetch } = {}) {
   const headers = { "user-agent": "cc-termux" };
   let sha = null;
@@ -61,7 +74,7 @@ async function remoteInfo({ repo = DEFAULT_REPO, fetchImpl = fetch } = {}) {
   let commits = [];
   // The commit atom feed is public, stable per commit and not API rate-limited.
   try {
-    const r = await fetchImpl("https://github.com/" + repo + "/commits/main.atom", { headers, signal: AbortSignal.timeout(8000) });
+    const r = await fetchTextRetry("https://github.com/" + repo + "/commits/main.atom", { headers, signal: AbortSignal.timeout(8000) }, fetchImpl);
     if (r.ok) {
       const text = await r.text();
       const re = /Grit::Commit\/([0-9a-f]{40})[\s\S]*?<updated>([^<]+)<\/updated>/g;
@@ -71,12 +84,12 @@ async function remoteInfo({ repo = DEFAULT_REPO, fetchImpl = fetch } = {}) {
     }
   } catch (e) { }
   try {
-    const r = await fetchImpl("https://raw.githubusercontent.com/" + repo + "/main/package.json", { headers, signal: AbortSignal.timeout(5000) });
+    const r = await fetchTextRetry("https://raw.githubusercontent.com/" + repo + "/main/package.json", { headers, signal: AbortSignal.timeout(5000) }, fetchImpl);
     if (r.ok) version = (await r.json()).version || null;
   } catch (e) { }
   if (!sha) {
     try {
-      const r = await fetchImpl("https://api.github.com/repos/" + repo + "/commits/main", { headers, signal: AbortSignal.timeout(5000) });
+      const r = await fetchTextRetry("https://api.github.com/repos/" + repo + "/commits/main", { headers, signal: AbortSignal.timeout(5000) }, fetchImpl);
       if (r.ok) {
         const j = await r.json();
         sha = j.sha || null;
@@ -117,7 +130,7 @@ export function findInstaller(dir, depth = 0) {
 }
 
 async function latestClaudeVersion({ fetchImpl = fetch } = {}) {
-  const r = await fetchImpl("https://registry.npmjs.org/@anthropic-ai/claude-code/latest", { signal: AbortSignal.timeout(15000) });
+  const r = await fetchTextRetry("https://registry.npmjs.org/@anthropic-ai/claude-code/latest", { signal: AbortSignal.timeout(15000) }, fetchImpl);
   if (!r.ok) throw new Error("registry HTTP " + r.status);
   return (await r.json()).version || null;
 }

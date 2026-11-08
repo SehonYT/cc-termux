@@ -18,7 +18,29 @@ const SETTINGS = path.join(HOME, ".claude", "settings.json");
 const CACHE_DIR = path.join(HOME, ".cache", "cc-termux");
 const CATALOG = path.join(CACHE_DIR, "catalog.json");
 const PRESETS_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "presets.json");
-const fetchT = (url, opts = {}) => fetch(url, { ...opts, signal: AbortSignal.timeout(10000) });
+const RETRY_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
+async function fetchT(url, opts = {}) {
+  const { retries = 3, timeoutMs = 10000, ...rest } = opts;
+  let lastErr = null;
+  for (let attempt = 0; attempt < retries; attempt++) {
+    try {
+      const res = await fetch(url, { ...rest, signal: AbortSignal.timeout(timeoutMs) });
+      if (!RETRY_STATUS.has(res.status) || attempt === retries - 1) return res;
+      const ra = Number(res.headers.get("retry-after"));
+      const wait = Number.isFinite(ra) && ra > 0 ? Math.min(ra * 1000, 5000) : Math.min(5000, 600 * 2 ** attempt);
+      console.log(dim("  network hiccup (" + res.status + ") - retrying in " + Math.round(wait) + "ms..."));
+      try { await res.body?.cancel(); } catch (e) { }
+      await new Promise((r) => setTimeout(r, wait));
+    } catch (e) {
+      lastErr = e;
+      if (attempt === retries - 1) throw e;
+      const wait = Math.min(5000, 600 * 2 ** attempt);
+      console.log(dim("  network hiccup - retrying in " + Math.round(wait) + "ms..."));
+      await new Promise((r) => setTimeout(r, wait));
+    }
+  }
+  throw lastErr || new Error("network request failed");
+}
 function loadPresets() { try { return JSON.parse(fs.readFileSync(PRESETS_PATH, "utf8")); } catch (e) { return { free: [] }; } }
 const ESC = String.fromCharCode(27);
 const color = (code, str) => process.stdout.isTTY ? ESC + "[" + code + "m" + str + ESC + "[0m" : str;

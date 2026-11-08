@@ -307,17 +307,28 @@ export function parseQuotaSummary(data) {
 export async function postCloud(urls, accessToken, body, { fetchImpl = fetch, timeoutMs = 10000 } = {}) {
   let lastError = null;
   for (const url of urls) {
-    try {
-      const res = await fetchImpl(url, {
-        method: "POST",
-        headers: antigravityHeaders(accessToken),
-        body: JSON.stringify(body || {}),
-        signal: AbortSignal.timeout(timeoutMs),
-      });
-      if (res.status === 401 || res.status === 403) throw new Error("Antigravity auth error " + res.status);
-      if (!res.ok) { lastError = new Error(url + " HTTP " + res.status); continue; }
-      return await res.json();
-    } catch (e) { lastError = e; }
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const res = await fetchImpl(url, {
+          method: "POST",
+          headers: antigravityHeaders(accessToken),
+          body: JSON.stringify(body || {}),
+          signal: AbortSignal.timeout(timeoutMs),
+        });
+        if (res.status === 401 || res.status === 403) throw new Error("Antigravity auth error " + res.status);
+        if (res.ok) return await res.json();
+        lastError = new Error(url + " HTTP " + res.status);
+        if (attempt === 0 && [408, 425, 429, 500, 502, 503, 504].includes(res.status)) {
+          await new Promise((r) => setTimeout(r, 600));
+          continue;
+        }
+        break;
+      } catch (e) {
+        lastError = e;
+        if (attempt === 0) { await new Promise((r) => setTimeout(r, 600)); continue; }
+        break;
+      }
+    }
   }
   throw lastError || new Error("Antigravity API unavailable");
 }

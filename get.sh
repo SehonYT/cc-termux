@@ -42,10 +42,10 @@ URL="https://codeload.github.com/$REPO/tar.gz/${SHA:-$REF}"
 if [ -n "${CC_TERMUX_ARCHIVE:-}" ]; then
   cp "$CC_TERMUX_ARCHIVE" "$tmp/src.tar.gz"
 elif command -v curl >/dev/null 2>&1; then
-  if [ -t 2 ]; then CURL_OPTS="-fL --progress-bar"; else CURL_OPTS="-fsSL"; fi
+  if [ -t 2 ]; then CURL_OPTS="-fL --progress-bar --retry 3 --retry-delay 2 --retry-connrefused"; else CURL_OPTS="-fsSL --retry 3 --retry-delay 2 --retry-connrefused"; fi
   curl $CURL_OPTS "$URL" -o "$tmp/src.tar.gz"
 elif command -v wget >/dev/null 2>&1; then
-  wget -qO "$tmp/src.tar.gz" "$URL"
+  wget -qO "$tmp/src.tar.gz" --tries=3 --timeout=30 "$URL"
 else
   echo "cc-termux: curl or wget is required" >&2; exit 1
 fi
