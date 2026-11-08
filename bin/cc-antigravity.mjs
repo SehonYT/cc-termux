@@ -29,6 +29,31 @@ export const SCOPES = [
 ];
 export const BOOTSTRAP_URL = process.env.CC_TERMUX_ANTIGRAVITY_BOOTSTRAP_URL || "https://cloudcode-pa.googleapis.com";
 export const GENERATE_URL = process.env.CC_TERMUX_ANTIGRAVITY_GENERATE_URL || "https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse";
+export const FETCH_MODELS_URLS = [
+  "https://daily-cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels",
+  "https://cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels",
+];
+export const QUOTA_SUMMARY_URLS = [
+  "https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary",
+  "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary",
+];
+export const QUOTA_URLS = [
+  "https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota",
+  "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota",
+];
+export function usageCachePath() {
+  return path.join(process.env.CC_TERMUX_CACHE || path.join(os.homedir(), ".cache", "cc-termux"), "antigravity-usage.json");
+}
+export function readUsageCache() {
+  try { return JSON.parse(fs.readFileSync(usageCachePath(), "utf8")); } catch (e) { return null; }
+}
+export function writeUsageCache(data) {
+  try {
+    fs.mkdirSync(path.dirname(usageCachePath()), { recursive: true });
+    fs.writeFileSync(usageCachePath(), JSON.stringify(data, null, 2) + "\n", { mode: 0o600 });
+  } catch (e) { }
+  return data;
+}
 export const LOAD_CODE_ASSIST_URL = BOOTSTRAP_URL + "/v1internal:loadCodeAssist";
 export const ONBOARD_USER_URL = BOOTSTRAP_URL + "/v1internal:onboardUser";
 export const USER_AGENT = "antigravity/ide/2.5.5 darwin/arm64";
@@ -200,6 +225,185 @@ function askLine(prompt) {
 }
 function closePrompt() { if (activePrompt) { try { activePrompt.close(); } catch (e) { } activePrompt = null; } }
 
+export function parseAvailableModels(data) {
+  const models = [];
+  const src = (data && data.models) || {};
+  for (const [id, info] of Object.entries(src)) {
+    if (!info || typeof info !== "object") continue;
+    if (info.isInternal === true || info.disabled === true) continue;
+    if (/^(tab_|chat_)/i.test(id) || /(^|[-_])(image|imagen|tts|audio|embedding|embed|video|veo|transcribe|tab)([-_]|$)/i.test(id)) continue;
+    models.push({
+      id,
+      name: info.displayName || id,
+      contextTokens: Number(info.maxTokens) || 0,
+      maxOutputTokens: Number(info.maxOutputTokens) || 0,
+      recommended: info.recommended === true,
+    });
+  }
+  return models.sort((a, b) => (Number(b.recommended) - Number(a.recommended)) || a.name.localeCompare(b.name));
+}
+
+function quotaWindowOf(bucket) {
+  const w = String(bucket.window || "").toLowerCase();
+  if (w === "5h" || w === "session") return "session";
+  if (w === "weekly" || w === "7d") return "weekly";
+  const text = (String(bucket.bucketId || "") + " " + String(bucket.displayName || "")).toLowerCase();
+  if (/\b5h\b|five.?hour|session/.test(text)) return "session";
+  if (/weekly|7d|seven.?day/.test(text)) return "weekly";
+  return null;
+}
+
+function quotaGroupOf(displayName, groupId, bucketText) {
+  const text = (String(displayName || "") + " " + String(groupId || "") + " " + (bucketText || "")).toLowerCase();
+  if (/argon/.test(text) || /gemini[\s_-]*4/.test(text)) return { id: "argon", label: "Gemini 4 Argon" };
+  if (/gemini/.test(text)) return { id: "gemini", label: "Gemini" };
+  if (/claude|gpt|\b3p\b|third/.test(text)) return { id: "claude", label: "Claude & GPT" };
+  return { id: String(groupId || displayName || "quota").replace(/[^a-z0-9]+/gi, "_"), label: displayName || groupId || "Quota" };
+}
+
+export function parseQuotaSummary(data) {
+  const root = (data && data.quotaSummary) || data || {};
+  const rawGroups = Array.isArray(root.groups) ? root.groups : [];
+  const groups = [];
+  for (const raw of rawGroups) {
+    if (!raw || typeof raw !== "object") continue;
+    const buckets = Array.isArray(raw.buckets) ? raw.buckets : [];
+    const text = String(raw.displayName || "") + " " + buckets.map((b) => b.bucketId || "").join(" ");
+    const g = quotaGroupOf(raw.displayName, raw.groupId || raw.id, text);
+    const windows = {};
+    for (const bucket of buckets) {
+      if (!bucket || typeof bucket !== "object" || bucket.disabled === true) continue;
+      const win = quotaWindowOf(bucket);
+      if (!win) continue;
+      const frac = Number(bucket.remaining && bucket.remaining.remainingFraction != null ? bucket.remaining.remainingFraction : bucket.remainingFraction);
+      if (!Number.isFinite(frac)) continue;
+      windows[win] = {
+        percent: Math.max(0, Math.min(100, frac * 100)),
+        resetAt: bucket.resetTime || (bucket.remaining && bucket.remaining.resetTime) || null,
+        description: bucket.description || "",
+      };
+    }
+    if (Object.keys(windows).length) groups.push({ ...g, windows });
+  }
+  return { groups };
+}
+
+export async function postCloud(urls, accessToken, body, { fetchImpl = fetch, timeoutMs = 10000 } = {}) {
+  let lastError = null;
+  for (const url of urls) {
+    try {
+      const res = await fetchImpl(url, {
+        method: "POST",
+        headers: antigravityHeaders(accessToken),
+        body: JSON.stringify(body || {}),
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      if (res.status === 401 || res.status === 403) throw new Error("Antigravity auth error " + res.status);
+      if (!res.ok) { lastError = new Error(url + " HTTP " + res.status); continue; }
+      return await res.json();
+    } catch (e) { lastError = e; }
+  }
+  throw lastError || new Error("Antigravity API unavailable");
+}
+
+export async function fetchAvailableModels({ fetchImpl = fetch, timeoutMs = 10000 } = {}) {
+  const creds = loadCredentials();
+  if (!creds) throw new Error("not logged in; run: cc-termux antigravity login");
+  const token = await ensureAccessToken(creds, { fetchImpl });
+  const data = await postCloud(FETCH_MODELS_URLS, token, creds.project_id ? { project: creds.project_id } : {}, { fetchImpl, timeoutMs });
+  return parseAvailableModels(data);
+}
+
+export async function fetchQuotaSummary({ fetchImpl = fetch, timeoutMs = 10000 } = {}) {
+  const creds = loadCredentials();
+  if (!creds) throw new Error("not logged in; run: cc-termux antigravity login");
+  const token = await ensureAccessToken(creds, { fetchImpl });
+  const data = await postCloud(QUOTA_SUMMARY_URLS, token, creds.project_id ? { project: creds.project_id } : {}, { fetchImpl, timeoutMs });
+  return parseQuotaSummary(data);
+}
+
+export async function fetchQuotaBuckets({ fetchImpl = fetch, timeoutMs = 10000 } = {}) {
+  const creds = loadCredentials();
+  if (!creds) throw new Error("not logged in; run: cc-termux antigravity login");
+  const token = await ensureAccessToken(creds, { fetchImpl });
+  const data = await postCloud(QUOTA_URLS, token, creds.project_id ? { project: creds.project_id } : {}, { fetchImpl, timeoutMs });
+  const byFamily = new Map();
+  for (const b of (data && data.buckets) || []) {
+    if (!b || typeof b !== "object") continue;
+    const id = String(b.modelId || "");
+    const family = /argon/.test(id) ? "argon" : /gemini/.test(id) ? "gemini" : /claude|gpt/.test(id) ? "claude" : "other";
+    const frac = Number(b.remainingFraction);
+    if (!Number.isFinite(frac)) continue;
+    const cur = byFamily.get(family) || { id: family, label: family === "claude" ? "Claude & GPT" : family === "gemini" ? "Gemini" : family, windows: {} };
+    const resetAt = b.resetTime || null;
+    const prev = cur.windows.session;
+    cur.windows.session = { percent: Math.min(prev ? prev.percent : 100, Math.max(0, Math.min(100, frac * 100))), resetAt: prev && prev.resetAt && resetAt ? (Date.parse(prev.resetAt) < Date.parse(resetAt) ? prev.resetAt : resetAt) : (prev && prev.resetAt) || resetAt || null, description: "" };
+    byFamily.set(family, cur);
+  }
+  return { groups: [...byFamily.values()] };
+}
+
+export async function getAntigravityUsage({ force = false, fetchImpl = fetch, timeoutMs = 10000 } = {}) {
+  if (!force) {
+    const cached = readUsageCache();
+    if (cached && cached.fetchedAt && Date.now() - cached.fetchedAt < 60_000) return cached;
+  }
+  const creds = loadCredentials();
+  if (!creds) throw new Error("not logged in; run: cc-termux antigravity login");
+  let groups = [];
+  let source = "summary";
+  try { groups = (await fetchQuotaSummary({ fetchImpl, timeoutMs })).groups; } catch (e) { groups = []; }
+  if (!groups.length) {
+    try { groups = (await fetchQuotaBuckets({ fetchImpl, timeoutMs })).groups; source = "models"; } catch (e) { groups = []; }
+  }
+  const data = { groups, source, fetchedAt: Date.now(), email: creds.email || "", project: creds.project_id || "" };
+  writeUsageCache(data);
+  return data;
+}
+
+export async function updateProviderModels({ log = console.log, timeoutMs = 15000, fetchImpl = fetch } = {}) {
+  const models = await fetchAvailableModels({ fetchImpl, timeoutMs });
+  if (!models.length) throw new Error("Antigravity returned no models");
+  const cfgFile = process.env.CC_TERMUX_CONFIG || path.join(os.homedir(), ".config", "cc-termux", "config.json");
+  const cfg = JSON.parse(fs.readFileSync(cfgFile, "utf8"));
+  const name = Object.keys(cfg.providers || {}).find((n) => cfg.providers[n].type === "antigravity") || "antigravity";
+  const p = cfg.providers[name];
+  if (!p) throw new Error("no antigravity provider configured; run cc-termux setup");
+  const old = new Set(Object.keys(p.modelsById || {}));
+  p.modelsById = {};
+  for (const m of models) p.modelsById[m.id] = { name: m.name, contextTokens: m.contextTokens || 0, inUsd: null, outUsd: null };
+  if (!p.modelsById[p.model]) p.model = p.modelsById["claude-sonnet-4-6"] ? "claude-sonnet-4-6" : models[0].id;
+  p.defaultModel = p.defaultModel && p.modelsById[p.defaultModel] ? p.defaultModel : p.model;
+  p.aliases = p.aliases || {};
+  for (const k of Object.keys(p.aliases)) if (!p.modelsById[p.aliases[k]]) p.aliases[k] = p.model;
+  cfg.routing = cfg.routing || {};
+  for (const k of Object.keys(cfg.routing)) if (k.startsWith("prov/" + name + "/") || k.startsWith(name + "::")) delete cfg.routing[k];
+  for (const m of models) cfg.routing["prov/" + name + "/" + m.id] = name + "::" + m.id;
+  const tmp = cfgFile + "." + process.pid + ".tmp";
+  fs.writeFileSync(tmp, JSON.stringify(cfg, null, 2) + "\n", { mode: 0o600 });
+  fs.renameSync(tmp, cfgFile);
+  // Refresh Claude Code's /model picker entries for this provider.
+  const settingsFile = process.env.CLAUDE_CONFIG_DIR ? path.join(process.env.CLAUDE_CONFIG_DIR, "settings.json") : path.join(os.homedir(), ".claude", "settings.json");
+  try {
+    const settings = JSON.parse(fs.readFileSync(settingsFile, "utf8"));
+    if (settings.modelPicker && Array.isArray(settings.modelPicker.options)) {
+      settings.modelPicker.options = settings.modelPicker.options.filter((o) => !String(o.model || "").startsWith("prov/" + name + "/"));
+      for (const m of models) {
+        settings.modelPicker.options.push({
+          model: "prov/" + name + "/" + m.id,
+          label: (m.name || m.id) + "  [" + name + "]",
+          description: (m.contextTokens ? Math.round(m.contextTokens / 1000) + "K ctx" : "antigravity") + (m.recommended ? " · recommended" : ""),
+        });
+      }
+      const st = settingsFile + "." + process.pid + ".tmp";
+      fs.writeFileSync(st, JSON.stringify(settings, null, 2) + "\n", { mode: 0o600 });
+      fs.renameSync(st, settingsFile);
+    }
+  } catch (e) { }
+  log("updated " + models.length + " live Antigravity models (added " + models.filter((m) => !old.has(m.id)).length + ", removed " + [...old].filter((id) => !models.some((m) => m.id === id)).length + ")");
+  return models;
+}
+
 export function parseCallbackInput(input, expectedState) {
   const raw = String(input || "").trim();
   if (!raw) throw new Error("empty input");
@@ -321,7 +525,24 @@ function status() {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const cmd = process.argv[2] || "status";
-  if (cmd === "login") {
+  if (cmd === "usage") {
+    getAntigravityUsage({ force: true }).then((u) => {
+      if (!u.groups.length) { console.log("Antigravity usage unavailable"); return; }
+      for (const g of u.groups) {
+        const parts = [];
+        const rel = (iso) => { const t = Date.parse(iso || ""); if (!Number.isFinite(t)) return ""; const m = Math.round((t - Date.now()) / 60000); if (m <= 0) return " now"; if (m < 60) return " " + m + "m"; const h = Math.floor(m / 60); if (h >= 24) { const d = Math.floor(h / 24); return " " + d + "d" + (h % 24 ? (h % 24) + "h" : ""); } return " " + h + "h" + (m % 60 ? (m % 60) + "m" : ""); };
+        if (g.windows.session) parts.push("5h " + Math.round(g.windows.session.percent) + "%" + (rel(g.windows.session.resetAt) ? " (resets" + rel(g.windows.session.resetAt) + ")" : ""));
+        if (g.windows.weekly) parts.push("weekly " + Math.round(g.windows.weekly.percent) + "%" + (rel(g.windows.weekly.resetAt) ? " (resets" + rel(g.windows.weekly.resetAt) + ")" : ""));
+        console.log(g.label + ": " + parts.join("  "));
+      }
+    }).catch((e) => { console.error("usage: " + e.message); process.exit(1); });
+  } else if (cmd === "models") {
+    (process.argv.includes("--update") ? updateProviderModels({ timeoutMs: 15000 }) : fetchAvailableModels({ timeoutMs: 15000 })).then((models) => {
+      if (process.argv.includes("--json")) { console.log(JSON.stringify(models, null, 2)); return; }
+      console.log(models.length + " models");
+      for (const m of models) console.log("  " + m.id + "  " + m.name + (m.contextTokens ? "  " + Math.round(m.contextTokens / 1000) + "K ctx" : ""));
+    }).catch((e) => { console.error("models: " + e.message); process.exit(1); });
+  } else if (cmd === "login") {
     login().then((c) => { console.log("Antigravity login OK" + (c.email ? " (" + c.email + ")" : "")); }).catch((e) => { console.error("Antigravity login failed: " + e.message); process.exit(1); });
   } else if (cmd === "logout") {
     clearCredentials(); console.log("Antigravity credentials removed");

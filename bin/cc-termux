@@ -340,7 +340,8 @@ const HELP = [
   "  cc-termux diagnose               deep check: config, keys, binary, loader, gateway start",
   "  cc-termux heal                   fix PATH/settings/sample-config issues automatically",
   "  cc-termux tune [on|off]          performance mode for phones / slow computers",
-  "  cc-termux antigravity [login]     Google Antigravity OAuth (login/status/logout)",
+  "  cc-termux antigravity [login]     Google Antigravity OAuth (login/status/logout/usage/models)",
+  "  cc-termux statusline [--install]  Claude Code status line (model + Antigravity quota)",
   "  cc-termux sync-picker            rebuild the /model picker from configured providers",
   "  cc-termux setup                  add/change provider, key, models (interactive)",
   "  cc-termux presets [--json]       list built-in free/local provider presets",
@@ -636,8 +637,12 @@ switch (cmd) {
   }
   case "antigravity": {
     const sub = args[0] || "status";
-    if (!["login", "status", "logout", "refresh"].includes(sub)) { console.log("usage: cc-termux antigravity [login|status|logout]"); break; }
+    if (!["login", "status", "logout", "refresh", "usage", "models"].includes(sub)) { console.log("usage: cc-termux antigravity [login|status|logout|usage|models]"); break; }
     execFileSync(process.execPath, [path.join(ROOT, "bin", "cc-antigravity.mjs"), sub === "refresh" ? "status" : sub], { stdio: "inherit" });
+    break;
+  }
+  case "statusline": {
+    execFileSync(process.execPath, [path.join(ROOT, "bin", "cc-statusline.mjs"), ...args], { stdio: "inherit" });
     break;
   }
   case "heal": {

@@ -13,7 +13,7 @@ Individual suite: `node --test tests/<name>.test.mjs`.
 
 | File | Covers |
 |---|---|
-| `antigravity.test.mjs` | Antigravity OAuth URL/token/project discovery, request translation, SSE proxy |
+| `antigravity.test.mjs` | Antigravity OAuth/code paste, request translation, SSE proxy, live model/quota parsing |
 | `assets.test.mjs` | installer ships every runtime file and every relative import |
 | `gateway.test.mjs` | empty-config error, auth, failure logging, image-aware count_tokens |
 | `get-bootstrap.test.mjs` | no-TTY piped bootstrap runs the installer |

@@ -8,7 +8,8 @@ import path from "node:path";
 import readline from "node:readline";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
-import { login as antigravityLogin, ensureProject as antigravityEnsureProject, loadCredentials as antigravityCreds } from "./cc-antigravity.mjs";
+import { login as antigravityLogin, ensureProject as antigravityEnsureProject, loadCredentials as antigravityCreds, fetchAvailableModels, updateProviderModels } from "./cc-antigravity.mjs";
+import { installStatusLine } from "./cc-statusline.mjs";
 
 const HOME = os.homedir();
 const ROOT = process.env.CC_TERMUX_ROOT || path.join(HOME, ".local", "share", "cc-termux");
@@ -409,7 +410,9 @@ async function presetFlow(c, presetOverride) {
     }
     try { creds = await antigravityEnsureProject({ log: (m) => console.log(dim("  " + m)) }); }
     catch (e) { console.log(cyan("  " + e.message)); return null; }
-    const amodels = presetStaticModels(preset);
+    let amodels = [];
+    try { amodels = await fetchAvailableModels({ timeoutMs: 12000 }); } catch (e) { }
+    if (!amodels.length) amodels = presetStaticModels(preset);
     if (!amodels.length) { console.log(cyan("  no Antigravity models configured")); return null; }
     console.log(cyan("  \u2714 " + amodels.length + " Antigravity models available" + (creds.email ? " for " + creds.email : "")));
     const amain = await pickModel(amodels, "Main model", "claude-sonnet-4-6");
@@ -421,6 +424,7 @@ async function presetFlow(c, presetOverride) {
       aliases: { opus: amain.id, sonnet: amain.id, haiku: amain.id, subagent: amain.id },
     });
     summary(c, aname);
+    try { installStatusLine(); } catch (e) { }
     if ((await ask("\nSend a small test request now? (y/N) > ")).toLowerCase().startsWith("y")) await runSmokeTest();
     return aname;
   }
@@ -486,7 +490,9 @@ async function envMode() {
       let creds = antigravityCreds();
       if (!creds) throw new Error("run: cc-termux antigravity login");
       creds = await antigravityEnsureProject({ log: () => { } });
-      const amodels = presetStaticModels(preset);
+      let amodels = [];
+      try { amodels = await fetchAvailableModels({ timeoutMs: 12000 }); } catch (e) { }
+      if (!amodels.length) amodels = presetStaticModels(preset);
       const want = process.env.CC_SETUP_MODEL || "";
       const main = (want && amodels.find((m) => m.id === want)) || amodels.find((m) => m.id === "claude-sonnet-4-6") || amodels[0];
       if (!main) throw new Error("no antigravity models");
@@ -495,6 +501,7 @@ async function envMode() {
       const name0 = process.env.CC_SETUP_NAME || (existing ? existing[0] : providerName(c0, "antigravity"));
       addProvider(c0, name0, { family: "antigravity", type: "antigravity", baseUrl: preset.baseUrl, path: preset.path, key: "", models: amodels, main: main.id, contextWindow: main.contextTokens || 1048576, aliases: { opus: main.id, sonnet: main.id, haiku: main.id, subagent: main.id } });
       summary(c0, name0);
+      try { installStatusLine(); } catch (e) { }
       if (opts.test) await runSmokeTest();
       return;
     }

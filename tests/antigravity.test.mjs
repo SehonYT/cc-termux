@@ -186,3 +186,29 @@ test("rate limiting is retried then reported as 429", async () => {
   assert.equal(errors[0][0], 429);
   assert.match(errors[0][2], /rate-limited|quota/i);
 });
+test("live model and quota payload parsing", async () => {
+  const ant = await import("../bin/cc-antigravity.mjs?t=" + Date.now());
+  const models = ant.parseAvailableModels({ models: {
+    "gemini-3.8-flash-high": { displayName: "Gemini 3.8 Flash (High)", maxTokens: 1048576, maxOutputTokens: 65536, recommended: true },
+    "claude-sonnet-4-6": { displayName: "Claude Sonnet 4.6", maxTokens: 250000, maxOutputTokens: 64000 },
+    "gemini-3.1-flash-image": { displayName: "Image" },
+    "tab_flash_lite_preview": { displayName: "Tab" },
+    "internal_x": { displayName: "Internal", isInternal: true },
+  } });
+  assert.deepEqual(models.map((m) => m.id), ["gemini-3.8-flash-high", "claude-sonnet-4-6"]);
+  const usage = ant.parseQuotaSummary({ groups: [
+    { displayName: "Gemini Models", buckets: [
+      { bucketId: "gemini-5h", window: "5h", remainingFraction: 0.5, resetTime: "2026-11-08T06:00:00Z" },
+      { bucketId: "gemini-weekly", window: "weekly", remainingFraction: 1, resetTime: "2026-11-15T00:00:00Z" },
+    ] },
+    { displayName: "Claude & GPT", buckets: [
+      { bucketId: "3p-5h", window: "5h", remainingFraction: 0.9 },
+      { bucketId: "3p-weekly", window: "weekly", remainingFraction: 0.68 },
+    ] },
+  ] });
+  assert.equal(usage.groups.length, 2);
+  assert.equal(usage.groups[0].id, "gemini");
+  assert.equal(Math.round(usage.groups[0].windows.session.percent), 50);
+  assert.equal(usage.groups[1].id, "claude");
+  assert.equal(Math.round(usage.groups[1].windows.weekly.percent), 68);
+});

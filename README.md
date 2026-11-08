@@ -176,6 +176,9 @@ Antigravity uses your Google account (Antigravity / Google One AI), not an API k
 cc-termux antigravity login    # opens Google consent; if Google shows a code/callback URL,
                                # paste it into the prompt instead of waiting
 cc-termux antigravity status
+cc-termux antigravity usage     # 5h and weekly quota per family
+cc-termux antigravity models --update   # refresh models from Google into /model
+cc-termux statusline --install  # model + quota in Claude's status line
 cc-termux antigravity logout
 # or simply choose the preset in `cc-termux setup`
 ```
