@@ -94,6 +94,7 @@ export function anthropicToGemini(body, model, creds) {
     }
     push(role, parts);
   }
+  while (contents.length && contents[contents.length - 1].role === "model") contents.pop();
   if (!contents.length) contents.push({ role: "user", parts: [{ text: "continue" }] });
   const tools = Array.isArray(body.tools) && body.tools.length
     ? [{ functionDeclarations: body.tools.filter((t) => t && t.name).map((t) => ({
@@ -105,7 +106,7 @@ export function anthropicToGemini(body, model, creds) {
   const request = {
     contents,
     ...(sys ? { systemInstruction: { parts: [{ text: sys }] } } : {}),
-    ...(tools ? { tools, toolConfig: { functionCallingConfig: { mode: "AUTO" } } } : {}),
+    ...(tools ? { tools, toolConfig: { functionCallingConfig: { mode: "VALIDATED" } } } : {}),
     generationConfig: {
       maxOutputTokens: Math.min(Number(body.max_tokens) || 8192, MAX_OUTPUT),
       ...(body.temperature != null ? { temperature: body.temperature } : {}),
@@ -190,6 +191,13 @@ export async function proxyAntigravity(req, res, route, body, { anthropicError }
   };
   const handle = (payload) => {
     const { payload: r, cand, parts } = partsFrom(payload);
+    if (r && r.error) {
+      start();
+      const msg = (r.error && (r.error.message || r.error.status)) || JSON.stringify(r.error);
+      sse("error", { type: "error", error: { type: "api_error", message: String(msg) } });
+      stop = "end_turn";
+      return;
+    }
     if (r.usageMetadata) {
       usage.input = r.usageMetadata.promptTokenCount || usage.input;
       usage.output = r.usageMetadata.candidatesTokenCount || usage.output;
@@ -203,6 +211,20 @@ export async function proxyAntigravity(req, res, route, body, { anthropicError }
     for (const part of parts) {
       if (part.thought) continue;
       if (typeof part.text === "string" && part.text) {
+        const m = /^[\s\S]*?\[Tool call:\s*([^\]\n]+)\]\s*\nArguments:\s*([\s\S]+?)\s*$/.exec(part.text);
+        if (m) {
+          let args = {};
+          try { args = JSON.parse(m[2]); } catch (e) { }
+          start(); closeBlock();
+          blockIndex++; blockKind = "tool";
+          const id = "toolu_" + Date.now() + "_" + blockIndex;
+          sse("content_block_start", { type: "content_block_start", index: blockIndex, content_block: { type: "tool_use", id, name: m[1].trim(), input: {} } });
+          sse("content_block_delta", { type: "content_block_delta", index: blockIndex, delta: { type: "input_json_delta", partial_json: JSON.stringify(args) } });
+          collected.tools.push({ id, name: m[1].trim(), input: args });
+          sse("content_block_stop", { type: "content_block_stop", index: blockIndex });
+          blockKind = null; stop = "tool_use"; sawContent = true;
+          continue;
+        }
         start();
         if (!textOpen) { closeBlock(); blockIndex++; blockKind = "text"; textOpen = true; sse("content_block_start", { type: "content_block_start", index: blockIndex, content_block: { type: "text", text: "" } }); }
         sse("content_block_delta", { type: "content_block_delta", index: blockIndex, delta: { type: "text_delta", text: part.text } });
@@ -242,6 +264,11 @@ export async function proxyAntigravity(req, res, route, body, { anthropicError }
     }
     start();
     closeBlock();
+    if (!sawContent && wantStream) {
+      sse("error", { type: "error", error: { type: "api_error", message: "Antigravity returned an empty response" } });
+      sse("message_stop", { type: "message_stop" });
+      return;
+    }
     if (!sawContent) {
       sse("content_block_start", { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } });
       sse("content_block_stop", { type: "content_block_stop", index: 0 });

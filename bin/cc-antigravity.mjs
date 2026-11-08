@@ -139,12 +139,15 @@ export async function discoverProject(accessToken, { fetchImpl = fetch, log = ()
     postJson(ONBOARD_USER_URL, accessToken, { tier_id: tierId, metadata }, fetchImpl).catch(() => { });
     return { projectId, tierId };
   }
-  try {
-    await postJson(ONBOARD_USER_URL, accessToken, { tier_id: tierId, metadata }, fetchImpl);
-    data = await postJson(LOAD_CODE_ASSIST_URL, accessToken, { metadata }, fetchImpl);
-    projectId = projectIdFrom(data);
-    tierId = (data.currentTier && (data.currentTier.id || data.currentTier.name)) || tierId;
-  } catch (e) { log("onboardUser/retry failed: " + e.message); }
+  for (let attempt = 1; attempt <= 3 && !projectId; attempt++) {
+    try {
+      await postJson(ONBOARD_USER_URL, accessToken, { tier_id: tierId, metadata }, fetchImpl);
+      data = await postJson(LOAD_CODE_ASSIST_URL, accessToken, { metadata }, fetchImpl);
+      projectId = projectIdFrom(data);
+      tierId = (data.currentTier && (data.currentTier.id || data.currentTier.name)) || tierId;
+    } catch (e) { log("onboardUser/discovery attempt " + attempt + " failed: " + e.message); }
+    if (!projectId && attempt < 3) await new Promise((r) => setTimeout(r, 1000 * attempt));
+  }
   return { projectId, tierId };
 }
 
@@ -188,20 +191,43 @@ function openBrowser(url) {
   return false;
 }
 
+let activePrompt = null;
 function askLine(prompt) {
   return new Promise((resolve) => {
-    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-    rl.question(prompt, (a) => { rl.close(); resolve(a.trim()); });
+    activePrompt = readline.createInterface({ input: process.stdin, output: process.stdout });
+    activePrompt.question(prompt, (a) => { const rl = activePrompt; activePrompt = null; try { rl.close(); } catch (e) { } resolve(a.trim()); });
   });
 }
+function closePrompt() { if (activePrompt) { try { activePrompt.close(); } catch (e) { } activePrompt = null; } }
 
-export async function login({ log = console.log, timeoutMs = 300000, fetchImpl = fetch } = {}) {
+export function parseCallbackInput(input, expectedState) {
+  const raw = String(input || "").trim();
+  if (!raw) throw new Error("empty input");
+  let code = null, state = expectedState || null, error = null, errorDescription = null;
+  try {
+    const u = new URL(raw);
+    code = u.searchParams.get("code");
+    state = u.searchParams.get("state") || u.hash.replace(/^#/, "") || state;
+    error = u.searchParams.get("error");
+    errorDescription = u.searchParams.get("error_description");
+  } catch (e) {
+    const [c, s] = raw.split("#", 2);
+    code = c || null;
+    state = s || state;
+  }
+  if (error) throw new Error(errorDescription || error);
+  if (!code) throw new Error("no authorization code found in the pasted value");
+  if (expectedState && state && state !== expectedState) throw new Error("OAuth state mismatch");
+  return { code, state };
+}
+
+export async function login({ log = console.log, timeoutMs = 300000, fetchImpl = fetch, browser = true } = {}) {
   const state = crypto.randomBytes(16).toString("hex");
   let server = null;
   let redirectUri = "";
   const resultPromise = new Promise((resolve, reject) => {
     server = http.createServer((req, res) => {
-      const u = new URL(req.url, "http://localhost");
+      const u = new URL(req.url, "http://127.0.0.1");
       if (u.pathname !== "/callback") { res.writeHead(404); res.end("not found"); return; }
       const code = u.searchParams.get("code");
       const gotState = u.searchParams.get("state");
@@ -211,24 +237,40 @@ export async function login({ log = console.log, timeoutMs = 300000, fetchImpl =
       if (err) return reject(new Error("Google OAuth error: " + err));
       if (!code) return reject(new Error("no code in callback"));
       if (gotState !== state) return reject(new Error("OAuth state mismatch"));
-      resolve(code);
+      resolve({ code });
     });
     server.on("error", reject);
-    server.listen(0, "0.0.0.0", () => {
+    server.listen(0, "127.0.0.1", () => {
       const port = server.address().port;
-      redirectUri = "http://localhost:" + port + "/callback";
+      redirectUri = "http://127.0.0.1:" + port + "/callback";
       const url = buildAuthUrl(redirectUri, state);
       log("Open this URL in a browser:\n\n" + url + "\n");
-      if (!openBrowser(url)) log("(could not open a browser automatically)");
-      log("Waiting for Google to redirect back...");
+      if (browser && !openBrowser(url)) log("(could not open a browser automatically)");
+      log("If Google shows an authorization code or a callback URL instead of redirecting,");
+      log("paste it below. Otherwise just wait for the browser redirect.");
     });
   });
+  // Accept a manually pasted callback URL / raw code too (headless/browser code screens).
+  let manualInput = process.env.CC_TERMUX_ANTIGRAVITY_CODE || process.env.CC_TERMUX_OAUTH_CALLBACK_URL || "";
+  const manualPromise = (async () => {
+    if (manualInput) return parseCallbackInput(manualInput, state);
+    if (!process.stdin.isTTY) return await new Promise(() => { }); // headless: wait for callback/env code
+    for (;;) {
+      let input = "";
+      try { input = await askLine("Paste callback URL, code, or just press Enter to keep waiting > "); } catch (e) { return await new Promise(() => { }); }
+      if (!input) continue; // keep waiting for the browser callback
+      try { return parseCallbackInput(input, state); }
+      catch (e) { log("Could not use that value: " + e.message); log("Paste the full callback URL or the code, or wait for the redirect."); }
+    }
+  })();
   let timer;
   try {
-    const code = await Promise.race([
+    const result = await Promise.race([
       resultPromise,
-      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("OAuth timed out")), timeoutMs); }),
+      manualPromise,
+      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("OAuth timed out; retry or paste a code/URL")), timeoutMs); }),
     ]);
+    const code = typeof result === "string" ? result : result.code;
     clearTimeout(timer);
     const tokens = await exchangeCode(code, redirectUri, fetchImpl);
     const user = await fetchUserInfo(tokens.access_token, fetchImpl);
@@ -240,11 +282,17 @@ export async function login({ log = console.log, timeoutMs = 300000, fetchImpl =
       scope: tokens.scope, email: user.email || "", project_id: project.projectId || "", tier_id: project.tierId || "",
       client_profile: "ide", created_at: new Date().toISOString(),
     };
-    if (!creds.project_id) throw new Error("Google account has no Cloud Code project. Run 'agy login' once or create a GCP project, then retry.");
+    if (!creds.project_id && process.stdin.isTTY) {
+      console.log("Google did not return a Cloud Code project id.");
+      const manual = (await askLine("GCP project id (leave empty to abort) > ")).trim();
+      if (/^[a-z][a-z0-9-]{4,28}[a-z0-9]$/.test(manual)) creds.project_id = manual;
+    }
+    if (!creds.project_id) throw new Error("Google account has no Cloud Code project. Run 'agy login' once, create/enter a GCP project, then retry.");
     saveCredentials(creds);
     return creds;
   } finally {
     clearTimeout(timer);
+    closePrompt();
     if (server) try { server.close(); } catch (e) { }
   }
 }

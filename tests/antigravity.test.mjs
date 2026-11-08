@@ -138,3 +138,28 @@ test("gateway adapter returns JSON for non-streaming requests", async () => {
   assert.equal(j.content[0].text, "hello world");
   assert.equal(j.usage.input_tokens, 7);
 });
+test("manual callback input accepts URL, raw code and code#state", async () => {
+  const ant = await import("../bin/cc-antigravity.mjs?t=" + Date.now());
+  const u = ant.parseCallbackInput("http://127.0.0.1:1234/callback?code=abc&state=st", "st");
+  assert.deepEqual(u, { code: "abc", state: "st" });
+  const raw = ant.parseCallbackInput("abc", "st");
+  assert.equal(raw.code, "abc");
+  const pair = ant.parseCallbackInput("abc#st", "st");
+  assert.equal(pair.code, "abc");
+  assert.throws(() => ant.parseCallbackInput("http://x/callback?code=a&state=wrong", "st"), /state mismatch/);
+  assert.throws(() => ant.parseCallbackInput("http://x/callback?error=access_denied&error_description=no", "st"), /no/);
+});
+test("login completes from a pasted/authorization code with mocked Google endpoints", async () => {
+  const ant = await import("../bin/cc-antigravity.mjs?t=" + Date.now());
+  const old = process.env.CC_TERMUX_ANTIGRAVITY_CODE;
+  process.env.CC_TERMUX_ANTIGRAVITY_CODE = "test-code";
+  try {
+    const creds = await ant.login({ browser: false, timeoutMs: 5000, log: () => { }, fetchImpl: fetch });
+    assert.equal(creds.access_token, "access-new");
+    assert.equal(creds.project_id, "project-123");
+    assert.equal(creds.email, "user@example.com");
+    assert.equal(ant.loadCredentials().project_id, "project-123");
+  } finally {
+    if (old === undefined) delete process.env.CC_TERMUX_ANTIGRAVITY_CODE; else process.env.CC_TERMUX_ANTIGRAVITY_CODE = old;
+  }
+});

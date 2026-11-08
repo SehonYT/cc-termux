@@ -173,7 +173,8 @@ Custom OpenAI-compatible and Anthropic-compatible endpoints can be added by URL.
 Antigravity uses your Google account (Antigravity / Google One AI), not an API key.
 
 ```bash
-cc-termux antigravity login    # opens Google consent, stores tokens + projectId
+cc-termux antigravity login    # opens Google consent; if Google shows a code/callback URL,
+                               # paste it into the prompt instead of waiting
 cc-termux antigravity status
 cc-termux antigravity logout
 # or simply choose the preset in `cc-termux setup`
