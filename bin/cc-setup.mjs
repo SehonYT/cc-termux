@@ -9,7 +9,7 @@ import readline from "node:readline";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { login as antigravityLogin, ensureProject as antigravityEnsureProject, loadCredentials as antigravityCreds, fetchAvailableModels, updateProviderModels } from "./cc-antigravity.mjs";
-import { installStatusLine } from "./cc-statusline.mjs";
+import { installStatusLine, refreshStatusLine } from "./cc-statusline.mjs";
 
 const HOME = os.homedir();
 const ROOT = process.env.CC_TERMUX_ROOT || path.join(HOME, ".local", "share", "cc-termux");
@@ -158,12 +158,21 @@ function normalizeBase(base) {
 
 async function fetchCustomModels(baseUrl, key, type) {
   const headers = key ? { authorization: "Bearer " + key } : {};
-  if (type === "anthropic") { headers["x-api-key"] = key; headers["anthropic-version"] = "2023-06-01"; }
-  const r = await fetch(baseUrl.replace(/\/$/, "") + "/models", { headers });
-  if (!r.ok) throw new Error("custom /models HTTP " + r.status);
-  const j = await r.json();
-  const arr = j.data || j.models || j;
-  return arr.map(m => ({ id: m.id || m.name, name: m.name || m.id, contextTokens: m.context_length || m.inputTokenLimit || null, inUsd: null, outUsd: null }));
+  if (key && type === "anthropic") { headers["x-api-key"] = key; headers["anthropic-version"] = "2023-06-01"; }
+  const base = baseUrl.replace(/\/$/, "");
+  let last = null;
+  for (const url of [base + "/v1/models", base + "/models"]) {
+    try {
+      const r = await fetch(url, { headers });
+      if (!r.ok) { last = new Error("custom /models HTTP " + r.status); continue; }
+      const j = await r.json();
+      const arr = j.data || j.models || j;
+      if (!Array.isArray(arr)) continue;
+      const models = arr.map(m => ({ id: m.id || m.name, name: m.name || m.id, contextTokens: m.context_length || m.inputTokenLimit || null, inUsd: null, outUsd: null }));
+      if (models.length) return models;
+    } catch (e) { last = e; }
+  }
+  throw last || new Error("custom /models unavailable");
 }
 function atomicWrite(file, text, mode = 0o600) {
   const tmp = file + "." + process.pid + ".tmp";
@@ -313,7 +322,7 @@ function summary(c, name) {
   console.log(cyan("model   : ") + p.model + "   ctx " + p.contextWindow);
   console.log(cyan("picker  : ") + total + " models from " + visible(c).length + " provider(s)");
   console.log();
-  console.log("run " + bold("claude") + " - the gateway restarts automatically.");
+  console.log("run " + bold("claude") + " - the gateway restarts on next launch.");
   console.log(dim("switch later in a session: /provider <name>   |   add more: cc-termux setup"));
 }
 
@@ -425,7 +434,7 @@ async function presetFlow(c, presetOverride) {
       aliases: { opus: amain.id, sonnet: amain.id, haiku: amain.id, subagent: amain.id },
     });
     summary(c, aname);
-    try { installStatusLine(); } catch (e) { }
+    try { installStatusLine(); await refreshStatusLine({ force: true }); } catch (e) { }
     if ((await ask("\nSend a small test request now? (y/N) > ")).toLowerCase().startsWith("y")) await runSmokeTest();
     return aname;
   }
@@ -502,7 +511,7 @@ async function envMode() {
       const name0 = process.env.CC_SETUP_NAME || (existing ? existing[0] : providerName(c0, "antigravity"));
       addProvider(c0, name0, { family: "antigravity", type: "antigravity", baseUrl: preset.baseUrl, path: preset.path, key: "", models: amodels, main: main.id, contextWindow: main.contextTokens || 1048576, aliases: { opus: main.id, sonnet: main.id, haiku: main.id, subagent: main.id } });
       summary(c0, name0);
-      try { installStatusLine(); } catch (e) { }
+      try { installStatusLine(); await refreshStatusLine({ force: true }); } catch (e) { }
       if (opts.test) await runSmokeTest();
       return;
     }
@@ -593,7 +602,7 @@ async function addFlow(c) {
     }
   }
   const name = providerName(c, f.family);
-  addProvider(c, name, { family: f.family, type: f.type, baseUrl: f.baseUrl, path: f.path, key, models: f.models, main: main.id, contextWindow: ctx, aliases: aliasModels });
+  addProvider(c, name, { family: f.family, type: f.type, baseUrl: f.baseUrl, path: f.path, key, noKey: !key, models: f.models, main: main.id, contextWindow: ctx, aliases: aliasModels });
   summary(c, name);
   if ((await ask("\nSend a small test request now? (y/N) > ")).toLowerCase().startsWith("y")) await runSmokeTest();
   return name;

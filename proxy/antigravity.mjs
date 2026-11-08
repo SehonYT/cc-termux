@@ -5,6 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { ensureAccessToken, loadCredentials, GENERATE_URL, antigravityHeaders } from "../bin/cc-antigravity.mjs";
+import { refreshStatusLine } from "../bin/cc-statusline.mjs";
 
 const MODEL_ALIASES = {
   "gemini-3.7-flash": "gemini-3.7-flash-tiered",
@@ -97,15 +98,24 @@ export function anthropicToGemini(body, model, creds) {
         else if (b.type === "image") { const p = imagePart(b); if (p) parts.push(p); }
         else if (b.type === "tool_use") {
           toolNameById.set(b.id, b.name);
-          const part = { functionCall: { name: b.name, args: b.input || {} } };
-          if (SIGNATURE_CACHE.has(b.id)) part.thoughtSignature = SIGNATURE_CACHE.get(b.id);
+          const part = { functionCall: { name: b.name, args: b.input || {}, ...(b.id ? { id: b.id } : {}) } };
+          // Claude-via-Antigravity tool calls carry no thoughtSignature; Cloud Code
+          // rejects signature-less native tool history. The official Antigravity
+          // path uses this bypass sentinel.
+          part.thoughtSignature = SIGNATURE_CACHE.get(b.id) || "skip_thought_signature_validator";
           parts.push(part);
         } else if (b.type === "tool_result") {
-          const name = toolNameById.get(b.tool_use_id) || "tool";
           let result = "";
           if (typeof b.content === "string") result = b.content;
           else if (Array.isArray(b.content)) result = b.content.filter((x) => x && x.type === "text").map((x) => x.text || "").join("\n");
-          parts.push({ functionResponse: { name, response: { result } } });
+          if (!toolNameById.has(b.tool_use_id)) {
+            // Orphan result (truncated history): Gemini/Vertex rejects a
+            // functionResponse that has no matching functionCall.
+            parts.push({ text: "[tool result" + (b.tool_use_id ? " " + b.tool_use_id : "") + "] " + result });
+          } else {
+            const name = toolNameById.get(b.tool_use_id);
+            parts.push({ functionResponse: { name, response: { result }, ...(b.tool_use_id ? { id: b.tool_use_id } : {}) } });
+          }
         }
       }
     }
@@ -341,5 +351,6 @@ export async function proxyAntigravity(req, res, route, body, { anthropicError }
     } catch (e2) { }
   } finally {
     try { res.end(); } catch (e) { try { res.destroy(); } catch (e2) { } }
+    refreshStatusLine().catch(() => { });
   }
 }

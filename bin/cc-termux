@@ -9,6 +9,9 @@ import { execFileSync } from "node:child_process";
 const ROOT = process.env.CC_TERMUX_ROOT || path.join(os.homedir(), ".local", "share", "cc-termux");
 const CFG = process.env.CC_TERMUX_CONFIG || path.join(os.homedir(), ".config", "cc-termux", "config.json");
 const CATALOG = path.join(os.homedir(), ".cache", "cc-termux", "catalog.json");
+function refreshStatusLineFile() {
+  try { execFileSync(process.execPath, [path.join(ROOT, "bin", "cc-statusline.mjs"), "--refresh"], { stdio: "ignore", timeout: 6000 }); } catch (e) { }
+}
 function atomicWrite(file, text, mode = 0o600) {
   const tmp = file + "." + process.pid + ".tmp";
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -460,13 +463,14 @@ switch (cmd) {
       if (c.override) console.log("override: " + c.override.provider + " -> " + (c.override.model || "default"));
       break;
     }
-    if (args[0] === "off") { delete c.override; save(c); console.log("override cleared; active provider: " + c.active); break; }
+    if (args[0] === "off") { delete c.override; save(c); refreshStatusLineFile(); console.log("override cleared; active provider: " + c.active); break; }
     const name = args[0];
     if (!c.providers[name]) { console.error("unknown provider:", name); console.error("known: " + Object.keys(c.providers || {}).join(", ")); process.exit(1); }
     const p = c.providers[name];
     c.active = name;
     c.override = { provider: name, model: p.model || p.defaultModel || null };
     save(c);
+    refreshStatusLineFile();
     if (p.model) setDefaultModel(composite(name, p.model));
     console.log("active provider -> " + name + " (" + (p.model || p.defaultModel) + ")");
     console.log("the running Claude Code session switches on its next request");
@@ -639,6 +643,7 @@ switch (cmd) {
     const sub = args[0] || "status";
     if (!["login", "status", "logout", "refresh", "usage", "models"].includes(sub)) { console.log("usage: cc-termux antigravity [login|status|logout|usage|models]"); break; }
     execFileSync(process.execPath, [path.join(ROOT, "bin", "cc-antigravity.mjs"), sub === "refresh" ? "status" : sub], { stdio: "inherit" });
+    if ((sub === "login" || sub === "logout" || sub === "usage") || (sub === "models" && args.includes("--update"))) refreshStatusLineFile();
     break;
   }
   case "statusline": {

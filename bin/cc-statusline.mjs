@@ -1,17 +1,15 @@
 #!/usr/bin/env node
-// Claude Code status line: shows the active provider model plus Antigravity quota.
+// Claude Code status line. The configured command prints a pre-rendered file directly
+// (fast); this script refreshes that file from the Antigravity quota API.
 import fs from "node:fs";
+import { fileURLToPath } from "node:url";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { getAntigravityUsage, readUsageCache } from "./cc-antigravity.mjs";
 
-function configPath() {
-  return process.env.CC_TERMUX_CONFIG || path.join(os.homedir(), ".config", "cc-termux", "config.json");
-}
-function claudeDir() {
-  return process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), ".claude");
-}
+function configPath() { return process.env.CC_TERMUX_CONFIG || path.join(os.homedir(), ".config", "cc-termux", "config.json"); }
+function claudeDir() { return process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), ".claude"); }
+function cacheDir() { return process.env.CC_TERMUX_CACHE || path.join(os.homedir(), ".cache", "cc-termux"); }
+function statusFile() { return path.join(cacheDir(), "antigravity-status.txt"); }
 function readJson(file) { try { return JSON.parse(fs.readFileSync(file, "utf8")); } catch (e) { return {}; } }
 function writeJson(file, data) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -30,13 +28,13 @@ function rel(iso) {
   if (h < 24) return h + "h" + (mm ? mm + "m" : "");
   return Math.floor(h / 24) + "d" + (h % 24 ? h % 24 + "h" : "");
 }
-function shortGroup(g) {
-  if (g.id === "gemini") return "G";
-  if (g.id === "claude") return "C";
-  if (g.id === "argon") return "A";
-  return (g.label || "?").slice(0, 1).toUpperCase();
+function activeModel(cfg) {
+  const p = cfg.providers && cfg.providers[cfg.active];
+  if (!p) return null;
+  return { provider: cfg.active, type: p.type, name: (p.modelsById && p.modelsById[p.model] && p.modelsById[p.model].name) || p.model || p.type };
 }
-function formatUsage(u) {
+function shortGroup(g) { return g.id === "gemini" ? "G" : g.id === "claude" ? "C" : g.id === "argon" ? "A" : (g.label || "?").slice(0, 1).toUpperCase(); }
+export function formatUsage(u) {
   if (!u || !Array.isArray(u.groups) || !u.groups.length) return "usage ?";
   const parts = [];
   for (const g of u.groups) {
@@ -48,23 +46,58 @@ function formatUsage(u) {
   }
   return parts.join(" · ") || "usage ?";
 }
-async function currentUsage() {
-  const cached = readUsageCache();
-  if (cached && cached.fetchedAt && Date.now() - cached.fetchedAt < 120000) return cached;
+function lineFor(usage, model) {
+  return "antigravity · " + model + (usage ? " · " + formatUsage(usage) : "");
+}
+export function readStatusLine() {
+  try { return fs.readFileSync(statusFile(), "utf8").trim(); } catch (e) { return ""; }
+}
+function writeStatusLine(line) {
   try {
-    return await Promise.race([
-      getAntigravityUsage({ timeoutMs: 1500 }),
-      new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), 2200)),
-    ]);
-  } catch (e) { return cached || null; }
+    fs.mkdirSync(cacheDir(), { recursive: true });
+    const tmp = statusFile() + "." + process.pid + ".tmp";
+    fs.writeFileSync(tmp, line + "\n", { mode: 0o644 });
+    fs.renameSync(tmp, statusFile());
+  } catch (e) { }
+}
+let refreshInFlight = null;
+export async function refreshStatusLine({ force = false } = {}) {
+  if (refreshInFlight) return refreshInFlight;
+  refreshInFlight = (async () => {
+  const cfg = readJson(configPath());
+  const model = activeModel(cfg);
+  if (!model) { writeStatusLine("cc-termux"); return "cc-termux"; }
+  if (model.type !== "antigravity") { const line = "cc-termux · " + model.provider + " · " + model.name; writeStatusLine(line); return line; }
+  try {
+    const st = fs.statSync(statusFile());
+    const currentLine = readStatusLine();
+    if (!force && Date.now() - st.mtimeMs < 60000 && currentLine.includes("· " + model.name + " ·")) return currentLine;
+  } catch (e) { }
+  try {
+    const { getAntigravityUsage } = await import("./cc-antigravity.mjs");
+    const usage = await getAntigravityUsage({ timeoutMs: 2500 });
+    const line = lineFor(usage, model.name);
+    writeStatusLine(line);
+    return line;
+  } catch (e) {
+    const line = "antigravity · " + model.name + " · usage ?";
+    writeStatusLine(line);
+    return line;
+  }
+  })().finally(() => { refreshInFlight = null; });
+  return refreshInFlight;
 }
 export function installStatusLine() {
   const settingsFile = path.join(claudeDir(), "settings.json");
   const settings = readJson(settingsFile);
   const current = settings.statusLine;
-  const ours = current && typeof current.command === "string" && /cc-termux\s+statusline/.test(current.command);
+  const ours = current && typeof current.command === "string" && /cc-termux\s+statusline|antigravity-status\.txt/.test(current.command);
   if (!current || ours) {
-    settings.statusLine = { type: "command", command: "cc-termux statusline" };
+    // POSIX shells can cat the pre-rendered line in ~1ms; Windows falls back to the shim.
+    const command = process.platform === "win32"
+      ? "cc-termux statusline --print"
+      : "sh -c 'f=\"${CC_TERMUX_CACHE:-$HOME/.cache/cc-termux}/antigravity-status.txt\"; cat \"$f\" 2>/dev/null || printf cc-termux'";
+    settings.statusLine = { type: "command", command };
     writeJson(settingsFile, settings);
   }
   const cmdFile = path.join(claudeDir(), "commands", "antigravity-usage.md");
@@ -81,26 +114,22 @@ export function installStatusLine() {
   } catch (e) { }
   return { settingsFile, cmdFile, installed: !current || ours };
 }
-
-async function main() {
-  const cfg = readJson(configPath());
-  const active = cfg.providers && cfg.providers[cfg.active];
-  if (!active) { console.log("cc-termux"); return; }
-  const model = (active.modelsById && active.modelsById[active.model] && active.modelsById[active.model].name) || active.model || active.type;
-  if (active.type !== "antigravity") {
-    console.log("cc-termux · " + (cfg.active || "provider") + " · " + model);
-    return;
-  }
-  const usage = await currentUsage();
-  console.log("antigravity · " + model + " · " + formatUsage(usage));
-}
-
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   if (process.argv.includes("--install")) {
-    const r = installStatusLine();
-    console.log(r.installed ? "status line installed in " + r.settingsFile : "existing custom status line kept (" + r.settingsFile + ")");
-    console.log("full usage: /antigravity-usage");
+    installStatusLine();
+    refreshStatusLine({ force: true }).then(() => {
+      console.log("status line installed in " + path.join(claudeDir(), "settings.json"));
+      console.log("full usage: /antigravity-usage");
+    }).catch((e) => { console.log("status line installed (usage refresh pending)"); });
+  } else if (process.argv.includes("--refresh")) {
+    refreshStatusLine({ force: true }).then((l) => console.log(l)).catch(() => { });
   } else {
-    main().catch((e) => { console.log("cc-termux · usage unavailable"); });
+    const line = readStatusLine();
+    if (line) console.log(line);
+    else {
+      const cfg = readJson(configPath());
+      const m = activeModel(cfg);
+      console.log(m ? (m.type === "antigravity" ? "antigravity · " + m.name : "cc-termux · " + m.provider + " · " + m.name) : "cc-termux");
+    }
   }
 }

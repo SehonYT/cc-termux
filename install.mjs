@@ -199,6 +199,11 @@ function stopManagedGateway() {
       } catch (e) { }
     }
   } catch (e) { }
+  try {
+    const pf = path.join(os.homedir(), ".cache", "cc-termux", "gateway.pid");
+    const pid = Number(fs.readFileSync(pf, "utf8").trim());
+    if (pid && pid !== process.pid && pid !== process.ppid && !pids.includes(pid)) pids.push(pid);
+  } catch (e) { }
   for (const pid of pids) { try { process.kill(pid, "SIGTERM"); } catch (e) { } }
   try { fs.unlinkSync(path.join(os.homedir(), ".cache", "cc-termux", "gateway.pid")); } catch (e) { }
   if (pids.length) log("stopped running gateway so the new code loads on next launch");

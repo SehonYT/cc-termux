@@ -15,6 +15,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { proxyAntigravity } from "./antigravity.mjs";
+import { refreshStatusLine } from "../bin/cc-statusline.mjs";
 
 const CONFIG_PATH = process.env.CC_TERMUX_CONFIG || path.join(os.homedir(), '.config', 'cc-termux', 'config.json');
 const LOG = (...a) => {
@@ -741,6 +742,7 @@ const server = http.createServer(async (req, res) => {
           CONFIG.override = { provider: name, model: target.model || null };
           try { saveConfig(); } catch (e) { LOG('saveConfig failed', e.message); }
           LOG('provider switch via /model ->', name);
+          refreshStatusLine().catch(() => { });
           model = target.model || model;
           body.model = model;
         }

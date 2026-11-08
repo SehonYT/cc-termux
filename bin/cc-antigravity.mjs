@@ -389,6 +389,7 @@ export async function updateProviderModels({ log = console.log, timeoutMs = 1500
   p.modelsById = {};
   for (const m of models) p.modelsById[m.id] = { name: m.name, contextTokens: m.contextTokens || 0, inUsd: null, outUsd: null };
   if (!p.modelsById[p.model]) p.model = p.modelsById["claude-sonnet-4-6"] ? "claude-sonnet-4-6" : models[0].id;
+  if (cfg.override && cfg.override.provider === name && !p.modelsById[cfg.override.model]) cfg.override.model = p.model;
   p.defaultModel = p.defaultModel && p.modelsById[p.defaultModel] ? p.defaultModel : p.model;
   p.aliases = p.aliases || {};
   for (const k of Object.keys(p.aliases)) if (!p.modelsById[p.aliases[k]]) p.aliases[k] = p.model;
@@ -403,6 +404,7 @@ export async function updateProviderModels({ log = console.log, timeoutMs = 1500
   try {
     const settings = JSON.parse(fs.readFileSync(settingsFile, "utf8"));
     if (settings.modelPicker && Array.isArray(settings.modelPicker.options)) {
+      if (typeof settings.model === "string" && settings.model.startsWith("prov/" + name + "/") && !models.some((m) => "prov/" + name + "/" + m.id === settings.model)) settings.model = "prov/" + name + "/" + p.model;
       settings.modelPicker.options = settings.modelPicker.options.filter((o) => !String(o.model || "").startsWith("prov/" + name + "/"));
       for (const m of models) {
         settings.modelPicker.options.push({

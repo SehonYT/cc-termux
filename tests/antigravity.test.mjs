@@ -105,7 +105,13 @@ test("request translation maps text, system and tools", async () => {
   assert.equal(envelope.request.tools[0].functionDeclarations[0].name, "read");
   assert.equal(envelope.request.tools[0].functionDeclarations[0].parameters.properties.path.exclusiveMinimum, undefined);
   assert.equal(envelope.request.tools[0].functionDeclarations[0].parameters.properties.path.minLength, undefined);
-  assert.ok(envelope.request.contents.some((c) => c.role === "model" && c.parts.some((p) => p.functionCall)));
+  const modelCall = envelope.request.contents.find((c) => c.role === "model" && c.parts.some((p) => p.functionCall));
+  assert.ok(modelCall);
+  const call = modelCall.parts.find((p) => p.functionCall);
+  assert.equal(call.functionCall.id, "toolu_1");
+  assert.equal(call.thoughtSignature, "skip_thought_signature_validator");
+  const resultContent = envelope.request.contents.find((c) => c.role === "user" && c.parts.some((p) => p.functionResponse));
+  assert.equal(resultContent.parts.find((p) => p.functionResponse).functionResponse.id, "toolu_1");
   assert.ok(envelope.request.contents.some((c) => c.role === "user" && c.parts.some((p) => p.functionResponse)));
 });
 
