@@ -225,12 +225,19 @@ function askLine(prompt) {
 }
 function closePrompt() { if (activePrompt) { try { activePrompt.close(); } catch (e) { } activePrompt = null; } }
 
+// The Cloud Code catalog includes legacy aliases and plan-gated/internal models.
+// The official Antigravity CLI only exposes: Claude Opus 4.6, Claude Sonnet 4.6,
+// Gemini 3.8 Flash tiers, GPT-OSS 120B and (paid plans only) Gemini 4 Argon.
+const OFFICIAL_MODEL_RE = /^(claude-opus-4-6-thinking|claude-sonnet-4-6|gemini-3\.8-flash-(high|medium|low)|gpt-oss-120b-medium)$/;
+const ARGON_MODEL_RE = /^gemini-4-argon-(high|medium|low)$/;
 export function parseAvailableModels(data) {
   const models = [];
   const src = (data && data.models) || {};
   for (const [id, info] of Object.entries(src)) {
     if (!info || typeof info !== "object") continue;
     if (info.isInternal === true || info.disabled === true) continue;
+    const official = OFFICIAL_MODEL_RE.test(id) || ARGON_MODEL_RE.test(id);
+    if (!official && process.env.CC_TERMUX_ANTIGRAVITY_ALL_MODELS !== "1") continue;
     if (/^(tab_|chat_)/i.test(id) || /(^|[-_])(image|imagen|tts|audio|embedding|embed|video|veo|transcribe|tab)([-_]|$)/i.test(id)) continue;
     models.push({
       id,

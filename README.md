@@ -186,6 +186,9 @@ cc-termux antigravity logout
 Credentials live in `~/.config/cc-termux/antigravity.json` (0600). The gateway refreshes
 the access token automatically and routes Anthropic Messages through Google Cloud Code
 (`v1internal:streamGenerateContent`). Models are exposed in `/model` as `prov/antigravity/...`.
+Models are restricted to the official Antigravity CLI catalog: Claude Opus/Sonnet 4.6,
+Gemini 3.8 Flash (high/medium/low), GPT-OSS 120B, plus Gemini 4 Argon only when the
+account is entitled (paid Pro/Ultra; free/Jio AI Pro accounts do not get Argon).
 Requires an account with Antigravity access; if project discovery fails, run `agy login` once or
 add a GCP project ID. Tokens are never sent anywhere except Google.
 

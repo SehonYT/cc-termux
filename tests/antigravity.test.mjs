@@ -191,7 +191,9 @@ test("live model and quota payload parsing", async () => {
   const models = ant.parseAvailableModels({ models: {
     "gemini-3.8-flash-high": { displayName: "Gemini 3.8 Flash (High)", maxTokens: 1048576, maxOutputTokens: 65536, recommended: true },
     "claude-sonnet-4-6": { displayName: "Claude Sonnet 4.6", maxTokens: 250000, maxOutputTokens: 64000 },
+    "gemini-2.5-pro": { displayName: "Legacy Gemini" },
     "gemini-3.1-flash-image": { displayName: "Image" },
+    "gemini-4-argon-disabled": { displayName: "Argon (disabled)" },
     "tab_flash_lite_preview": { displayName: "Tab" },
     "internal_x": { displayName: "Internal", isInternal: true },
   } });
@@ -211,4 +213,15 @@ test("live model and quota payload parsing", async () => {
   assert.equal(Math.round(usage.groups[0].windows.session.percent), 50);
   assert.equal(usage.groups[1].id, "claude");
   assert.equal(Math.round(usage.groups[1].windows.weekly.percent), 68);
+});
+test("official Antigravity catalog keeps only CLI-visible models and hides disabled Argon", async () => {
+  const ant = await import("../bin/cc-antigravity.mjs?t=" + Date.now());
+  const models = ant.parseAvailableModels({ models: {
+    "gemini-3.8-flash-high": { displayName: "Gemini 3.8 Flash (High)" },
+    "gpt-oss-120b-medium": { displayName: "GPT-OSS" },
+    "gemini-3.1-flash-lite": { displayName: "Old" },
+    "gemini-4-argon-disabled": { displayName: "Argon disabled" },
+    "gemini-4-argon-high": { displayName: "Argon" },
+  } });
+  assert.deepEqual(models.map((m) => m.id).sort(), ["gemini-3.8-flash-high", "gemini-4-argon-high", "gpt-oss-120b-medium"].sort());
 });
