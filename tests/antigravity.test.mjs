@@ -87,7 +87,7 @@ test("request translation maps text, system and tools", async () => {
   const ant = await import("../bin/cc-antigravity.mjs?t=" + Date.now());
   const adapter = await import("../proxy/antigravity.mjs?t=" + Date.now());
   const envelope = adapter.anthropicToGemini({
-    system: "be brief",
+    system: "x-anthropic-billing-header: cc_version=2.1.319; cc_entrypoint=sdk-cli;\nbe brief",
     max_tokens: 1234,
     messages: [
       { role: "user", content: "hi" },
@@ -100,6 +100,7 @@ test("request translation maps text, system and tools", async () => {
   assert.equal(envelope.model, "claude-sonnet-4-6");
   assert.equal(envelope.userAgent, "antigravity");
   assert.equal(envelope.request.systemInstruction.parts[0].text, "be brief");
+  assert.doesNotMatch(envelope.request.systemInstruction.parts[0].text, /billing-header/);
   assert.equal(envelope.request.generationConfig.maxOutputTokens, 1234);
   assert.equal(envelope.request.tools[0].functionDeclarations[0].name, "read");
   assert.equal(envelope.request.tools[0].functionDeclarations[0].parameters.properties.path.exclusiveMinimum, undefined);
@@ -170,17 +171,18 @@ test("login completes from a pasted/authorization code with mocked Google endpoi
     if (old === undefined) delete process.env.CC_TERMUX_ANTIGRAVITY_CODE; else process.env.CC_TERMUX_ANTIGRAVITY_CODE = old;
   }
 });
-test("quota exhaustion is reported as a fast 400, not a retryable 429", async () => {
+test("rate limiting is retried then reported as 429", async () => {
   const ant = await import("../bin/cc-antigravity.mjs?t=" + Date.now());
   ant.saveCredentials({ access_token: "access-new", refresh_token: "refresh-new", expires_at: Date.now() + 3600_000, project_id: "project-123" });
   const adapter = await import("../proxy/antigravity.mjs?t=" + Date.now());
   generateMode = "quota";
+  process.env.CC_TERMUX_ANTIGRAVITY_429_RETRIES = "0";
   const errors = [];
   const res = { writeHead() { }, flushHeaders() { }, write() { }, end() { }, destroy() { } };
   try {
     await adapter.proxyAntigravity({}, res, { name: "antigravity", model: "claude-sonnet-4-6", provider: { type: "antigravity" } }, { max_tokens: 10, messages: [{ role: "user", content: "hi" }] }, { anthropicError: (_r, status, type, message) => errors.push([status, type, message]) });
-  } finally { generateMode = "ok"; }
+  } finally { generateMode = "ok"; delete process.env.CC_TERMUX_ANTIGRAVITY_429_RETRIES; }
   assert.equal(errors.length, 1);
-  assert.equal(errors[0][0], 400);
-  assert.match(errors[0][2], /quota/i);
+  assert.equal(errors[0][0], 429);
+  assert.match(errors[0][2], /rate-limited|quota/i);
 });

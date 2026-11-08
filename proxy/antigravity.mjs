@@ -79,7 +79,11 @@ export function anthropicToGemini(body, model, creds) {
     if (last && last.role === role) last.parts.push(...parts);
     else contents.push({ role, parts });
   };
-  const sys = body.system ? textOf(body.system) : "";
+  const rawSystem = body.system ? textOf(body.system) : "";
+  // Claude Code embeds an x-anthropic-billing-header line in the system prompt.
+  // Google Cloud Code rejects that request shape with a misleading 429
+  // RESOURCE_EXHAUSTED; stripping the line makes the same request succeed.
+  const sys = rawSystem.split(/\r?\n/).filter((line) => !/^\s*x-anthropic-billing-header\s*:/i.test(line)).join("\n").trim();
   const msgs = Array.isArray(body.messages) ? body.messages : [];
   for (const m of msgs) {
     const role = m.role === "assistant" ? "model" : "user";
@@ -165,6 +169,7 @@ export async function proxyAntigravity(req, res, route, body, { anthropicError }
       const dir = path.join(os.homedir(), ".cache", "cc-termux");
       fs.mkdirSync(dir, { recursive: true });
       fs.writeFileSync(path.join(dir, "antigravity-request.json"), JSON.stringify(envelope, null, 2) + "\n");
+      fs.writeFileSync(path.join(dir, "antigravity-body.json"), JSON.stringify(body, null, 2) + "\n");
     } catch (e) { }
   }
   const sendUpstream = async (accessToken) => fetch(GENERATE_URL, {
@@ -182,16 +187,36 @@ export async function proxyAntigravity(req, res, route, body, { anthropicError }
       upstream = await sendUpstream(token);
     } catch (e) { }
   }
+  // Antigravity returns RESOURCE_EXHAUSTED (429) both for hard quota and for short
+  // per-minute bursts (Claude Code's retry storm was triggering the latter). Retry
+  // a few times with backoff before reporting a rate limit.
+  const max429 = Number(process.env.CC_TERMUX_ANTIGRAVITY_429_RETRIES || 3);
+  let last429Text = "";
+  for (let attempt = 0; upstream.status === 429 && attempt < max429; attempt++) {
+    last429Text = await upstream.text();
+    let delay = [2000, 5000, 10000][Math.min(attempt, 2)];
+    try {
+      const ra = upstream.headers && upstream.headers.get("retry-after");
+      if (ra && /^\d+$/.test(ra.trim())) delay = Math.min(15000, Math.max(500, Number(ra) * 1000));
+    } catch (e) { }
+    try {
+      const j = JSON.parse(last429Text);
+      const d = (j.error && j.error.details || []).find((x) => x["@type"] && /RetryInfo/.test(x["@type"]));
+      if (d && typeof d.retryDelay === "string") { const sec = parseFloat(d.retryDelay); if (sec > 0) delay = Math.min(15000, sec * 1000); }
+    } catch (e) { }
+    console.error(new Date().toISOString(), "antigravity rate-limited; retry", attempt + 1, "in", delay + "ms");
+    await new Promise((r) => setTimeout(r, delay));
+    try { upstream = await sendUpstream(token); } catch (e) { break; }
+  }
   if (!upstream.ok) {
-    const text = await upstream.text();
+    const text = upstream.status === 429 && last429Text ? last429Text : await upstream.text();
     console.error(new Date().toISOString(), "antigravity upstream", upstream.status, text.slice(0, 500));
     let msg = text.slice(0, 600);
     try { const j = JSON.parse(text); msg = (j.error && (j.error.message || j.error.status)) || msg; } catch (e) { }
-    const quota = upstream.status === 429 && /RESOURCE_EXHAUSTED|quota|exhausted|rate.?limit/i.test(text);
-    const status = quota ? 400 : upstream.status;
-    const type = upstream.status === 401 ? "authentication_error" : quota ? "invalid_request_error" : upstream.status === 429 ? "rate_limit_error" : "api_error";
-    const suffix = quota ? " (Antigravity quota for this model is exhausted/reset; choose another model with /model)" : "";
-    return anthropicError(res, status, type, "Antigravity upstream " + upstream.status + ": " + msg + suffix);
+    const type = upstream.status === 401 ? "authentication_error" : upstream.status === 429 ? "rate_limit_error" : "api_error";
+    try { if (upstream.status === 429) res.setHeader("retry-after", "10"); } catch (e) { }
+    const suffix = upstream.status === 429 ? " (Antigravity temporarily rate-limited; usage may still be available - retry shortly or switch model with /model)" : "";
+    return anthropicError(res, upstream.status, type, "Antigravity upstream " + upstream.status + ": " + msg + suffix);
   }
   const reader = upstream.body.getReader();
   const dec = new TextDecoder();
