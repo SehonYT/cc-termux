@@ -11,6 +11,18 @@ const CFG = process.env.CC_TERMUX_CONFIG || path.join(os.homedir(), ".config", "
 const CATALOG = path.join(os.homedir(), ".cache", "cc-termux", "catalog.json");
 function refreshStatusLineFile() {
   try { execFileSync(process.execPath, [path.join(ROOT, "bin", "cc-statusline.mjs"), "--refresh"], { stdio: "ignore", timeout: 6000 }); } catch (e) { }
+  try {
+    const cache = process.env.CC_TERMUX_CACHE || path.join(os.homedir(), ".cache", "cc-termux");
+    const file = path.join(cache, "antigravity-status.txt");
+    if (!fs.existsSync(file)) {
+      const cfg = JSON.parse(fs.readFileSync(CFG, "utf8"));
+      const prov = cfg.providers && cfg.providers[cfg.active];
+      if (prov) {
+        fs.mkdirSync(cache, { recursive: true });
+        fs.writeFileSync(file, "cc-termux · " + cfg.active + " · " + (prov.model || prov.defaultModel || prov.type) + NL);
+      }
+    }
+  } catch (e) { }
 }
 function atomicWrite(file, text, mode = 0o600) {
   const tmp = file + "." + process.pid + ".tmp";
@@ -102,8 +114,14 @@ async function doctor(fix) {
       fail("provider " + name + " has no API key (cc-termux key " + name + " <key>)");
     }
     const mc = Object.keys(p.modelsById || {}).length;
+    let shownModel = p.model;
+    try {
+      const sm = JSON.parse(fs.readFileSync(settingsPath, "utf8")).model || "";
+      const mm = /^prov\/([^/]+)\/(.+)$/.exec(String(sm));
+      if (mm && mm[1] === name) shownModel = mm[2];
+    } catch (e) { }
     if (!mc) warn("provider " + name + " has no cached models (run: cc-termux setup)");
-    else pass("provider " + name + ": " + p.model + "  (" + mc + " models, retries " + (p.retries || 5) + ")");
+    else pass("provider " + name + ": " + shownModel + "  (" + mc + " models, retries " + (p.retries || 5) + ")");
   }
 
   try {
@@ -121,7 +139,7 @@ async function doctor(fix) {
   let health = null;
   try { health = await (await fetch("http://127.0.0.1:" + portv + "/health")).json(); } catch (e) {}
   if (health && health.ok) pass("gateway up on " + portv + " (active: " + health.active + ")");
-  else warn("gateway not running (starts automatically on next claude run)");
+  else lines.push("  - gateway not running (starts automatically on next claude run)");
 
   let settings = {};
   try { settings = JSON.parse(fs.readFileSync(settingsPath, "utf8")); } catch (e) {}
@@ -217,6 +235,7 @@ async function doctor(fix) {
     const tail = fs.readFileSync(log, "utf8").split("\n").slice(-300).join("\n");
     let qc = {}; try { qc = JSON.parse(fs.readFileSync(path.join(os.homedir(), ".cache", "cc-termux", "quota.json"), "utf8")); } catch (e) { }
     for (const [provider, q] of Object.entries(qc)) {
+      if (!c.providers || !c.providers[provider]) continue;
       const age = Date.now() - new Date(q.at).getTime();
       if (age < 7 * 24 * 3600 * 1000) warn("provider " + provider + ": recent " + q.status + (q.limit != null ? " (limit " + q.limit + ")" : "") + " at " + q.at);
     }
@@ -329,6 +348,10 @@ async function diagnose() {
     }
   } catch (e) {}
   console.log("  gateway   " + (health ? "UP active=" + health.active : "DOWN") + "  pids=" + JSON.stringify(pids));
+  if (!c || !c.active || !(c.providers && c.providers[c.active])) {
+    console.log("  next      run: cc-termux setup");
+    return;
+  }
   if (!health) {
     hdr("gateway start attempt");
     const { spawn } = await import("node:child_process");
@@ -532,8 +555,9 @@ switch (cmd) {
       let shown = 0;
       for (const [name, p] of Object.entries(c.providers || {})) {
         if (p.hidden) continue;
-        const model = p.model || p.defaultModel || "-";
-        console.log((name === c.active ? " \u2714 " : "   ") + name.padEnd(14) + String(p.type).padEnd(10) + model + "  key=" + mask(loadKeys()[name] || (p.apiKeyEnv ? "env:" + p.apiKeyEnv : "")));
+        const model = (name === c.active && c.override && c.override.model) ? c.override.model : (p.model || p.defaultModel || "-");
+        const keyLabel = p.type === "antigravity" ? "OAuth" : p.noKey ? "no key" : mask(loadKeys()[name] || (p.apiKeyEnv ? "env:" + p.apiKeyEnv : ""));
+        console.log((name === c.active ? " \u2714 " : "   ") + name.padEnd(14) + String(p.type).padEnd(12) + " " + model + "  key=" + keyLabel);
         shown++;
       }
       if (!shown) console.log("no providers configured - run: cc-termux setup");
@@ -547,8 +571,8 @@ switch (cmd) {
     c.active = name;
     c.override = { provider: name, model: p.model || p.defaultModel || null };
     save(c);
-    refreshStatusLineFile();
     if (p.model) setDefaultModel(composite(name, p.model));
+    refreshStatusLineFile();
     console.log("active provider -> " + name + " (" + (p.model || p.defaultModel) + ")");
     console.log("the running Claude Code session switches on its next request");
     break;
@@ -622,6 +646,7 @@ switch (cmd) {
   }
   case "logs": {
     const f = path.join(os.homedir(), ".cache", "cc-termux", "gateway.log");
+    if (!fs.existsSync(f)) { console.log("no gateway log yet - run claude to start the gateway"); break; }
     console.log(fs.readFileSync(f, "utf8").split("\n").slice(-60).join("\n"));
     break;
   }

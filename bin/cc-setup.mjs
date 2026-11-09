@@ -608,8 +608,10 @@ async function envMode() {
       family: "custom", type: "openai", baseUrl: preset.baseUrl, path: preset.path || "/chat/completions",
       key, models, main: main.id, contextWindow: main.contextTokens || 128000,
       aliases: { opus: main.id, sonnet: main.id, haiku: main.id, subagent: main.id },
+      noKey: !!(preset.noKey || preset.local),
     });
     summary(c, name);
+    await ensureStatusLine();
     if (opts.test) await runSmokeTest();
     return;
   }
@@ -637,6 +639,7 @@ async function envMode() {
   addProvider(c, name, { family: f.family, type: f.type, baseUrl: f.baseUrl, path: f.path, key, noKey: !key, models: f.models, main: main.id, contextWindow: ctx,
     aliases: { opus: main.id, sonnet: main.id, haiku: bg.id, subagent: bg.id } });
   summary(c, name);
+  await ensureStatusLine();
 }
 
 async function addFlow(c) {
@@ -728,7 +731,7 @@ async function ttyMode() {
       console.log();
       console.log("  " + dim("#") + "  " + dim("provider".padEnd(15)) + dim("type".padEnd(12)) + dim("model"));
       list.forEach(([name, p], i) => {
-        const model = p.model || p.defaultModel || "-";
+        const model = (c.override && c.override.provider === name && c.override.model) ? c.override.model : (p.model || p.defaultModel || "-");
         const key = p.type === "antigravity" ? "Google OAuth" : p.noKey ? "no key" : ((ks0[name] || p.apiKeyEnv) ? "key saved" : "no key");
         console.log("  " + String(i + 1).padStart(2) + (name === c.active ? color("32", " ✔ ") : "   ") + bold(name.padEnd(15)) + dim(String(p.type).padEnd(12)) + model + dim("   " + key));
       });

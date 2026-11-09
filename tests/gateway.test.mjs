@@ -142,3 +142,28 @@ test("gateway translates upstream OpenAI tool calls into Anthropic tool_use bloc
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+test("discovery lists configured provider models and invalid JSON is rejected", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cc-gw-disc-"));
+  const port = 23000 + Math.floor(Math.random() * 1000);
+  const { child } = startGateway(tmp, port, {
+    listen: { host: "127.0.0.1", port }, active: "p",
+    providers: { p: { type: "openai", baseUrl: "http://127.0.0.1:9", path: "/chat/completions", model: "m", modelsById: { m: { name: "Model M" }, n: { name: "Model N" } } } },
+    routing: {},
+  });
+  try {
+    assert.ok(await waitHealth(port), "gateway did not start");
+    const res = await fetch("http://127.0.0.1:" + port + "/v1/models", { headers: { authorization: "Bearer cc-termux-local" } });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    const ids = body.data.map((m) => m.id).sort();
+    assert.deepEqual(ids, ["prov/p/m", "prov/p/n"]);
+    const bad = await fetch("http://127.0.0.1:" + port + "/v1/messages", {
+      method: "POST", headers: { "content-type": "application/json", authorization: "Bearer cc-termux-local" }, body: "{bad",
+    });
+    assert.equal(bad.status, 400);
+    assert.match((await bad.json()).error.message, /invalid JSON/);
+  } finally {
+    child.kill("SIGKILL");
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});

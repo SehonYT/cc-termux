@@ -87,3 +87,34 @@ test("heal never writes prefix shims for a non-canonical install root", () => {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+test("heal preserves the model selected in Claude settings", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cc-heal-model-"));
+  const home = path.join(tmp, "home");
+  const root = path.join(tmp, "root");
+  fs.mkdirSync(path.join(home, ".claude"), { recursive: true });
+  fs.mkdirSync(path.join(home, ".config", "cc-termux"), { recursive: true });
+  fs.mkdirSync(path.join(root, "bin"), { recursive: true });
+  fs.writeFileSync(path.join(root, "bin", "claude.bin"), Buffer.from("fake"));
+  const cfgPath = path.join(home, ".config", "cc-termux", "config.json");
+  fs.writeFileSync(cfgPath, JSON.stringify({
+    active: "antigravity",
+    override: { provider: "antigravity", model: "gemini-3.8-flash-high" },
+    providers: { antigravity: { type: "antigravity", baseUrl: "https://example.invalid", path: "/x", model: "gemini-3.8-flash-high", modelsById: {
+      "gemini-3.8-flash-high": { name: "Gemini 3.8 Flash (High)" },
+      "claude-sonnet-4-6": { name: "Claude Sonnet 4.6" },
+    } } },
+    routing: {},
+  }));
+  fs.writeFileSync(path.join(home, ".claude", "settings.json"), JSON.stringify({ model: "prov/antigravity/claude-sonnet-4-6" }));
+  const prevCfg = process.env.CC_TERMUX_CONFIG;
+  process.env.CC_TERMUX_CONFIG = cfgPath;
+  try {
+    healEnvironment({ root, home, prefix: path.join(tmp, "prefix"), searchPath: path.join(tmp, "empty-bin"), installPrefix: false });
+  } finally {
+    if (prevCfg === undefined) delete process.env.CC_TERMUX_CONFIG; else process.env.CC_TERMUX_CONFIG = prevCfg;
+  }
+  const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
+  assert.equal(cfg.override.model, "claude-sonnet-4-6");
+  assert.equal(JSON.parse(fs.readFileSync(path.join(home, ".claude", "settings.json"), "utf8")).model, "prov/antigravity/claude-sonnet-4-6");
+  fs.rmSync(tmp, { recursive: true, force: true });
+});

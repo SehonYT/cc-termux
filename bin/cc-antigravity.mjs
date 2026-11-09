@@ -549,7 +549,8 @@ function status() {
   console.log("Antigravity: logged in" + (c.email ? " as " + c.email : ""));
   console.log("  project: " + (c.project_id || "(missing)"));
   console.log("  tier:    " + (c.tier_id || "unknown"));
-  console.log("  expires: " + new Date(Number(c.expires_at || 0)).toISOString());
+  const exp = Number(c.expires_at || 0);
+  console.log("  expires: " + new Date(exp).toISOString() + (exp && exp <= Date.now() ? "  (expired; refreshes automatically)" : ""));
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

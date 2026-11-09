@@ -75,6 +75,14 @@ export function healEnvironment({ root = process.env.CC_TERMUX_ROOT, home = os.h
   const cfg = loadJson(cfgPath, null);
   const keys = loadJson(keysPath, {});
 
+  // Respect the model Claude Code currently has selected (settings.model).
+  const earlySettings = loadJson(settingsPath, null);
+  let selectedProvider = "", selectedModel = "";
+  try {
+    const m = /^prov\/([^/]+)\/(.+)$/.exec(String((earlySettings && earlySettings.model) || ""));
+    if (m) { selectedProvider = m[1]; selectedModel = m[2]; }
+  } catch (e) { }
+
   // 1. config sanity: active/override/routing/sample entries
   if (cfg && cfg.providers) {
     let dirty = false;
@@ -90,8 +98,9 @@ export function healEnvironment({ root = process.env.CC_TERMUX_ROOT, home = os.h
     if (cfg.override) {
       const p = cfg.providers[cfg.override.provider];
       if (!p) { delete cfg.override; dirty = true; changes.push("config: removed stale override"); }
-      else if (cfg.override.model && p.model && cfg.override.model !== p.model) {
-        cfg.override.model = p.model; dirty = true; changes.push("config: override model -> " + p.model);
+      else {
+        const chosen = (selectedProvider === cfg.override.provider && selectedModel) ? selectedModel : p.model;
+        if (cfg.override.model && chosen && cfg.override.model !== chosen) { cfg.override.model = chosen; dirty = true; changes.push("config: override model -> " + chosen); }
       }
     }
     const routing = {};
@@ -109,7 +118,7 @@ export function healEnvironment({ root = process.env.CC_TERMUX_ROOT, home = os.h
   // 2. settings.json: env overrides, stale model, picker sync
   const settings = loadJson(settingsPath, null);
   const provider = cfg && cfg.providers && cfg.providers[cfg.active];
-  const wantModel = provider && provider.model ? composite(cfg.active, provider.model) : "";
+  const wantModel = (selectedProvider === cfg.active && selectedModel) ? composite(cfg.active, selectedModel) : (provider && provider.model ? composite(cfg.active, provider.model) : "");
   if (settings) {
     let changed = false;
     if (settings.env && typeof settings.env === "object") {
@@ -130,7 +139,7 @@ export function healEnvironment({ root = process.env.CC_TERMUX_ROOT, home = os.h
       const rows = [];
       for (const [name, p] of Object.entries(cfg.providers).filter(([, q]) => !q.hidden)) {
         for (const [id, info] of Object.entries(p.modelsById || {})) {
-          const isActive = name === cfg.active && id === p.model;
+          const isActive = name === cfg.active && id === ((name === selectedProvider && selectedModel) ? selectedModel : p.model);
           rows.push({
             model: composite(name, id),
             label: (info.name && info.name !== id ? info.name : id) + "  [" + name + "]",

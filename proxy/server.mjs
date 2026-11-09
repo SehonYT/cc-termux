@@ -22,6 +22,7 @@ const LOG = (...a) => {
   if (process.env.CC_TERMUX_QUIET) return;
   const line = new Date().toISOString() + " " + a.join(" ");
   console.error(line);
+  if (process.env.CC_TERMUX_MANAGED === '1') return; // stderr is already redirected to gateway.log by the launcher
   try {
     const gwLog = path.join(os.homedir(), ".cache", "cc-termux", "gateway.log");
     fs.mkdirSync(path.dirname(gwLog), { recursive: true, mode: 0o700 });
@@ -696,17 +697,13 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET') LOG('GET', u.pathname);
     if (u.pathname === '/v1/models' && req.method === 'GET') {
       LOG('GET /v1/models discovery');
-      const cacheFile = path.join(os.homedir(), '.cache', 'cc-termux', 'catalog.json');
-      let models = [];
-      try {
-        const cat = JSON.parse(fs.readFileSync(cacheFile, 'utf8'));
-        models = (cat.models || []).map(m => ({
-          type: 'model',
-          id: 'prov/' + CONFIG.active + '/' + m.id,
-          display_name: m.name + ' (' + m.id + ')',
-          created_at: new Date(m.fetchedAt || Date.now()).toISOString(),
-        }));
-      } catch (e) { LOG('no catalog for discovery', e.message); }
+      const models = [];
+      for (const [name, p] of Object.entries(CONFIG.providers || {})) {
+        if (p.hidden) continue;
+        for (const [id, info] of Object.entries(p.modelsById || {})) {
+          models.push({ type: 'model', id: 'prov/' + name + '/' + id, display_name: (info.name || id) + ' (' + name + ')', created_at: new Date().toISOString() });
+        }
+      }
       const body = { data: models, has_more: false, first_id: models[0] && models[0].id, last_id: models.length ? models[models.length - 1].id : null };
       res.writeHead(200, { 'content-type': 'application/json' });
       return res.end(JSON.stringify(body));
@@ -725,7 +722,9 @@ const server = http.createServer(async (req, res) => {
       chunks.push(c);
     }
     const raw = Buffer.concat(chunks).toString('utf8');
-    let body = {}; try { body = JSON.parse(raw || '{}'); } catch {}
+    let body;
+    try { body = JSON.parse(raw || '{}'); }
+    catch (e) { return anthropicError(res, 400, 'invalid_request_error', 'invalid JSON body'); }
     if (u.pathname === '/v1/messages/count_tokens') {
       res.writeHead(200, { 'content-type': 'application/json' });
       return res.end(JSON.stringify({ input_tokens: estimate(body.messages) + estimate(body.system) + estimate(body.tools) }));
