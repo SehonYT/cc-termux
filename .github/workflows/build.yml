@@ -18,7 +18,7 @@ jobs:
       - name: Build
         run: echo "Building project..."
 
-      - name: Send Discord webhook
+      - name: Send Discord update
         if: always()
         continue-on-error: true
         env:
@@ -29,7 +29,43 @@ jobs:
             echo "WEBHOOK_URL secret is not configured; skipping notification."
             exit 0
           fi
-          content="**$STATUS** · $GITHUB_REPOSITORY · $GITHUB_WORKFLOW · Commit $GITHUB_SHA · $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
-          payload=$(jq -n --arg content "$content" '{content: $content}')
+          case "$STATUS" in
+            success)  color=5763719; title="✅ Build successful" ;;
+            failure)  color=15548997; title="❌ Build failed" ;;
+            cancelled) color=16776960; title="⏹ Build cancelled" ;;
+            *)        color=3447003; title="🔨 Build $STATUS" ;;
+          esac
+          short=$(git rev-parse --short HEAD)
+          payload=$(jq -n \
+            --arg title "$title" \
+            --argjson color "$color" \
+            --arg status "$STATUS" \
+            --arg repo "$GITHUB_REPOSITORY" \
+            --arg workflow "$GITHUB_WORKFLOW" \
+            --arg branch "$GITHUB_REF_NAME" \
+            --arg actor "$GITHUB_ACTOR" \
+            --arg short "$short" \
+            --arg url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{
+              username: "cc-termux CI",
+              avatar_url: "https://github.com/SehonYT.png?size=64",
+              embeds: [{
+                title: $title,
+                url: $url,
+                color: $color,
+                description: ("Push to **" + $branch + "** by **" + $actor + "**"),
+                fields: [
+                  {name: "Repository", value: $repo, inline: true},
+                  {name: "Workflow", value: $workflow, inline: true},
+                  {name: "Status", value: ("`" + $status + "`"), inline: true},
+                  {name: "Branch", value: ("`" + $branch + "`"), inline: true},
+                  {name: "Commit", value: ("`" + $short + "`"), inline: true},
+                  {name: "Run", value: ("[Open workflow run](" + $url + ")"), inline: false}
+                ],
+                footer: {text: "cc-termux · GitHub Actions"},
+                timestamp: $ts
+              }]
+            }')
           curl -fsS -X POST "$WEBHOOK_URL" -H "Content-Type: application/json" -d "$payload"
-          echo "Discord notification sent."
+          echo "Discord embed sent."
