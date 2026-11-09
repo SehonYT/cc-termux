@@ -1,0 +1,39 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build
+        run: echo "Building project..."
+
+      - name: Send Discord webhook
+        if: always()
+        continue-on-error: true
+        env:
+          WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+          STATUS: ${{ job.status }}
+        run: |
+          if [ -z "$WEBHOOK_URL" ]; then
+            echo "WEBHOOK_URL secret is not configured; skipping notification."
+            exit 0
+          fi
+          payload=$(jq -n \
+            --arg status "$STATUS" \
+            --arg repo "$GITHUB_REPOSITORY" \
+            --arg commit "$GITHUB_SHA" \
+            --arg workflow "$GITHUB_WORKFLOW" \
+            --arg url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            '{content: ("**" + $status + "** · " + $repo + " · " + $workflow + "\nCommit: \`" + $commit + "\`\n" + $url)}')
+          curl -fsS -X POST "$WEBHOOK_URL" -H "Content-Type: application/json" -d "$payload"
