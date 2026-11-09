@@ -30,3 +30,25 @@ test("status line installer preserves custom lines and is idempotent", async () 
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+test("status line model follows Claude settings.model, not the provider default", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cc-statusline-model-"));
+  const old = { CC_TERMUX_CONFIG: process.env.CC_TERMUX_CONFIG, CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR };
+  process.env.CC_TERMUX_CONFIG = path.join(tmp, "config.json");
+  process.env.CLAUDE_CONFIG_DIR = tmp;
+  try {
+    fs.writeFileSync(path.join(tmp, "config.json"), JSON.stringify({ active: "antigravity", providers: { antigravity: { type: "antigravity", model: "gemini-3.8-flash-high", modelsById: {
+      "gemini-3.8-flash-high": { name: "Gemini 3.8 Flash (High)" },
+      "claude-sonnet-4-6": { name: "Claude Sonnet 4.6 (Thinking)" },
+    } } } }));
+    fs.writeFileSync(path.join(tmp, "settings.json"), JSON.stringify({ model: "prov/antigravity/claude-sonnet-4-6" }));
+    const mod = await import("../bin/cc-statusline.mjs?t=" + Date.now());
+    const cfg = JSON.parse(fs.readFileSync(path.join(tmp, "config.json"), "utf8"));
+    const m = mod.activeModel(cfg);
+    assert.equal(m.name, "Claude Sonnet 4.6 (Thinking)");
+  } finally {
+    if (old.CC_TERMUX_CONFIG === undefined) delete process.env.CC_TERMUX_CONFIG; else process.env.CC_TERMUX_CONFIG = old.CC_TERMUX_CONFIG;
+    if (old.CLAUDE_CONFIG_DIR === undefined) delete process.env.CLAUDE_CONFIG_DIR; else process.env.CLAUDE_CONFIG_DIR = old.CLAUDE_CONFIG_DIR;
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});

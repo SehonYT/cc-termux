@@ -28,10 +28,22 @@ function rel(iso) {
   if (h < 24) return h + "h" + (mm ? mm + "m" : "");
   return Math.floor(h / 24) + "d" + (h % 24 ? h % 24 + "h" : "");
 }
-function activeModel(cfg) {
-  const p = cfg.providers && cfg.providers[cfg.active];
+export function activeModel(cfg, explicitId) {
+  let key = cfg.active;
+  let p = cfg.providers && cfg.providers[key];
+  let id = explicitId || (p && p.model);
+  if (!explicitId) {
+    const settings = readJson(path.join(claudeDir(), "settings.json"));
+    const sm = typeof settings.model === "string" ? settings.model : "";
+    const m = /^prov\/([^/]+)\/(.+)$/.exec(sm);
+    if (m && cfg.providers && cfg.providers[m[1]]) { key = m[1]; p = cfg.providers[key]; id = m[2]; }
+    else {
+      const ps = /^provswitch\/([^/]+)$/.exec(sm);
+      if (ps && cfg.providers && cfg.providers[ps[1]]) { key = ps[1]; p = cfg.providers[key]; id = p.model; }
+    }
+  }
   if (!p) return null;
-  return { provider: cfg.active, type: p.type, name: (p.modelsById && p.modelsById[p.model] && p.modelsById[p.model].name) || p.model || p.type };
+  return { provider: key, type: p.type, name: (p.modelsById && p.modelsById[id] && p.modelsById[id].name) || id || p.type };
 }
 function shortGroup(g) { return g.id === "gemini" ? "G" : g.id === "claude" ? "C" : g.id === "argon" ? "A" : (g.label || "?").slice(0, 1).toUpperCase(); }
 export function formatUsage(u) {
@@ -61,11 +73,11 @@ function writeStatusLine(line) {
   } catch (e) { }
 }
 let refreshInFlight = null;
-export async function refreshStatusLine({ force = false } = {}) {
+export async function refreshStatusLine({ force = false, modelId = null } = {}) {
   if (refreshInFlight) return refreshInFlight;
   refreshInFlight = (async () => {
   const cfg = readJson(configPath());
-  const model = activeModel(cfg);
+  const model = activeModel(cfg, modelId);
   if (!model) { writeStatusLine("cc-termux"); return "cc-termux"; }
   if (model.type !== "antigravity") { const line = "cc-termux · " + model.provider + " · " + model.name; writeStatusLine(line); return line; }
   try {

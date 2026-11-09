@@ -35,7 +35,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 function textOf(content) {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";
-  return content.filter((b) => b && b.type === "text").map((b) => b.text || "").join("");
+  return content.filter((b) => b && b.type === "text").map((b) => b.text || "").join("\n");
 }
 
 const SCHEMA_DENY = new Set([
@@ -351,6 +351,6 @@ export async function proxyAntigravity(req, res, route, body, { anthropicError }
     } catch (e2) { }
   } finally {
     try { res.end(); } catch (e) { try { res.destroy(); } catch (e2) { } }
-    refreshStatusLine().catch(() => { });
+    refreshStatusLine({ modelId: route.model }).catch(() => { });
   }
 }

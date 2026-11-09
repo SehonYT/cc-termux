@@ -462,28 +462,36 @@ switch (cmd) {
     const pad = (s, n) => strip(s).padEnd(n);
     let stamp = {};
     try { stamp = JSON.parse(fs.readFileSync(path.join(ROOT, "cc-termux.json"), "utf8")); } catch (e) { }
-    const active = c.providers && c.providers[c.active];
-    const activeModel = active && (active.modelsById && active.modelsById[active.model] ? active.modelsById[active.model].name : active.model || active.defaultModel || "-");
-    const keyState = active ? (active.type === "antigravity" ? "OAuth" : active.noKey ? "no key" : ((loadKeys()[c.active] || active.apiKeyEnv) ? "key set" : "no key")) : "";
+    let activeName = c.active;
+    let active = c.providers && c.providers[activeName];
+    let activeId = active && active.model;
+    try {
+      const st = JSON.parse(fs.readFileSync(SETTINGS_PATH, "utf8"));
+      const m = /^prov\/([^/]+)\/(.+)$/.exec(String(st.model || ""));
+      if (m && c.providers && c.providers[m[1]]) { activeName = m[1]; active = c.providers[activeName]; activeId = m[2]; }
+    } catch (e) { }
+    const activeModel = active && (active.modelsById && active.modelsById[activeId] ? active.modelsById[activeId].name : activeId || active.model || active.defaultModel || "-");
+    const keyState = active ? (active.type === "antigravity" ? "OAuth" : active.noKey ? "no key" : ((loadKeys()[activeName] || active.apiKeyEnv) ? "key set" : "no key")) : "";
     console.log();
     console.log(bold("  cc-termux") + dim("  " + (stamp.version || "dev") + "  " + process.platform + " " + process.arch));
     console.log();
     console.log("  gateway   " + (h ? color("32", "● UP") + dim("  http://127.0.0.1:" + port(c)) : color("33", "○ DOWN") + dim("  starts automatically with claude")));
-    console.log("  active    " + (c.active ? bold(c.active) + (active && active.type !== c.active ? dim("  " + active.type) : "") : dim("none")));
-    console.log("  model     " + (activeModel || "-") + (active && active.contextWindow ? dim("  " + Math.round(active.contextWindow / 1000) + "K ctx") : "") + dim(keyState ? "  " + keyState : ""));
+    console.log("  active    " + (activeName ? bold(activeName) + (active && active.type !== activeName ? dim("  " + active.type) : "") : dim("none")));
+    const activeCtx = active && (active.modelsById && active.modelsById[activeId] && active.modelsById[activeId].contextTokens) || (active && active.contextWindow);
+    console.log("  model     " + (activeModel || "-") + (activeCtx ? dim("  " + Math.round(activeCtx / 1000) + "K ctx") : "") + dim(keyState ? "  " + keyState : ""));
     try {
       const sf = path.join(os.homedir(), ".cache", "cc-termux", "antigravity-status.txt");
       if (active && active.type === "antigravity") {
         const line = fs.readFileSync(sf, "utf8").trim();
-        if (line) console.log("  quota     " + line.replace(/^antigravity · [^·]+ · /, ""));
+        if (/^antigravity · /.test(line)) console.log("  quota     " + line.replace(/^antigravity · [^·]+ · /, ""));
       }
     } catch (e) { }
     console.log();
     console.log(dim("  providers"));
     for (const [name, p] of Object.entries(c.providers || {})) {
       if (p.hidden) continue;
-      const model = p.model || p.defaultModel || "-";
-      const isActive = name === c.active;
+      const model = (name === activeName && activeId) ? activeId : (p.model || p.defaultModel || "-");
+      const isActive = name === activeName;
       const marker = isActive ? color("32", "●") : dim("○");
       const key = p.type === "antigravity" ? "OAuth" : p.noKey ? "no key" : ((loadKeys()[name] || p.apiKeyEnv) ? "key set" : "no key");
       console.log("   " + marker + " " + pad(name, 15) + dim(pad(p.type, 12)) + pad(model, 32) + dim(key));

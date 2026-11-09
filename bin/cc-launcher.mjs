@@ -168,6 +168,24 @@ async function envForChild() {
   let settingsModel = "";
   try { settingsModel = (JSON.parse(fs.readFileSync(path.join(os.homedir(), ".claude", "settings.json"), "utf8")).model) || ""; } catch {}
   const bareAnthropic = /^claude-(opus|sonnet|haiku)-[0-9]/.test(settingsModel) && !settingsModel.startsWith("prov/");
+  let selectedProvider = "";
+  let selectedId = "";
+  const selectedMatch = /^prov\/([^/]+)\/(.+)$/.exec(settingsModel || "");
+  if (selectedMatch && cfg.providers && cfg.providers[selectedMatch[1]]) {
+    selectedProvider = selectedMatch[1];
+    selectedId = selectedMatch[2];
+  }
+  let selectedContext = null;
+  if (selectedProvider === cfg.active && selectedId) {
+    const sp = cfg.providers[selectedProvider];
+    const info = sp.modelsById && sp.modelsById[selectedId];
+    if (info && info.contextTokens) selectedContext = info.contextTokens;
+    // Keep the persistent config in sync with the model Claude Code actually selected.
+    try {
+      cfg.override = { provider: cfg.active, model: selectedId };
+      fs.writeFileSync(CFG, JSON.stringify(cfg, null, 2) + "\n");
+    } catch (e) { }
+  }
   const model = p.model || p.defaultModel;
   const a = p.aliases || {};
   const composite = (id) => (String(id).startsWith("prov/") || !cfg.active ? id : "prov/" + cfg.active + "/" + id);
@@ -194,7 +212,8 @@ async function envForChild() {
       if (process.env.CC_TERMUX_PERF_VERBOSE === "1") process.stderr.write("cc-termux: performance profile: on\n");
     }
   } catch (e) { }
-  if (p.contextWindow) env.CLAUDE_CODE_MAX_CONTEXT_TOKENS = String(p.contextWindow);
+  const ctx = selectedContext || p.contextWindow;
+  if (ctx) env.CLAUDE_CODE_MAX_CONTEXT_TOKENS = String(ctx);
   env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS = "1";
   env.TMPDIR = env.TMPDIR || os.tmpdir();
   env.CLAUDE_CODE_TMPDIR = env.CLAUDE_CODE_TMPDIR || env.TMPDIR;

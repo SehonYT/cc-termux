@@ -41,6 +41,11 @@ test.before(async () => {
       }
       if (u.pathname === "/generate") {
         lastEnvelope = json();
+        if (generateMode === "tool") {
+          res.writeHead(200, { "content-type": "text/event-stream" });
+          res.write("data: " + JSON.stringify({ response: { candidates: [{ content: { parts: [{ functionCall: { id: "call_1", name: "bash", args: { command: "echo hi" } } }] }, finishReason: "STOP" }], usageMetadata: { promptTokenCount: 3, candidatesTokenCount: 1 } } }) + "\n\n");
+          return res.end();
+        }
         if (generateMode === "quota") {
           res.writeHead(429, { "content-type": "application/json" });
           return res.end(JSON.stringify({ error: { code: 429, message: "Resource has been exhausted (e.g. check quota).", status: "RESOURCE_EXHAUSTED" } }));
@@ -244,4 +249,37 @@ test("agentModelSorts drives the official list (paid Argon appears automatically
     agentModelSorts: [{ groups: [{ modelIds: ["gemini-3.8-flash-high", "claude-sonnet-4-6", "gpt-oss-120b-medium", "gemini-4-argon-high"] }] }],
   });
   assert.deepEqual(models.map((m) => m.id), ["gemini-3.8-flash-high", "claude-sonnet-4-6", "gpt-oss-120b-medium", "gemini-4-argon-high"]);
+});
+test("system prompt blocks are joined with newlines and only the billing header is stripped", async () => {
+  const adapter = await import("../proxy/antigravity.mjs?t=" + Date.now());
+  const envelope = adapter.anthropicToGemini({
+    system: [
+      { type: "text", text: "x-anthropic-billing-header: cc_version=2.1.319;" },
+      { type: "text", text: "You are a Claude agent, built on Anthropic\x27s Claude Agent SDK." },
+      { type: "text", text: "Follow the user request." },
+    ],
+    max_tokens: 32,
+    messages: [{ role: "user", content: "hi" }],
+  }, "gemini-3.8-flash-high", { project_id: "p" });
+  const text = envelope.request.systemInstruction.parts[0].text;
+  assert.match(text, /You are a Claude agent/);
+  assert.match(text, /Follow the user request/);
+  assert.doesNotMatch(text, /billing-header/);
+  assert.doesNotMatch(text, /You are Gemini|built by Google/);
+});
+test("gateway adapter surfaces tool calls as anthropic tool_use blocks", async () => {
+  const ant = await import("../bin/cc-antigravity.mjs?t=" + Date.now());
+  ant.saveCredentials({ access_token: "access-new", refresh_token: "refresh-new", expires_at: Date.now() + 3600_000, project_id: "project-123" });
+  const adapter = await import("../proxy/antigravity.mjs?t=" + Date.now());
+  generateMode = "tool";
+  let out = "";
+  const errors = [];
+  const res = { writeHead() { }, flushHeaders() { }, write(s) { out += s; }, end() { }, destroy() { } };
+  try {
+    await adapter.proxyAntigravity({}, res, { name: "antigravity", model: "gemini-3.8-flash-high", provider: { type: "antigravity" } }, { max_tokens: 50, messages: [{ role: "user", content: "run" }], tools: [{ name: "bash", input_schema: { type: "object", properties: { command: { type: "string" } } } }] }, { anthropicError: (_r, status, type, message) => errors.push([status, type, message]) });
+  } finally { generateMode = "ok"; }
+  assert.equal(errors.length, 0, JSON.stringify(errors));
+  assert.match(out, /"type":"tool_use"/);
+  assert.match(out, /input_json_delta/);
+  assert.match(out, /message_stop/);
 });
