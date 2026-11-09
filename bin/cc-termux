@@ -576,6 +576,12 @@ switch (cmd) {
     p.contextWindow = entry.contextTokens || p.contextWindow || 128000;
     p.aliases = { opus: entry.id, sonnet: entry.id, haiku: entry.id, subagent: entry.id };
     save(c);
+    try {
+      const st = JSON.parse(fs.readFileSync(SETTINGS_PATH, "utf8"));
+      st.model = "prov/" + c.active + "/" + entry.id;
+      fs.writeFileSync(SETTINGS_PATH, JSON.stringify(st, null, 2) + "\n");
+    } catch (e) { }
+    refreshStatusLineFile();
     console.log("active model -> " + entry.id + "  (" + entry.name + ", ctx " + entry.context + " = " + p.contextWindow + " tokens, $" + entry.inUsd + "/$" + entry.outUsd + " per 1M)");
     console.log("aliases opus/sonnet/haiku/subagent -> " + entry.id);
     console.log("restart Claude Code to apply.");

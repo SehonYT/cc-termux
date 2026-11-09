@@ -54,12 +54,26 @@ function cleanSchema(schema) {
     if (SCHEMA_DENY.has(k) || k.startsWith("x-")) continue;
     if (k === "properties" && v && typeof v === "object") {
       out.properties = {};
-      for (const [pk, pv] of Object.entries(v)) out.properties[pk] = cleanSchema(pv);
+      for (const [pk, pv] of Object.entries(v)) {
+        const cleaned = cleanSchema(pv);
+        if (cleaned && typeof cleaned === "object" && Object.keys(cleaned).length) out.properties[pk] = cleaned;
+      }
     } else if (k === "items") out.items = cleanSchema(v);
     else if (k === "type") {
       if (Array.isArray(v)) { out.type = String(v[0] || "string").toLowerCase(); if (v.includes("null")) out.nullable = true; }
       else out.type = String(v).toLowerCase();
     } else out[k] = cleanSchema(v);
+  }
+  // Gemini rejects required entries that point at properties removed above.
+  if (out.properties && typeof out.properties === "object") {
+    const keys = new Set(Object.keys(out.properties));
+    if (Array.isArray(schema.required)) {
+      out.required = schema.required.filter((key) => typeof key === "string" && keys.has(key));
+      if (!out.required.length) delete out.required;
+    }
+    if (!keys.size) delete out.properties;
+  } else if (Array.isArray(out.required)) {
+    delete out.required;
   }
   return out;
 }

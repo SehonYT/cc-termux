@@ -283,3 +283,14 @@ test("gateway adapter surfaces tool calls as anthropic tool_use blocks", async (
   assert.match(out, /input_json_delta/);
   assert.match(out, /message_stop/);
 });
+test("tool schemas prune required entries whose properties were stripped", async () => {
+  const adapter = await import("../proxy/antigravity.mjs?t=" + Date.now());
+  const envelope = adapter.anthropicToGemini({
+    max_tokens: 10,
+    messages: [{ role: "user", content: "hi" }],
+    tools: [{ name: "t", input_schema: { type: "object", properties: { a: { type: "string" }, gone: { $ref: "x" } }, required: ["a", "gone"], additionalProperties: false } }],
+  }, "m", { project_id: "p" });
+  const params = envelope.request.tools[0].functionDeclarations[0].parameters;
+  assert.deepEqual(params.required, ["a"]);
+  assert.equal(params.properties.gone, undefined);
+});
