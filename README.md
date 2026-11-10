@@ -107,6 +107,20 @@ $PREFIX/bin/cc-termux, $PREFIX/bin/ccp     CLI shims
 - appends `~/.local/bin` to `~/.bashrc` and `~/.profile` when missing
 - makes `~/.local/bin/claude` a symlink into `claude/versions/` so the diagnostics stay clean
 
+### Where files live
+
+| | Termux / Linux / macOS | Windows |
+|---|---|---|
+| Code, Claude Code binary, patches | `~/.local/share/cc-termux` | `%LOCALAPPDATA%\cc-termux` |
+| Config and API keys | `~/.config/cc-termux` | `%APPDATA%\cc-termux` |
+| Cache, logs, status line | `~/.cache/cc-termux` | `%LOCALAPPDATA%\cc-termux\cache` |
+| Claude Code's own settings | `~/.claude` | `%USERPROFILE%\.claude` |
+
+Overrides: `CC_TERMUX_ROOT` (code + binary), `CC_TERMUX_CONFIG` (config file, keys live
+beside it), `CC_TERMUX_CACHE`, and Claude's own `CLAUDE_CONFIG_DIR`. An existing Windows
+install under `~/.local/share/cc-termux` keeps working: the legacy location wins until it
+is removed.
+
 ## First run
 
 Non-interactive setup is available too:

@@ -3,12 +3,9 @@
 // (fast); this script refreshes that file from the Antigravity quota API.
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
-import os from "node:os";
 import path from "node:path";
-
-function configPath() { return process.env.CC_TERMUX_CONFIG || path.join(os.homedir(), ".config", "cc-termux", "config.json"); }
-function claudeDir() { return process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), ".claude"); }
-function cacheDir() { return process.env.CC_TERMUX_CACHE || path.join(os.homedir(), ".cache", "cc-termux"); }
+import { configFile, claudeDir, cacheDir } from "./cc-paths.mjs";
+function configPath() { return configFile(); }
 function statusFile() { return path.join(cacheDir(), "antigravity-status.txt"); }
 function readJson(file) { try { return JSON.parse(fs.readFileSync(file, "utf8")); } catch (e) { return {}; } }
 function writeJson(file, data) {

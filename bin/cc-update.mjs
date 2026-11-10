@@ -10,10 +10,11 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { extractTgz } from "./cc-tar.mjs";
 import { buildVersion, labelVersion } from "../scripts/version.mjs";
+import { installRoot } from "./cc-paths.mjs";
 import { createProgress, banner, step, info } from "./cc-ui.mjs";
 
 const DEFAULT_REPO = process.env.CC_TERMUX_REPO || "SehonYT/cc-termux";
-const DEFAULT_ROOT = path.join(os.homedir(), ".local", "share", "cc-termux");
+const DEFAULT_ROOT = installRoot();
 
 export function localInfo(root = DEFAULT_ROOT) {
   try { return JSON.parse(fs.readFileSync(path.join(root, "cc-termux.json"), "utf8")); }

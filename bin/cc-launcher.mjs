@@ -6,10 +6,13 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
+import { installRoot, configFile, configDir, cacheDir, claudeDir } from "./cc-paths.mjs";
 
-const ROOT = process.env.CC_TERMUX_ROOT || path.join(os.homedir(), ".local", "share", "cc-termux");
-const CFG = process.env.CC_TERMUX_CONFIG || path.join(os.homedir(), ".config", "cc-termux", "config.json");
-const CACHE = path.join(os.homedir(), ".cache", "cc-termux");
+const ROOT = installRoot();
+const CFG = configFile();
+const CACHE = cacheDir();
+// The platform default, ignoring a CC_TERMUX_CONFIG override in our own environment.
+const DEFAULT_CFG = configFile({ ...process.env, CC_TERMUX_CONFIG: "" });
 fs.mkdirSync(CACHE, { recursive: true });
 
 function loadConfig() { try { return JSON.parse(fs.readFileSync(CFG, "utf8")); } catch { return { listen: { port: 8788 }, providers: {}, active: "" }; } }
@@ -33,7 +36,7 @@ function isOurGateway(pid) {
     const env = fs.readFileSync("/proc/" + pid + "/environ", "utf8").split("\0");
     const want = "CC_TERMUX_CONFIG=" + path.resolve(CFG);
     if (env.includes(want)) return true;
-    if (!env.some((e) => e.startsWith("CC_TERMUX_CONFIG=")) && path.resolve(CFG) === path.join(os.homedir(), ".config", "cc-termux", "config.json")) return true;
+    if (!env.some((e) => e.startsWith("CC_TERMUX_CONFIG=")) && path.resolve(CFG) === path.resolve(DEFAULT_CFG)) return true;
     return false;
   } catch (e) { return false; }
 }
@@ -140,7 +143,7 @@ async function ensureGateway() {
 }
 
 function sanitizeSettings(p) {
-  const file = path.join(os.homedir(), ".claude", "settings.json");
+  const file = path.join(claudeDir(), "settings.json");
   let s;
   try { s = JSON.parse(fs.readFileSync(file, "utf8")); } catch { return; }
   let changed = false;
@@ -194,7 +197,7 @@ function ensureMcpServer() {
   // Those two tools only read public web pages, so allow them without a prompt and point
   // the model at them (the built-in WebSearch/WebFetch cannot work on these platforms).
   try {
-    const settingsFile = path.join(os.homedir(), ".claude", "settings.json");
+    const settingsFile = path.join(claudeDir(), "settings.json");
     const settings = JSON.parse(fs.readFileSync(settingsFile, "utf8")) || {};
     settings.permissions = settings.permissions && typeof settings.permissions === "object" ? settings.permissions : {};
     const allow = Array.isArray(settings.permissions.allow) ? settings.permissions.allow : [];
@@ -210,7 +213,7 @@ function ensureMcpServer() {
     }
   } catch (e) { }
   try {
-    const memoryFile = path.join(os.homedir(), ".claude", "CLAUDE.md");
+    const memoryFile = path.join(claudeDir(), "CLAUDE.md");
     const marker = "cc-termux web tools";
     const current = fs.existsSync(memoryFile) ? fs.readFileSync(memoryFile, "utf8") : "";
     const note = "<!-- " + marker + " -->\nFor web access use the MCP tools web:search and web:fetch " +
@@ -250,7 +253,7 @@ async function envForChild() {
   try { sanitizeSettings(p); } catch (e) { }
   let settingsModel = "";
   try {
-    const settingsPath = path.join(os.homedir(), ".claude", "settings.json");
+    const settingsPath = path.join(claudeDir(), "settings.json");
     const settings = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
     settingsModel = settings.model || "";
     // /model picker can persist a provider-switch marker. Claude Code then treats
@@ -303,7 +306,7 @@ async function envForChild() {
     try {
       if (!env.CLAUDE_CODE_AUTO_MODE_MODEL && cfg.active) {
         let keys = {};
-        try { keys = JSON.parse(fs.readFileSync(path.join(path.dirname(CFG), "keys.json"), "utf8")); } catch (e) { }
+        try { keys = JSON.parse(fs.readFileSync(path.join(configDir(), "keys.json"), "utf8")); } catch (e) { }
         const usable = (name, q) => name === cfg.active || keys[name] || q.noKey || q.apiKeyEnv;
         const allowed = (id) => typeof id === "string" && id.startsWith("claude-") && !/5-5|opus-5/.test(id);
         const candidates = [cfg.active, ...Object.keys(cfg.providers || {}).filter((n) => n !== cfg.active && !cfg.providers[n].hidden)];

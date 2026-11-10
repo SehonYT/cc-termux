@@ -5,10 +5,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
+import { installRoot, configFile, claudeDir, cacheDir } from "./cc-paths.mjs";
 
-const ROOT = process.env.CC_TERMUX_ROOT || path.join(os.homedir(), ".local", "share", "cc-termux");
-const CFG = process.env.CC_TERMUX_CONFIG || path.join(os.homedir(), ".config", "cc-termux", "config.json");
-const GATEWAY_PID_FILE = path.join(os.homedir(), ".cache", "cc-termux", "gateway.pid");
+const ROOT = installRoot();
+const CFG = configFile();
+const CACHE = cacheDir();
+const GATEWAY_PID_FILE = path.join(CACHE, "gateway.pid");
 function readPidFile() {
   try {
     const pid = Number(fs.readFileSync(GATEWAY_PID_FILE, "utf8").trim());
@@ -67,12 +69,11 @@ async function gatewayPids() {
   return pids;
 }
 
-const CATALOG = path.join(os.homedir(), ".cache", "cc-termux", "catalog.json");
+const CATALOG = path.join(CACHE, "catalog.json");
 function refreshStatusLineFile() {
   try { execFileSync(process.execPath, [path.join(ROOT, "bin", "cc-statusline.mjs"), "--refresh"], { stdio: "ignore", timeout: 6000 }); } catch (e) { }
   try {
-    const cache = process.env.CC_TERMUX_CACHE || path.join(os.homedir(), ".cache", "cc-termux");
-    const file = path.join(cache, "antigravity-status.txt");
+    const file = path.join(CACHE, "antigravity-status.txt");
     if (!fs.existsSync(file)) {
       const cfg = JSON.parse(fs.readFileSync(CFG, "utf8"));
       const prov = cfg.providers && cfg.providers[cfg.active];
@@ -101,7 +102,7 @@ const loadKeys = () => { try { return JSON.parse(fs.readFileSync(KEYS_PATH, 'utf
 const saveKeys = (k) => { atomicWrite(KEYS_PATH, JSON.stringify(k, null, 2) + '\n', 0o600); };
 const mask = (k) => !k ? "(not set)" : k.startsWith("env:") ? k : "set (ends " + k.slice(-4) + ")";
 
-const SETTINGS_PATH = path.join(os.homedir(), ".claude", "settings.json");
+const SETTINGS_PATH = path.join(claudeDir(), "settings.json");
 const visibleProviders = (c) => Object.entries(c.providers || {}).filter(([, p]) => !p.hidden);
 const composite = (p, id) => (id ? "prov/" + p + "/" + id : id);
 const fmtCtx = (n) => (!n ? "?" : n >= 1e6 ? (n / 1e6).toFixed(n % 1e6 ? 1 : 0) + "M" : n >= 1e3 ? Math.round(n / 1e3) + "K" : String(n));
@@ -325,9 +326,9 @@ async function doctor(fix) {
   const ccpPath = ccpCandidates.find((p) => { try { return fs.existsSync(p); } catch (e) { return false; } });
   if (ccpPath) pass("ccp picker installed"); else warn("ccp not installed (run install.sh)");
   try {
-    const log = path.join(os.homedir(), ".cache", "cc-termux", "gateway.log");
+    const log = path.join(CACHE, "gateway.log");
     const tail = fs.readFileSync(log, "utf8").split("\n").slice(-300).join("\n");
-    let qc = {}; try { qc = JSON.parse(fs.readFileSync(path.join(os.homedir(), ".cache", "cc-termux", "quota.json"), "utf8")); } catch (e) { }
+    let qc = {}; try { qc = JSON.parse(fs.readFileSync(path.join(CACHE, "quota.json"), "utf8")); } catch (e) { }
     for (const [provider, q] of Object.entries(qc)) {
       if (!c.providers || !c.providers[provider]) continue;
       const age = Date.now() - new Date(q.at).getTime();
@@ -338,7 +339,7 @@ async function doctor(fix) {
   if (deny.length >= 4) pass("secret deny rules: " + deny.length); else warn("secret deny rules missing (re-run install.sh)");
 
   try {
-    const log = path.join(os.homedir(), ".cache", "cc-termux", "gateway.log");
+    const log = path.join(CACHE, "gateway.log");
     const sz = fs.statSync(log).size;
     if (sz > 5 * 1024 * 1024) { if (fix) { fs.writeFileSync(log, ""); fixed++; pass("gateway.log truncated (" + (sz / 1e6).toFixed(1) + " MB)"); } else warn("gateway.log is " + (sz / 1e6).toFixed(1) + " MB (--fix truncates)"); }
     else pass("gateway.log " + (sz / 1024).toFixed(0) + " KB");
@@ -407,7 +408,7 @@ async function diagnose() {
     for (const p of claudeCandidates().slice(1)) console.log("            also: " + p + (isOurShim(p) ? " [ours]" : " [not ours]"));
   }
   try {
-    const st = JSON.parse(fs.readFileSync(path.join(os.homedir(), ".claude", "settings.json"), "utf8"));
+    const st = JSON.parse(fs.readFileSync(path.join(claudeDir(), "settings.json"), "utf8"));
     console.log("  settings  model=" + (st.model || "(none)"));
     const ek = Object.keys(st.env || {}).filter((k) => /^ANTHROPIC_|^CLAUDE_CODE_MAX_CONTEXT/.test(k));
     if (ek.length) console.log("  settings  env overrides=" + ek.join(", "));
@@ -591,7 +592,7 @@ switch (cmd) {
     const activeCtx = active && (active.modelsById && active.modelsById[activeId] && active.modelsById[activeId].contextTokens) || (active && active.contextWindow);
     console.log("  model     " + (activeModel || "-") + (activeCtx ? dim("  " + Math.round(activeCtx / 1000) + "K ctx") : "") + dim(keyState ? "  " + keyState : ""));
     try {
-      const sf = path.join(os.homedir(), ".cache", "cc-termux", "antigravity-status.txt");
+      const sf = path.join(CACHE, "antigravity-status.txt");
       if (active && active.type === "antigravity") {
         const line = fs.readFileSync(sf, "utf8").trim();
         if (/^antigravity · /.test(line)) console.log("  quota     " + line.replace(/^antigravity · [^·]+ · /, ""));
@@ -621,7 +622,7 @@ switch (cmd) {
   }
   case "provider": {
     const c = load();
-    const settingsPath = path.join(os.homedir(), ".claude", "settings.json");
+    const settingsPath = path.join(claudeDir(), "settings.json");
     const setDefaultModel = (composite) => {
       try {
         const s = fs.existsSync(settingsPath) ? JSON.parse(fs.readFileSync(settingsPath, "utf8")) : {};
@@ -733,7 +734,7 @@ switch (cmd) {
     break;
   }
   case "logs": {
-    const f = path.join(os.homedir(), ".cache", "cc-termux", "gateway.log");
+    const f = path.join(CACHE, "gateway.log");
     if (!fs.existsSync(f)) { console.log("no gateway log yet - run claude to start the gateway"); break; }
     console.log(fs.readFileSync(f, "utf8").split("\n").slice(-60).join("\n"));
     break;
@@ -802,7 +803,7 @@ switch (cmd) {
     console.log("provider: " + name + "  (" + p.baseUrl + ")");
     console.log("  no usage endpoint known for this provider");
     try {
-      const q = JSON.parse(fs.readFileSync(path.join(os.homedir(), ".cache", "cc-termux", "quota.json"), "utf8"))[name];
+      const q = JSON.parse(fs.readFileSync(path.join(CACHE, "quota.json"), "utf8"))[name];
       if (q) {
         console.log("  observed upstream limit (" + q.at + "):");
         console.log("    status " + q.status + (q.model ? "  model " + q.model : "") + (q.limit != null ? "  limit " + q.limit : "") + (q.quotaId ? "  " + q.quotaId : ""));
@@ -824,7 +825,7 @@ switch (cmd) {
     break;
   }
   case "errors": {
-    const f = path.join(os.homedir(), ".cache", "cc-termux", "errors.log");
+    const f = path.join(CACHE, "errors.log");
     if (!fs.existsSync(f)) { console.log("no failures logged"); break; }
     const n = Number(args[0]) || 20;
     const lines = fs.readFileSync(f, "utf8").trim().split("\n").slice(-n);

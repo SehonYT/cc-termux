@@ -18,13 +18,17 @@ import { extractTgz } from "./bin/cc-tar.mjs";
 import { createProgress, banner, step, info } from "./bin/cc-ui.mjs";
 import { PERF_PROMPT_LINES, perfDefaultAnswer, savePerfMode, shouldAskPerf } from "./bin/cc-perf.mjs";
 import { ensurePathInRcFiles, prefixBinDir } from "./bin/cc-heal.mjs";
+import { installRoot, configFile, cacheDir, claudeDir, isWindows } from "./bin/cc-paths.mjs";
 
 const SRC = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
 const has = (f) => args.includes(f);
 const argVal = (f, d) => { const i = args.indexOf(f); return i >= 0 && args[i + 1] ? args[i + 1] : d; };
-const ROOT = argVal("--root", process.env.CC_TERMUX_ROOT || path.join(os.homedir(), ".local", "share", "cc-termux"));
-const CFG = process.env.CC_TERMUX_CONFIG || path.join(os.homedir(), ".config", "cc-termux", "config.json");
+const ROOT = argVal("--root", installRoot());
+const CFG = configFile();
+// Platform default root, ignoring a CC_TERMUX_ROOT override: only a canonical install may
+// write user-wide shims, and temp/custom roots (tests, parallel checkouts) must stay isolated.
+const DEFAULT_ROOT = installRoot({ ...process.env, CC_TERMUX_ROOT: "" });
 const CHECK = has("--check");
 const NO_SETUP = has("--no-setup");
 const NO_SHIMS = has("--no-shims");
@@ -148,7 +152,7 @@ function copyAssets() {
   try { fs.chmodSync(path.join(ROOT, "bin", "cc-launcher.mjs"), 0o755); } catch {}
   const cmds = path.join(SRC, "commands");
   if (fs.existsSync(cmds)) {
-    const dst = path.join(os.homedir(), ".claude", "commands");
+    const dst = path.join(claudeDir(), "commands");
     fs.mkdirSync(dst, { recursive: true });
     fs.cpSync(cmds, dst, { recursive: true, force: true });
   }
@@ -200,13 +204,13 @@ function stopManagedGateway() {
       } catch (e) { }
     }
   } catch (e) { }
+  const pidFile = path.join(cacheDir(), "gateway.pid");
   try {
-    const pf = path.join(os.homedir(), ".cache", "cc-termux", "gateway.pid");
-    const pid = Number(fs.readFileSync(pf, "utf8").trim());
+    const pid = Number(fs.readFileSync(pidFile, "utf8").trim());
     if (pid && pid !== process.pid && pid !== process.ppid && !pids.includes(pid)) pids.push(pid);
   } catch (e) { }
   for (const pid of pids) { try { process.kill(pid, "SIGTERM"); } catch (e) { } }
-  try { fs.unlinkSync(path.join(os.homedir(), ".cache", "cc-termux", "gateway.pid")); } catch (e) { }
+  try { fs.unlinkSync(pidFile); } catch (e) { }
   if (pids.length) log("stopped running gateway so the new code loads on next launch");
 }
 
@@ -240,7 +244,7 @@ function installShims(t) {
     log("windows shims: " + (placed || path.join(ROOT, "bin")) + (placed ? "" : " (add this folder to PATH)"));
     return;
   }
-  const canonicalRoot = path.join(os.homedir(), ".local", "share", "cc-termux");
+  const canonicalRoot = DEFAULT_ROOT;
   if (path.resolve(ROOT) !== path.resolve(canonicalRoot)) {
     log("custom install root: skipping ~/.local and $PREFIX shims (add " + path.join(ROOT, "bin") + " to PATH)");
     return;
@@ -323,10 +327,20 @@ function installShims(t) {
     if (t.js && t.reason) console.log("  fallback : " + t.reason);
     console.log("  root     : " + ROOT);
     console.log("  config   : " + CFG);
+    console.log("  cache    : " + cacheDir());
     console.log("  shims    : " + (t.win ? ROOT + "\\bin\\*.cmd" : "~/.local/bin/claude and " + prefixBinDir() + "/{cc-termux,ccp}"));
     return;
   }
   fs.mkdirSync(ROOT, { recursive: true });
+  if (isWindows) {
+    // Windows keeps config and cache outside the install root; create both up front so the
+    // install does not depend on a later write, and tell the user where everything lives.
+    fs.mkdirSync(path.dirname(CFG), { recursive: true });
+    fs.mkdirSync(cacheDir(), { recursive: true });
+    log("install root: " + ROOT);
+    log("config file : " + CFG);
+    log("cache dir   : " + cacheDir());
+  }
 
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cctermux-"));
 

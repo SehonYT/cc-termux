@@ -11,20 +11,20 @@
 
 import http from 'node:http';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
 import { proxyAntigravity } from "./antigravity.mjs";
 import { refreshStatusLine } from "../bin/cc-statusline.mjs";
+import { configFile, configDir, cacheDir } from "../bin/cc-paths.mjs";
 
-const CONFIG_PATH = process.env.CC_TERMUX_CONFIG || path.join(os.homedir(), '.config', 'cc-termux', 'config.json');
+const CONFIG_PATH = configFile();
 const LOG = (...a) => {
   if (process.env.CC_TERMUX_QUIET) return;
   const line = new Date().toISOString() + " " + a.join(" ");
   console.error(line);
   if (process.env.CC_TERMUX_MANAGED === '1') return; // stderr is already redirected to gateway.log by the launcher
   try {
-    const gwLog = path.join(os.homedir(), ".cache", "cc-termux", "gateway.log");
+    const gwLog = path.join(cacheDir(), "gateway.log");
     fs.mkdirSync(path.dirname(gwLog), { recursive: true, mode: 0o700 });
     fs.appendFileSync(gwLog, line + "\n");
     fs.chmodSync(gwLog, 0o600);
@@ -40,8 +40,8 @@ function loadConfig() {
 }
 let CONFIG = loadConfig();
 for (const [n, p] of Object.entries(CONFIG.providers || {})) p.name = p.name || n;
-const CONFIG_DIR = path.dirname(CONFIG_PATH);
-const CACHE_DIR = path.join(os.homedir(), '.cache', 'cc-termux');
+const CONFIG_DIR = configDir();
+const CACHE_DIR = cacheDir();
 const KEYS_PATH = path.join(CONFIG_DIR, 'keys.json');
 const GATEWAY_TOKEN = process.env.CC_TERMUX_GATEWAY_TOKEN || (CONFIG.gatewayToken || 'cc-termux-local');
 const QUOTA_PATH = path.join(CACHE_DIR, 'quota.json');
@@ -140,7 +140,7 @@ function providerKey(p) {
 
 function catalogIds() {
   try {
-    const f = path.join(os.homedir(), '.cache', 'cc-termux', 'catalog.json');
+    const f = path.join(CACHE_DIR, 'catalog.json');
     const cat = JSON.parse(fs.readFileSync(f, 'utf8'));
     return new Set((cat.models || []).map(m => m.id));
   } catch { return new Set(); }
@@ -789,7 +789,7 @@ const server = http.createServer(async (req, res) => {
       // spending third-party quota.
       if (process.env.CC_TERMUX_DEBUG_BODIES === '1') {
         try {
-          const dir = path.join(os.homedir(), '.cache', 'cc-termux', 'bodies');
+          const dir = path.join(CACHE_DIR, 'bodies');
           fs.mkdirSync(dir, { recursive: true });
           fs.writeFileSync(path.join(dir, Date.now() + '-' + (body.model || 'x').replace(/[^\w.-]/g, '_') + '.json'), JSON.stringify({ model: body.model, stream: body.stream, tools: (body.tools || []).length, max_tokens: body.max_tokens, systemHead: (typeof body.system === 'string' ? body.system : JSON.stringify(body.system || '')).slice(0, 300), stop_sequences: body.stop_sequences }, null, 2));
         } catch (e) { }
@@ -823,7 +823,7 @@ const server = http.createServer(async (req, res) => {
 
 const port = (CONFIG.listen && CONFIG.listen.port) || 8788;
 if (process.env.CC_TERMUX_MANAGED === '1') {
-  const SESS = path.join(os.homedir(), '.cache', 'cc-termux', 'sessions');
+  const SESS = path.join(CACHE_DIR, 'sessions');
   let idle = 0;
   setInterval(() => {
     let alive = 0;

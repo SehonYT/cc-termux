@@ -3,19 +3,18 @@
 // writes config.json/keys.json and regenerates the /model picker.
 
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { login as antigravityLogin, ensureProject as antigravityEnsureProject, loadCredentials as antigravityCreds, fetchAvailableModels, updateProviderModels } from "./cc-antigravity.mjs";
 import { installStatusLine, refreshStatusLine } from "./cc-statusline.mjs";
+import { installRoot, configFile, claudeDir, cacheDir } from "./cc-paths.mjs";
 
-const HOME = os.homedir();
-const ROOT = process.env.CC_TERMUX_ROOT || path.join(HOME, ".local", "share", "cc-termux");
-const CFG = process.env.CC_TERMUX_CONFIG || path.join(HOME, ".config", "cc-termux", "config.json");
-const SETTINGS = path.join(HOME, ".claude", "settings.json");
-const CACHE_DIR = path.join(HOME, ".cache", "cc-termux");
+const ROOT = installRoot();
+const CFG = configFile();
+const SETTINGS = path.join(claudeDir(), "settings.json");
+const CACHE_DIR = cacheDir();
 const CATALOG = path.join(CACHE_DIR, "catalog.json");
 const PRESETS_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "presets.json");
 const RETRY_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);

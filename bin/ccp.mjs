@@ -3,11 +3,10 @@
 // a shell, from Claude Code bash mode, or from a key binding.
 
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
+import { configFile, claudeDir } from "./cc-paths.mjs";
 
-const HOME = os.homedir();
-const CFG = process.env.CC_TERMUX_CONFIG || path.join(HOME, ".config", "cc-termux", "config.json");
+const CFG = configFile();
 const ESC = String.fromCharCode(27);
 const load = () => JSON.parse(fs.readFileSync(CFG, "utf8"));
 const save = (c) => fs.writeFileSync(CFG, JSON.stringify(c, null, 2) + "\n", { mode: 0o600 });
@@ -43,7 +42,7 @@ const finish = (name) => {
     cfg.override = { provider: name, model: p.model || null };
     save(cfg);
     try {
-      const sp = path.join(HOME, ".claude", "settings.json");
+      const sp = path.join(claudeDir(), "settings.json");
       const s = fs.existsSync(sp) ? JSON.parse(fs.readFileSync(sp, "utf8")) : {};
       if (p.model) s.model = composite(name, p.model);
       fs.writeFileSync(sp, JSON.stringify(s, null, 2) + "\n");

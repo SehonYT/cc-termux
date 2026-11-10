@@ -17,6 +17,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
+import { installRoot, configFile, cacheDir, claudeDir } from "./cc-paths.mjs";
 
 const SHIM_MARK = "cc-launcher.mjs";
 // Termux installs every package under this prefix (and exports PREFIX to match).
@@ -109,13 +110,19 @@ function backup(file) {
 
 const composite = (p, id) => (id ? "prov/" + p + "/" + id : id);
 
-export function healEnvironment({ root = process.env.CC_TERMUX_ROOT, home = os.homedir(), prefix, killGateways = true, installPrefix, searchPath, platform = process.platform, exists = fs.existsSync } = {}) {
+export function healEnvironment({ root, home = os.homedir(), prefix, killGateways = true, installPrefix, searchPath, platform = process.platform, exists = fs.existsSync } = {}) {
+  if (!root) root = installRoot();
   if (!root) throw new Error("install root is required");
   const changes = [];
-  const cfgPath = process.env.CC_TERMUX_CONFIG || path.join(home, ".config", "cc-termux", "config.json");
+  // Production always calls heal with the real home, so the shared resolver decides where
+  // config/cache live (Windows: APPDATA/LOCALAPPDATA). Tests and embedders that pass an
+  // explicit home keep the historical home-relative layout so they stay self-contained.
+  const nativeHome = home === os.homedir();
+  const cfgDefault = nativeHome ? configFile() : path.join(home, ".config", "cc-termux", "config.json");
+  const cfgPath = process.env.CC_TERMUX_CONFIG || cfgDefault;
   const keysPath = path.join(path.dirname(cfgPath), "keys.json");
-  const settingsPath = path.join(home, ".claude", "settings.json");
-  const cache = path.join(home, ".cache", "cc-termux");
+  const settingsPath = nativeHome ? path.join(claudeDir(), "settings.json") : path.join(home, ".claude", "settings.json");
+  const cache = nativeHome ? cacheDir() : path.join(home, ".cache", "cc-termux");
   const cfg = loadJson(cfgPath, null);
   const keys = loadJson(keysPath, {});
 
@@ -226,7 +233,11 @@ export function healEnvironment({ root = process.env.CC_TERMUX_ROOT, home = os.h
   }
 
   // 4. launcher layout: native-style ~/.local/bin/claude + cc-termux/ccp in the prefix
-  const canonicalRoot = path.join(home, ".local", "share", "cc-termux");
+  // Ignore a CC_TERMUX_ROOT override when deciding whether this is a canonical install:
+  // the platform default is what "canonical" means for shims. A detected legacy Windows
+  // install in ~/.local/share/cc-termux still resolves to itself here (resolver handles it),
+  // so heal repairs the shims instead of fighting the legacy layout.
+  const canonicalRoot = nativeHome ? installRoot({ ...process.env, CC_TERMUX_ROOT: "" }) : path.join(home, ".local", "share", "cc-termux");
   const isCanonical = path.resolve(root) === path.resolve(canonicalRoot);
   if (isCanonical && installPrefix !== false && process.platform === "win32") {
     // Windows has no ~/.local/bin: install .cmd shims next to the other user tools so a
@@ -383,7 +394,7 @@ export function healEnvironment({ root = process.env.CC_TERMUX_ROOT, home = os.h
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const i = process.argv.indexOf("--root");
-  const root = i > 0 ? process.argv[i + 1] : process.env.CC_TERMUX_ROOT;
+  const root = i > 0 ? process.argv[i + 1] : installRoot();
   try {
     const changes = healEnvironment({ root });
     for (const c of changes) console.log("heal: " + c);
