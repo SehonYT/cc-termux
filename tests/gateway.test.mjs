@@ -14,8 +14,12 @@ function startGateway(tmp, port, config) {
   fs.mkdirSync(path.join(home, ".cache", "cc-termux"), { recursive: true });
   const cfg = path.join(tmp, "config.json");
   fs.writeFileSync(cfg, JSON.stringify(config));
+  const cache = path.join(home, ".cache", "cc-termux");
+  fs.mkdirSync(cache, { recursive: true });
   const child = spawn(process.execPath, [path.join(root, "proxy", "server.mjs")], {
-    env: { ...process.env, HOME: home, USERPROFILE: home, CC_TERMUX_CONFIG: cfg },
+    // Pin the cache explicitly: on Windows the resolver would otherwise use LOCALAPPDATA and
+    // the assertions below read from this isolated home directory.
+    env: { ...process.env, HOME: home, USERPROFILE: home, CC_TERMUX_CONFIG: cfg, CC_TERMUX_CACHE: cache },
     stdio: ["ignore", "pipe", "pipe"],
   });
   return { child, home };
