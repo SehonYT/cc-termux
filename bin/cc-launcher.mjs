@@ -285,6 +285,10 @@ async function envForChild() {
     await ensureGateway();
   }
   const env = await envForChild();
+  if (!trivial) {
+    // Replace a stale status line left by a previous session/provider.
+    try { spawn(process.execPath, [path.join(ROOT, "bin", "cc-statusline.mjs"), "--refresh"], { stdio: "ignore", detached: true, env }).unref(); } catch (e) { }
+  }
   const isWin = process.platform === "win32";
   const bin = path.join(ROOT, "bin", isWin ? "claude.exe" : "claude.bin");
   const jsCli = path.join(ROOT, "js", "cli.js");

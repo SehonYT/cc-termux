@@ -750,6 +750,9 @@ const server = http.createServer(async (req, res) => {
       let route;
       try { route = pickRoute(model); } catch (e) { return anthropicError(res, 400, 'invalid_request_error', e.message); }
       LOG('REQ', route.name, '->', route.model, 'stream=' + !!body.stream, 'tools=' + (body.tools || []).length);
+      // Keep the status line in sync with the model Claude Code selected, for every provider
+      // (Antigravity refreshes itself after the request to also pick up quota).
+      if (route.provider.type !== 'antigravity') refreshStatusLine().catch(() => { });
       if (route.provider.type === 'antigravity') return await proxyAntigravity(req, res, route, body, { anthropicError });
       if (route.provider.type === 'anthropic') return await proxyAnthropic(res, route, body, req);
       if (responsesApi(route.provider, route.model) === 'responses') return await proxyResponses(res, route, body);

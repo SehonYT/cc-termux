@@ -19,7 +19,7 @@ function refreshStatusLineFile() {
       const prov = cfg.providers && cfg.providers[cfg.active];
       if (prov) {
         fs.mkdirSync(cache, { recursive: true });
-        fs.writeFileSync(file, "cc-termux · " + cfg.active + " · " + (prov.model || prov.defaultModel || prov.type) + NL);
+        fs.writeFileSync(file, cfg.active + " · " + (prov.model || prov.defaultModel || prov.type) + NL);
       }
     }
   } catch (e) { }

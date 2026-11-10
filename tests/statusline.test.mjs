@@ -52,3 +52,26 @@ test("status line model follows Claude settings.model, not the provider default"
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+test("status line shows the selected non-Antigravity provider and model, never 'antigravity'", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cc-statusline-other-"));
+  const old = { CC_TERMUX_CONFIG: process.env.CC_TERMUX_CONFIG, CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR, CC_TERMUX_CACHE: process.env.CC_TERMUX_CACHE };
+  process.env.CC_TERMUX_CONFIG = path.join(tmp, "config.json");
+  process.env.CLAUDE_CONFIG_DIR = tmp;
+  process.env.CC_TERMUX_CACHE = path.join(tmp, "cache");
+  try {
+    fs.writeFileSync(path.join(tmp, "config.json"), JSON.stringify({ active: "antigravity", providers: {
+      antigravity: { type: "antigravity", model: "gemini-3.8-flash-high", modelsById: { "gemini-3.8-flash-high": { name: "Gemini 3.8 Flash (High)" } } },
+      tokens: { type: "openai", model: "deepseek/deepseek-v4.1-flash", modelsById: { "deepseek/deepseek-v4.1-flash": { name: "DeepSeek V4.1 Flash" } } },
+    } }));
+    fs.writeFileSync(path.join(tmp, "settings.json"), JSON.stringify({ model: "prov/tokens/deepseek/deepseek-v4.1-flash" }));
+    fs.mkdirSync(path.join(tmp, "cache"), { recursive: true });
+    fs.writeFileSync(path.join(tmp, "cache", "antigravity-status.txt"), "antigravity · Gemini 3.8 Flash (High) · G 5h 100% 7d 96%\n");
+    const mod = await import("../bin/cc-statusline.mjs?t=" + Date.now());
+    const line = await mod.refreshStatusLine({ force: true });
+    assert.equal(line, "tokens · DeepSeek V4.1 Flash");
+    assert.equal(mod.readStatusLine(), "tokens · DeepSeek V4.1 Flash");
+  } finally {
+    for (const k of Object.keys(old)) { if (old[k] === undefined) delete process.env[k]; else process.env[k] = old[k]; }
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});

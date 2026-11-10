@@ -37,6 +37,7 @@ export function activeModel(cfg, explicitId) {
     const sm = typeof settings.model === "string" ? settings.model : "";
     const m = /^prov\/([^/]+)\/(.+)$/.exec(sm);
     if (m && cfg.providers && cfg.providers[m[1]]) { key = m[1]; p = cfg.providers[key]; id = m[2]; }
+    else if (!sm && cfg.override && cfg.override.provider === key && cfg.override.model) id = cfg.override.model;
     else {
       const ps = /^provswitch\/([^/]+)$/.exec(sm);
       if (ps && cfg.providers && cfg.providers[ps[1]]) { key = ps[1]; p = cfg.providers[key]; id = p.model; }
@@ -58,8 +59,8 @@ export function formatUsage(u) {
   }
   return parts.join(" · ") || "usage ?";
 }
-function lineFor(usage, model) {
-  return "antigravity · " + model + (usage ? " · " + formatUsage(usage) : "");
+function lineFor(usage, model, provider = "antigravity") {
+  return provider + " · " + model + (usage ? " · " + formatUsage(usage) : "");
 }
 export function readStatusLine() {
   try { return fs.readFileSync(statusFile(), "utf8").trim(); } catch (e) { return ""; }
@@ -79,7 +80,11 @@ export async function refreshStatusLine({ force = false, modelId = null } = {}) 
   const cfg = readJson(configPath());
   const model = activeModel(cfg, modelId);
   if (!model) { writeStatusLine("cc-termux"); return "cc-termux"; }
-  if (model.type !== "antigravity") { const line = "cc-termux · " + model.provider + " · " + model.name; writeStatusLine(line); return line; }
+  if (model.type !== "antigravity") {
+    const line = model.provider + " · " + model.name;
+    if (readStatusLine() !== line) writeStatusLine(line);
+    return line;
+  }
   try {
     const st = fs.statSync(statusFile());
     const currentLine = readStatusLine();
@@ -88,12 +93,12 @@ export async function refreshStatusLine({ force = false, modelId = null } = {}) 
   try {
     const { getAntigravityUsage } = await import("./cc-antigravity.mjs");
     const usage = await getAntigravityUsage({ timeoutMs: 2500 });
-    const line = lineFor(usage, model.name);
+    const line = lineFor(usage, model.name, model.provider);
     writeStatusLine(line);
     return line;
   } catch (e) {
     const old = readStatusLine();
-    const line = old && old.includes("· " + model.name + " ·") ? old : "antigravity · " + model.name + " · usage ?";
+    const line = old && old.includes("· " + model.name + " ·") ? old : model.provider + " · " + model.name + " · usage ?";
     writeStatusLine(line);
     return line;
   }
@@ -142,7 +147,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     else {
       const cfg = readJson(configPath());
       const m = activeModel(cfg);
-      console.log(m ? (m.type === "antigravity" ? "antigravity · " + m.name : "cc-termux · " + m.provider + " · " + m.name) : "cc-termux");
+      console.log(m ? m.provider + " · " + m.name : "cc-termux");
     }
   }
 }
