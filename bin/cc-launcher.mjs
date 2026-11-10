@@ -149,7 +149,10 @@ function sanitizeSettings(p) {
 async function envForChild() {
   const env = { ...process.env };
   env.ANTHROPIC_BASE_URL = base;
-  env.ANTHROPIC_AUTH_TOKEN = GATEWAY_TOKEN;
+  // Exactly one credential: Claude Code 2.1.322+ warns (and may pick the wrong header)
+  // when both ANTHROPIC_AUTH_TOKEN and ANTHROPIC_API_KEY are set. The gateway accepts
+  // both "Authorization: Bearer" and "x-api-key", so keep just the API key form.
+  delete env.ANTHROPIC_AUTH_TOKEN;
   // Claude Code refuses its default cross-session messaging socket under a user
   // namespace without a uid map (some Termux/proot devices). Give it an explicit
   // socket path inside our private cache directory instead; the directory is 0700.
@@ -163,6 +166,7 @@ async function envForChild() {
   }
   env.CC_TERMUX_GATEWAY_TOKEN = GATEWAY_TOKEN;
   env.ANTHROPIC_API_KEY = GATEWAY_TOKEN;
+  delete env.ANTHROPIC_AUTH_TOKEN;
   let p = (cfg.providers || {})[cfg.active] || {};
   try { sanitizeSettings(p); } catch (e) { }
   let settingsModel = "";

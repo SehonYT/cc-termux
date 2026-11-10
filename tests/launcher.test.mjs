@@ -92,7 +92,7 @@ test("the launcher forces the local auto-mode classifier and pins a Claude-capab
     await new Promise((resolve) => {
       const child = spawn(process.execPath, [path.join(rt, "bin", "cc-launcher.mjs"), "-e",
         "require('fs').writeFileSync(process.env.CC_ENV_DUMP, JSON.stringify(process.env))"], {
-        env: { ...process.env, HOME: home, USERPROFILE: home, CC_TERMUX_ROOT: rt, CC_TERMUX_CONFIG: cfgFile, CC_TERMUX_CACHE: cache, CC_ENV_DUMP: dump },
+        env: { ...process.env, HOME: home, USERPROFILE: home, CC_TERMUX_ROOT: rt, CC_TERMUX_CONFIG: cfgFile, CC_TERMUX_CACHE: cache, CC_ENV_DUMP: dump, ANTHROPIC_AUTH_TOKEN: "inherited-should-be-dropped" },
         stdio: "ignore",
       });
       const timer = setTimeout(() => { try { child.kill("SIGKILL"); } catch {} resolve(); }, 25000);
@@ -101,6 +101,9 @@ test("the launcher forces the local auto-mode classifier and pins a Claude-capab
     const env = JSON.parse(fs.readFileSync(dump, "utf8"));
     assert.equal(env.CLAUDE_CODE_AUTO_MODE_SERVER, "0", "server-side classifier must be disabled behind the gateway");
     assert.match(env.CLAUDE_CODE_AUTO_MODE_MODEL || "", /^claude-/, "classifier must be a Claude-capable model");
+    // Claude Code warns (and may pick the wrong header) when both are set.
+    assert.equal(env.ANTHROPIC_API_KEY, "cc-termux-local", "gateway token must be the API key");
+    assert.equal(env.ANTHROPIC_AUTH_TOKEN, undefined, "ANTHROPIC_AUTH_TOKEN must not be set too");
   } finally {
     try { fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); } catch (e) { }
   }
