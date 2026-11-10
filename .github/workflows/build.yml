@@ -36,7 +36,9 @@ jobs:
             *)        color=3447003; title="🔨 Build $STATUS" ;;
           esac
           short=$(git rev-parse --short HEAD)
+          logo="https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$GITHUB_SHA/assets/logo.png"
           payload=$(jq -n \
+            --arg logo "$logo" \
             --arg title "$title" \
             --argjson color "$color" \
             --arg status "$STATUS" \
@@ -49,21 +51,24 @@ jobs:
             --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             '{
               username: "cc-termux CI",
-              avatar_url: "https://github.com/SehonYT.png?size=64",
+              avatar_url: $logo,
               embeds: [{
+                author: {name: "cc-termux", icon_url: $logo},
                 title: $title,
                 url: $url,
                 color: $color,
                 description: ("Push to **" + $branch + "** by **" + $actor + "**"),
+                thumbnail: {url: $logo},
                 fields: [
                   {name: "Repository", value: $repo, inline: true},
                   {name: "Workflow", value: $workflow, inline: true},
                   {name: "Status", value: ("`" + $status + "`"), inline: true},
                   {name: "Branch", value: ("`" + $branch + "`"), inline: true},
                   {name: "Commit", value: ("`" + $short + "`"), inline: true},
-                  {name: "Run", value: ("[Open workflow run](" + $url + ")"), inline: false}
+                  {name: "Run", value: ("[Open workflow run](" + $url + ")"), inline: false},
+                  {name: "Community", value: "[Join the cc-termux Discord](https://discord.gg/AF8zvEDcSG)", inline: false}
                 ],
-                footer: {text: "cc-termux · GitHub Actions"},
+                footer: {text: "cc-termux · GitHub Actions", icon_url: $logo},
                 timestamp: $ts
               }]
             }')

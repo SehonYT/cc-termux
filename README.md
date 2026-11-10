@@ -1,6 +1,11 @@
+<p align="center">
+  <img src="assets/logo.png" alt="cc-termux logo" width="200">
+</p>
+
 # cc-termux
 
 [![CI](https://github.com/SehonYT/cc-termux/actions/workflows/ci.yml/badge.svg)](https://github.com/SehonYT/cc-termux/actions/workflows/ci.yml)
+[![Discord](https://img.shields.io/badge/Discord-join%20the%20server-5865F2?logo=discord&logoColor=white)](https://discord.gg/AF8zvEDcSG)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D18-3c873a)](https://nodejs.org)
 [![Platforms](https://img.shields.io/badge/platforms-Termux%20%7C%20Linux%20%7C%20macOS%20%7C%20Windows-lightgrey)]
@@ -583,6 +588,10 @@ tests/                                 test suites (node:test)
 - The UI patches are tied to specific release strings and may be skipped after updates.
 - Windows and macOS installs are implemented in the Node installer but are less tested than
   Linux/Termux.
+
+## Community
+
+Release notes, setups and help: [join the cc-termux Discord](https://discord.gg/AF8zvEDcSG).
 
 ## License
 
