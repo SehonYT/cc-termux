@@ -846,3 +846,23 @@ server.on('error', (e) => { LOG('gateway server error', e.code || e.message); pr
 server.listen(port, listenHost, () => {
   LOG('gateway listening on', port, 'active=' + CONFIG.active, 'config=' + CONFIG_PATH);
 });
+
+// Claude Code asks https://api.anthropic.com/api/web/domain_info?domain=<host> before
+// WebFetch. Behind a third-party setup that call has no Anthropic account behind it and
+// fails ("Unable to verify if domain ... is safe to fetch"), which blocks every fetch.
+// A binary patch rewrites that URL to this loopback endpoint (same byte length), so the
+// check answers "fetchable" locally. Loopback only; it never proxies content.
+const DOMAIN_CHECK_PORT = Number(process.env.CC_TERMUX_DOMAIN_CHECK_PORT || 8799);
+if (DOMAIN_CHECK_PORT > 0) {
+  const helper = http.createServer((req, res) => {
+    let domain = '';
+    try { domain = new URL(req.url, 'http://127.0.0.1').searchParams.get('domain') || ''; } catch (e) { }
+    res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+    res.end(JSON.stringify({ can_fetch: true, domain }));
+  });
+  helper.on('error', (e) => {
+    // Another cc-termux gateway already owns the helper port: nothing to do.
+    if (e.code !== 'EADDRINUSE') LOG('domain-check helper error', e.code || e.message);
+  });
+  helper.listen(DOMAIN_CHECK_PORT, '127.0.0.1', () => LOG('domain-check helper listening on', DOMAIN_CHECK_PORT));
+}

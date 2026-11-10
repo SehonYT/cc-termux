@@ -25,6 +25,14 @@
         "For other/previous model names, specify with --model."
       ],
       "replace": "Provider rows switch provider, model rows apply now."
+    },
+    {
+      "id": "web-fetch-domain-check",
+      "description": "Point WebFetch's domain safety check at the local gateway instead of api.anthropic.com",
+      "find": [
+        "https://api.anthropic.com/api/web/domain_info?domain="
+      ],
+      "replace": "http://127.0.0.1:8799/api/web/domain_infoxxxx?domain="
     }
   ],
   "regions": [

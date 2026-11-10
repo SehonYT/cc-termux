@@ -236,6 +236,30 @@ Agent SDK.`) makes Google's filter refuse the call. The adapter therefore:
 Quota percentages in the status line and in `cc-termux antigravity usage` are **remaining**
 budget, and are labelled `left`.
 
+### Web search and page fetch
+
+Claude Code's built-in `WebSearch` and `WebFetch` depend on Anthropic's servers. On
+Termux the bundled musl build of Claude Code also cannot read `/etc/resolv.conf` (it does
+not exist on Android), so every DNS lookup inside it fails and `WebFetch` cannot reach any
+site at all.
+
+cc-termux therefore ships a small MCP server (`bin/cc-mcp.mjs`) that the launcher registers
+automatically in `~/.claude.json` as `cc-termux`:
+
+- `web_search` - Bing results (DuckDuckGo as fallback), returned as title, URL and snippet.
+- `web_fetch` - downloads any http(s) page and returns readable text (HTML is converted),
+  so the model can read any site.
+
+Both tools are pre-approved in `~/.claude/settings.json` (they only read public pages) and
+`~/.claude/CLAUDE.md` gets a short note telling the model to prefer them over the built-in
+tools. Names as Claude sees them: `mcp__cc-termux__web_search` and
+`mcp__cc-termux__web_fetch`.
+
+WebFetch's domain safety check also calls `api.anthropic.com`, which has no account behind
+it in a third-party setup. The installer patches that URL to a loopback helper served by
+the gateway (`127.0.0.1:8799`), which answers `can_fetch: true`; disable the helper with
+`CC_TERMUX_DOMAIN_CHECK_PORT=0` if you would rather the built-in check fail closed.
+
 ### Local gateway without an API key
 
 Yes. Run the gateway locally (or on your LAN), then `cc-termux setup` →

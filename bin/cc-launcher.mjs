@@ -146,6 +146,55 @@ function sanitizeSettings(p) {
   }
 }
 
+// WebFetch/WebSearch cannot work on some platforms (for example Termux, where the musl
+// build of Claude Code cannot read /etc/resolv.conf, so every DNS lookup inside it fails
+// with EAI_AGAIN, and WebFetch's domain check needs api.anthropic.com). Register our own
+// MCP server so the model still has working web search and page fetching.
+function ensureMcpServer() {
+  const file = path.join(os.homedir(), ".claude.json");
+  let cfg = {};
+  try { cfg = JSON.parse(fs.readFileSync(file, "utf8")) || {}; } catch (e) { return; }
+  const wanted = { command: process.execPath, args: [path.join(ROOT, "bin", "cc-mcp.mjs")] };
+  cfg.mcpServers = cfg.mcpServers && typeof cfg.mcpServers === "object" ? cfg.mcpServers : {};
+  const cur = cfg.mcpServers["cc-termux"];
+  const same = cur && cur.command === wanted.command && Array.isArray(cur.args) && cur.args[0] === wanted.args[0];
+  if (!same) {
+    cfg.mcpServers["cc-termux"] = wanted;
+    try {
+      const tmp = file + "." + process.pid + ".tmp";
+      fs.writeFileSync(tmp, JSON.stringify(cfg, null, 2) + "\n", { mode: 0o600 });
+      fs.renameSync(tmp, file);
+    } catch (e) { }
+  }
+  // Those two tools only read public web pages, so allow them without a prompt and point
+  // the model at them (the built-in WebSearch/WebFetch cannot work on these platforms).
+  try {
+    const settingsFile = path.join(os.homedir(), ".claude", "settings.json");
+    const settings = JSON.parse(fs.readFileSync(settingsFile, "utf8")) || {};
+    settings.permissions = settings.permissions && typeof settings.permissions === "object" ? settings.permissions : {};
+    const allow = Array.isArray(settings.permissions.allow) ? settings.permissions.allow : [];
+    const wantedTools = ["mcp__cc-termux__web_search", "mcp__cc-termux__web_fetch"];
+    const missing = wantedTools.filter((r) => !allow.includes(r));
+    if (missing.length) {
+      settings.permissions.allow = [...allow, ...missing];
+      const tmp2 = settingsFile + "." + process.pid + ".tmp";
+      fs.writeFileSync(tmp2, JSON.stringify(settings, null, 2) + "\n", { mode: 0o600 });
+      fs.renameSync(tmp2, settingsFile);
+    }
+  } catch (e) { }
+  try {
+    const memoryFile = path.join(os.homedir(), ".claude", "CLAUDE.md");
+    const marker = "cc-termux web tools";
+    const current = fs.existsSync(memoryFile) ? fs.readFileSync(memoryFile, "utf8") : "";
+    if (!current.includes(marker)) {
+      fs.mkdirSync(path.dirname(memoryFile), { recursive: true });
+      fs.appendFileSync(memoryFile, (current && !current.endsWith("\n") ? "\n" : "") +
+        "\n<!-- " + marker + " -->\nFor web access use the cc-termux MCP tools web_search and web_fetch; " +
+        "the built-in WebSearch/WebFetch tools cannot reach the network on this device.\n");
+    }
+  } catch (e) { }
+}
+
 async function envForChild() {
   const env = { ...process.env };
   env.ANTHROPIC_BASE_URL = base;
@@ -299,6 +348,7 @@ async function envForChild() {
     await ensureGateway();
   }
   const env = await envForChild();
+  try { ensureMcpServer(); } catch (e) { }
   if (!trivial) {
     // Replace a stale status line left by a previous session/provider.
     try { spawn(process.execPath, [path.join(ROOT, "bin", "cc-statusline.mjs"), "--refresh"], { stdio: "ignore", detached: true, env }).unref(); } catch (e) { }
