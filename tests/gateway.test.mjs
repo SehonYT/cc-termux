@@ -240,3 +240,20 @@ test("auto-mode classifier turns are detected by their system marker and can be 
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+test("health reports its own pid so a pid file can be verified without /proc", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cc-gw-health-"));
+  const port = 19600 + Math.floor(Math.random() * 300);
+  const { child } = startGateway(tmp, port, { listen: { host: "127.0.0.1", port }, active: "mock", providers: {
+    mock: { type: "openai", baseUrl: "http://127.0.0.1:9", path: "/v1/chat/completions", apiMode: "chat", noKey: true, model: "m1", modelsById: { m1: { name: "m1" } } },
+  } });
+  try {
+    assert.ok(await waitHealth(port), "gateway did not start");
+    const health = await (await fetch("http://127.0.0.1:" + port + "/health")).json();
+    assert.equal(health.ok, true);
+    assert.equal(health.pid, child.pid, "health.pid must name the gateway process");
+  } finally {
+    child.kill("SIGKILL");
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});

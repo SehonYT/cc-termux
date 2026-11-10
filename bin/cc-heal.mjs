@@ -19,6 +19,50 @@ import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 
 const SHIM_MARK = "cc-launcher.mjs";
+// Termux installs every package under this prefix (and exports PREFIX to match).
+const TERMUX_PREFIX = "/data/data/com.termux/files/usr";
+// Homebrew's documented default prefix on Apple Silicon; Intel Macs use /usr/local.
+const HOMEBREW_ARM_PREFIX = "/opt/homebrew";
+// Shell rc files that make ~/.local/bin visible: bash reads .bashrc/.profile,
+// zsh reads .zprofile (login shells) and .zshrc (interactive shells).
+const SHELL_RC_FILES = [".bashrc", ".profile", ".zprofile", ".zshrc"];
+const PATH_MARKER = "# cc-termux PATH";
+const PATH_LINE = 'export PATH="$HOME/.local/bin:$PATH"';
+
+export function shellRcFiles(home) {
+  return SHELL_RC_FILES.map((f) => path.join(home, f));
+}
+// Idempotently append the ~/.local/bin PATH entry to every rc file either shell reads.
+export function ensurePathInRcFiles(home) {
+  const added = [];
+  for (const rc of shellRcFiles(home)) {
+    try {
+      const text = fs.existsSync(rc) ? fs.readFileSync(rc, "utf8") : "";
+      if (text.includes(PATH_MARKER)) continue;
+      fs.appendFileSync(rc, "\n" + PATH_MARKER + "\n" + PATH_LINE + "\n");
+      added.push(path.basename(rc));
+    } catch (e) { }
+  }
+  return added;
+}
+// Resolve the system prefix whose bin/ holds the user-facing launchers.
+// An explicit PREFIX wins (Termux and the test harness set it), then the platform
+// default: Termux's usr, Homebrew's /opt/homebrew on Apple Silicon, /usr/local.
+export function resolvePrefix({ platform = process.platform, env = process.env, exists = fs.existsSync } = {}) {
+  try {
+    if (env && env.PREFIX) return env.PREFIX;
+    if (platform === "android") return TERMUX_PREFIX;
+    if (platform === "darwin") {
+      if (env && env.HOMEBREW_PREFIX) return env.HOMEBREW_PREFIX;
+      if (exists(path.join(HOMEBREW_ARM_PREFIX, "bin"))) return HOMEBREW_ARM_PREFIX;
+      return "/usr/local";
+    }
+  } catch (e) { }
+  return "/usr/local";
+}
+export function prefixBinDir(opts) {
+  return path.join(resolvePrefix(opts), "bin");
+}
 
 function loadJson(file, fallback) {
   try { return JSON.parse(fs.readFileSync(file, "utf8")); } catch { return fallback; }
@@ -65,7 +109,7 @@ function backup(file) {
 
 const composite = (p, id) => (id ? "prov/" + p + "/" + id : id);
 
-export function healEnvironment({ root = process.env.CC_TERMUX_ROOT, home = os.homedir(), prefix, killGateways = true, installPrefix, searchPath } = {}) {
+export function healEnvironment({ root = process.env.CC_TERMUX_ROOT, home = os.homedir(), prefix, killGateways = true, installPrefix, searchPath, platform = process.platform, exists = fs.existsSync } = {}) {
   if (!root) throw new Error("install root is required");
   const changes = [];
   const cfgPath = process.env.CC_TERMUX_CONFIG || path.join(home, ".config", "cc-termux", "config.json");
@@ -206,8 +250,8 @@ export function healEnvironment({ root = process.env.CC_TERMUX_ROOT, home = os.h
     }
   } else if (isCanonical && installPrefix !== false) {
     const homeBin = path.join(home, ".local", "bin");
-    fs.mkdirSync(homeBin, { recursive: true });
-    const prefixBin = path.join(prefix || process.env.PREFIX || (process.platform === "android" ? "/data/data/com.termux/files/usr" : "/usr/local"), "bin");
+    try { fs.mkdirSync(homeBin, { recursive: true }); } catch (e) { changes.push("shims: cannot write " + homeBin + " (" + e.code + ")"); }
+    const prefixBin = prefix ? path.join(prefix, "bin") : prefixBinDir({ platform, exists });
     const node = process.execPath;
     const shimBody = (target) => "#!/bin/sh\nexec \"" + node + "\" \"" + target + "\" \"$@\"\n";
     const writeLauncherShim = (file, target) => {
@@ -263,16 +307,8 @@ export function healEnvironment({ root = process.env.CC_TERMUX_ROOT, home = os.h
     if (fs.existsSync(oldClaude)) {
       try { backup(oldClaude); changes.push("shim: moved " + oldClaude + " aside"); } catch (e) { }
     }
-    // make sure login shells find ~/.local/bin
-    for (const rc of [path.join(home, ".bashrc"), path.join(home, ".profile")]) {
-      try {
-        if (!fs.existsSync(rc)) continue;
-        const text = fs.readFileSync(rc, "utf8");
-        if (text.includes("# cc-termux PATH")) continue;
-        fs.appendFileSync(rc, "\n# cc-termux PATH\nexport PATH=\"$HOME/.local/bin:$PATH\"\n");
-        changes.push("path: added ~/.local/bin to " + path.basename(rc));
-      } catch (e) { }
-    }
+    // make sure login shells find ~/.local/bin, using the same rc files as the installer
+    for (const rc of ensurePathInRcFiles(home)) changes.push("path: added ~/.local/bin to " + rc);
     // mark the install as native for Claude Code diagnostics
     try {
       const cj = path.join(home, ".claude.json");
@@ -285,7 +321,7 @@ export function healEnvironment({ root = process.env.CC_TERMUX_ROOT, home = os.h
     // remove a leftover npm global package if present
     try {
       const npmPrefix = path.dirname(prefixBin);
-      const realPrefix = process.env.PREFIX || (process.platform === "android" ? "/data/data/com.termux/files/usr" : "/usr/local");
+      const realPrefix = resolvePrefix({ platform, exists });
       const npmPkg = path.join(npmPrefix, "lib", "node_modules", "@anthropic-ai", "claude-code");
       // Only touch npm when operating on the real global prefix (never for temp/isolated roots).
       if (path.resolve(npmPrefix) === path.resolve(realPrefix) && fs.existsSync(npmPkg)) {

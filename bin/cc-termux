@@ -8,23 +8,62 @@ import { execFileSync } from "node:child_process";
 
 const ROOT = process.env.CC_TERMUX_ROOT || path.join(os.homedir(), ".local", "share", "cc-termux");
 const CFG = process.env.CC_TERMUX_CONFIG || path.join(os.homedir(), ".config", "cc-termux", "config.json");
-function gatewayPids() {
-  // /proc is Linux-only; macOS/Windows fall back to the pid file the launcher writes.
+const GATEWAY_PID_FILE = path.join(os.homedir(), ".cache", "cc-termux", "gateway.pid");
+function readPidFile() {
+  try {
+    const pid = Number(fs.readFileSync(GATEWAY_PID_FILE, "utf8").trim());
+    return Number.isInteger(pid) && pid > 0 ? pid : 0;
+  } catch (e) { return 0; }
+}
+function forgetPidFile() { try { fs.unlinkSync(GATEWAY_PID_FILE); } catch (e) { } }
+function pidAlive(pid) {
+  // signal 0 only probes existence (Node docs: "a signal of 0 can be used to test for the
+  // existence of a process"); EPERM still means the pid exists, just not ours.
+  try { process.kill(pid, 0); return true; } catch (e) { return e.code === "EPERM"; }
+}
+function procCmdline(pid) {
+  try { return fs.readFileSync("/proc/" + pid + "/cmdline", "utf8").replace(/\0/g, " ").trim(); }
+  catch (e) { return null; }
+}
+async function gatewayHealthUp() {
+  try {
+    const r = await fetch("http://127.0.0.1:" + port(load()) + "/health", { signal: AbortSignal.timeout(1500) });
+    const j = await r.json();
+    return !!(j && j.ok);
+  } catch (e) { return false; }
+}
+async function gatewayPids() {
+  // /proc is Linux-only; macOS/Windows use the pid file the launcher writes. Whatever the
+  // source, a pid is only reported once it is verified: a recycled or dead pid must never
+  // make `restart` kill an unrelated process or `status`/doctor claim a gateway that is
+  // not there.
+  const hasProc = fs.existsSync("/proc/self/cmdline");
   const pids = [];
-  try {
-    for (const d of fs.readdirSync("/proc")) {
-      if (!/^\\d+$/.test(d)) continue;
-      try {
-        const cmd = fs.readFileSync("/proc/" + d + "/cmdline", "utf8");
-        if (cmd.includes("proxy/server.mjs") && Number(d) !== process.pid) pids.push(Number(d));
-      } catch (e) { }
-    }
-  } catch (e) { }
-  if (pids.length) return pids;
-  try {
-    const pid = Number(fs.readFileSync(path.join(os.homedir(), ".cache", "cc-termux", "gateway.pid"), "utf8").trim());
-    if (pid > 0 && pid !== process.pid) pids.push(pid);
-  } catch (e) { }
+  if (hasProc) {
+    try {
+      for (const d of fs.readdirSync("/proc")) {
+        if (!/^\d+$/.test(d)) continue;
+        const pid = Number(d);
+        if (pid === process.pid) continue;
+        const cmd = procCmdline(pid);
+        if (cmd && cmd.includes("proxy/server.mjs")) pids.push(pid);
+      }
+    } catch (e) { }
+    if (pids.length) return pids;
+  }
+  const pid = readPidFile();
+  if (!pid || pid === process.pid) return pids;
+  const cmd = hasProc ? procCmdline(pid) : null;
+  if (cmd != null) {
+    // Linux: /proc is authoritative. A pid file that points at something else is stale.
+    if (cmd.includes("proxy/server.mjs")) pids.push(pid);
+    else forgetPidFile();
+    return pids;
+  }
+  if (!pidAlive(pid)) { forgetPidFile(); return pids; }
+  // No /proc to inspect (macOS, Windows): trust only a live pid whose own gateway health
+  // endpoint answers. A live but silent pid is a recycled one - leave it alone.
+  if (await gatewayHealthUp()) pids.push(pid);
   return pids;
 }
 
@@ -145,7 +184,7 @@ async function doctor(fix) {
   }
 
   try {
-    const pids = gatewayPids();
+    const pids = await gatewayPids();
     if (pids.length > 1) warn(pids.length + " gateway processes running (run: cc-termux restart)");
   } catch (e) { }
   const portv = (c.listen && c.listen.port) || 8788;
@@ -240,12 +279,42 @@ async function doctor(fix) {
     else warn(badIds.length + " non-chat gemini models in picker (cc-termux doctor --fix)");
   }
 
+  let patchOut = "";
   try {
-    const out = execFileSync(process.execPath, [path.join(ROOT, "bin", "cc-patch.mjs"), "--status"], { encoding: "utf8" });
-    const applied = (out.match(/applied/g) || []).length;
-    const pending = (out.match(/pending/g) || []).length;
+    patchOut = execFileSync(process.execPath, [path.join(ROOT, "bin", "cc-patch.mjs"), "--status"], { encoding: "utf8" });
+    const applied = (patchOut.match(/applied/g) || []).length;
+    const pending = (patchOut.match(/pending/g) || []).length;
     if (pending) warn(pending + " TUI patches pending (cc-termux patch)"); else pass("TUI patches applied (" + applied + ")");
   } catch (e) { warn("could not read patch status"); }
+
+  // WebFetch's domain-safety check only works when both halves agree: the gateway's helper
+  // must answer on 127.0.0.1:8799 (the patched URL) and the installed binary must carry the
+  // byte patch that calls it. The port is fixed because patches.json bakes it into the URL.
+  {
+    const helperUrl = "http://127.0.0.1:8799/api/web/domain_infoxxxx?domain=example.com";
+    let helperOk = false;
+    try {
+      const r = await fetch(helperUrl, { signal: AbortSignal.timeout(1500) });
+      const j = await r.json();
+      helperOk = !!(j && j.can_fetch === true);
+    } catch (e) { helperOk = false; }
+    let patchState = "unknown";
+    if (/^\s*applied\s+web-fetch-domain-check/m.test(patchOut)) patchState = "applied";
+    else if (/^\s*pending\s+web-fetch-domain-check/m.test(patchOut)) patchState = "pending";
+    else if (/^\s*n\/a\s+web-fetch-domain-check/m.test(patchOut)) patchState = "missing";
+    const helperNote = helperOk ? "helper answers on 8799" : "nothing answers on 8799";
+    if (patchState === "applied" && helperOk) {
+      pass("WebFetch domain check: " + helperNote + " and the binary is patched to use it");
+    } else if (patchState === "applied") {
+      warn("WebFetch domain check: binary is patched for 127.0.0.1:8799 but " + helperNote + " - WebFetch will fail (run: claude to start the gateway)");
+    } else if (patchState === "pending") {
+      warn("WebFetch domain check: " + helperNote + ", but the installed binary is not patched to use it - WebFetch will ask api.anthropic.com (run: cc-termux patch)");
+    } else if (patchState === "missing") {
+      warn("WebFetch domain check: this Claude Code build has no domain-check anchor, so the binary cannot be patched and " + helperNote + " (run: cc-termux update)");
+    } else {
+      warn("WebFetch domain check: cannot verify the binary patch (" + helperNote + ") - run: cc-termux update, then cc-termux patch");
+    }
+  }
 
   // The picker shim lives in different places per platform (and per install style).
   const ccpCandidates = [
@@ -365,7 +434,7 @@ async function diagnose() {
   const port = (c && c.listen && c.listen.port) || 8788;
   let health = null;
   try { health = await (await fetch("http://127.0.0.1:" + port + "/health", { signal: AbortSignal.timeout(1500) })).json(); } catch (e) {}
-  const pids = gatewayPids();
+  const pids = await gatewayPids();
   console.log("  gateway   " + (health ? "UP active=" + health.active : "DOWN") + "  pids=" + JSON.stringify(pids));
   if (!c || !c.active || !(c.providers && c.providers[c.active])) {
     console.log("  next      run: cc-termux setup");
@@ -670,8 +739,19 @@ switch (cmd) {
     break;
   }
   case "restart": {
-    for (const pid of gatewayPids()) { try { process.kill(pid); } catch (e) { } }
-    console.log("gateway stopped; restarts on the next claude run");
+    const pids = await gatewayPids();
+    for (const pid of pids) {
+      // Default signal only: on Windows SIGTERM is not a real signal (Node emulates it as an
+      // unconditional kill), so passing it explicitly buys nothing; on POSIX the default is
+      // SIGTERM, which is what we want.
+      try { process.kill(pid); } catch (e) { }
+    }
+    if (pids.length) {
+      forgetPidFile();
+      console.log("gateway stopped; restarts on the next claude run");
+    } else {
+      console.log("no verified gateway process found; it will start on the next claude run");
+    }
     break;
   }
   case "patch": {

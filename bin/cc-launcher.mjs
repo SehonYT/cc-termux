@@ -38,9 +38,24 @@ function isOurGateway(pid) {
   } catch (e) { return false; }
 }
 
+function pidAlive(pid) {
+  try { process.kill(pid, 0); return true; } catch (e) { return e.code === "EPERM"; }
+}
+
+// Without /proc the pid file is the only handle, so confirm the pid really is our gateway
+// (its /health reports the same pid) before anything signals it.
+async function verifiedGatewayPid(pid) {
+  if (process.platform === "linux") return pidAlive(pid);
+  try {
+    const r = await fetch(base + "/health", { signal: AbortSignal.timeout(1500) });
+    const j = await r.json();
+    return Boolean(j && j.ok && j.pid === pid);
+  } catch (e) { return false; }
+}
+
 function gatewayPids() {
   if (process.platform !== "linux") {
-    try { const pid = Number(fs.readFileSync(path.join(CACHE, "gateway.pid"), "utf8").trim()) || 0; if (pid > 0) return [pid]; } catch (e) { }
+    try { const pid = Number(fs.readFileSync(path.join(CACHE, "gateway.pid"), "utf8").trim()) || 0; if (pid > 0 && pidAlive(pid)) return [pid]; } catch (e) { }
     return [];
   }
   const out = [];
@@ -59,6 +74,11 @@ function gatewayPids() {
 }
 
 function stopGateway() {
+  if (process.platform !== "linux") {
+    // No /proc to prove identity and no synchronous health check here: leave the process
+    // alone and let its own idle timer exit. Killing a recycled pid would be worse.
+    return;
+  }
   try {
     const pid = Number(fs.readFileSync(path.join(CACHE, "gateway.pid"), "utf8").trim());
     if (pid && pid !== process.pid) {
@@ -93,8 +113,12 @@ async function ensureGateway() {
     try { fs.unlinkSync(lockFile); fs.writeFileSync(lockFile, String(process.pid), { flag: "wx", mode: 0o600 }); locked = true; } catch (e2) { }
   }
   const releaseLock = () => { if (locked) { try { fs.unlinkSync(lockFile); } catch (e) { } } };
-  // remove stale instances so a fresh one can bind the port
-  for (const pid of gatewayPids()) { try { process.kill(pid, "SIGKILL"); } catch {} }
+  // remove stale instances so a fresh one can bind the port (verify first: a recycled pid
+  // must never be killed)
+  for (const pid of gatewayPids()) {
+    if (!(await verifiedGatewayPid(pid))) continue;
+    try { process.kill(pid, "SIGKILL"); } catch {}
+  }
   const server = path.join(ROOT, "proxy", "server.mjs");
   if (!fs.existsSync(server)) { console.error("cc-launcher: gateway missing at " + server); process.exit(1); }
   const child = spawn(process.execPath, [server], {

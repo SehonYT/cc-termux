@@ -17,6 +17,7 @@ import { detectTarget, nodeVersionOk, glibcTooOld } from "./bin/cc-platform.mjs"
 import { extractTgz } from "./bin/cc-tar.mjs";
 import { createProgress, banner, step, info } from "./bin/cc-ui.mjs";
 import { PERF_PROMPT_LINES, perfDefaultAnswer, savePerfMode, shouldAskPerf } from "./bin/cc-perf.mjs";
+import { ensurePathInRcFiles, prefixBinDir } from "./bin/cc-heal.mjs";
 
 const SRC = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -244,8 +245,8 @@ function installShims(t) {
     log("custom install root: skipping ~/.local and $PREFIX shims (add " + path.join(ROOT, "bin") + " to PATH)");
     return;
   }
-  const prefix = process.env.PREFIX || (t.termux ? "/data/data/com.termux/files/usr" : "/usr/local");
-  const binDir = path.join(prefix, "bin");
+  // PREFIX (Termux) wins; on macOS this detects Homebrew's /opt/homebrew/bin.
+  const binDir = prefixBinDir();
   const homeBin = path.join(os.homedir(), ".local", "bin");
   const writeShim = (dir, name, target) => {
     const p = path.join(dir, name);
@@ -295,12 +296,7 @@ function installShims(t) {
       }
     }
   } catch (e) { }
-  for (const rc of [path.join(os.homedir(), ".bashrc"), path.join(os.homedir(), ".profile"), path.join(os.homedir(), ".zprofile"), path.join(os.homedir(), ".zshrc")]) {
-    try {
-      const text = fs.existsSync(rc) ? fs.readFileSync(rc, "utf8") : "";
-      if (!text.includes("# cc-termux PATH")) fs.appendFileSync(rc, "\n# cc-termux PATH\nexport PATH=\"$HOME/.local/bin:$PATH\"\n");
-    } catch (e) { }
-  }
+  ensurePathInRcFiles(os.homedir());
 }
 (async () => {
   if (has("--list-assets")) { for (const f of runtimeAssets()) console.log(f); return; }
@@ -327,7 +323,7 @@ function installShims(t) {
     if (t.js && t.reason) console.log("  fallback : " + t.reason);
     console.log("  root     : " + ROOT);
     console.log("  config   : " + CFG);
-    console.log("  shims    : " + (t.win ? ROOT + "\\bin\\*.cmd" : "~/.local/bin/claude and " + (process.env.PREFIX || (t.termux ? "/data/data/com.termux/files/usr" : "/usr/local")) + "/bin/{cc-termux,ccp}"));
+    console.log("  shims    : " + (t.win ? ROOT + "\\bin\\*.cmd" : "~/.local/bin/claude and " + prefixBinDir() + "/{cc-termux,ccp}"));
     return;
   }
   fs.mkdirSync(ROOT, { recursive: true });

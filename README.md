@@ -292,8 +292,13 @@ r.jina.ai), and the gateway's domain-check helper below.
 
 WebFetch's domain safety check also calls `api.anthropic.com`, which has no account behind
 it in a third-party setup. The installer patches that URL to a loopback helper served by
-the gateway (`127.0.0.1:8799`), which answers `can_fetch: true`; disable the helper with
-`CC_TERMUX_DOMAIN_CHECK_PORT=0` if you would rather the built-in check fail closed.
+the gateway (`127.0.0.1:8799`), which answers `can_fetch: true`.
+
+The port is deliberately not configurable: the patch replaces the URL with an equal-length
+string that bakes `8799` in, so overriding it could only make WebFetch fail silently. An old
+`CC_TERMUX_DOMAIN_CHECK_PORT` value is ignored and logged. `cc-termux doctor` checks both
+halves - that the helper answers and that the installed binary is patched - and prints the
+fix when they disagree.
 
 ### Local gateway without an API key
 

@@ -745,7 +745,9 @@ const server = http.createServer(async (req, res) => {
     if (u.pathname === '/health') {
       res.writeHead(200, { 'content-type': 'application/json' });
       const act = CONFIG.providers[CONFIG.active] || {};
-      return res.end(JSON.stringify({ ok: true, active: CONFIG.active, model: act.model || null, override: CONFIG.override || null, providers: Object.keys(CONFIG.providers) }));
+      // pid lets callers verify that a pid file still names THIS gateway on platforms
+      // without /proc (macOS, Windows) before they signal anything.
+      return res.end(JSON.stringify({ ok: true, pid: process.pid, active: CONFIG.active, model: act.model || null, override: CONFIG.override || null, providers: Object.keys(CONFIG.providers) }));
     }
     if (req.method !== 'POST') { res.writeHead(404); return res.end('{}'); }
     const chunks = [];
@@ -852,8 +854,18 @@ server.listen(port, listenHost, () => {
 // fails ("Unable to verify if domain ... is safe to fetch"), which blocks every fetch.
 // A binary patch rewrites that URL to this loopback endpoint (same byte length), so the
 // check answers "fetchable" locally. Loopback only; it never proxies content.
-const DOMAIN_CHECK_PORT = Number(process.env.CC_TERMUX_DOMAIN_CHECK_PORT || 8799);
-if (DOMAIN_CHECK_PORT > 0) {
+//
+// The port is NOT configurable. The patch in patches.json replaces the URL with an
+// equal-length string that bakes 8799 in ("http://127.0.0.1:8799/..."), so any override
+// would leave the binary talking to 8799 while this helper listened elsewhere and WebFetch
+// would fail silently. An env value from an older version is reported and ignored.
+const DOMAIN_CHECK_PORT = 8799;
+const DOMAIN_CHECK_ENV = process.env.CC_TERMUX_DOMAIN_CHECK_PORT;
+if (DOMAIN_CHECK_ENV != null && DOMAIN_CHECK_ENV !== '' && Number(DOMAIN_CHECK_ENV) !== DOMAIN_CHECK_PORT) {
+  LOG('ignoring CC_TERMUX_DOMAIN_CHECK_PORT=' + DOMAIN_CHECK_ENV +
+    ': the patched WebFetch URL is fixed to 127.0.0.1:' + DOMAIN_CHECK_PORT + ', overriding it would break WebFetch');
+}
+{
   const helper = http.createServer((req, res) => {
     let domain = '';
     try { domain = new URL(req.url, 'http://127.0.0.1').searchParams.get('domain') || ''; } catch (e) { }
