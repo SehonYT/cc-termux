@@ -162,11 +162,28 @@ async function envForChild() {
     } catch (e) { }
   }
   env.CC_TERMUX_GATEWAY_TOKEN = GATEWAY_TOKEN;
-  delete env.ANTHROPIC_API_KEY;
+  env.ANTHROPIC_API_KEY = GATEWAY_TOKEN;
   const p = (cfg.providers || {})[cfg.active] || {};
   try { sanitizeSettings(p); } catch (e) { }
   let settingsModel = "";
-  try { settingsModel = (JSON.parse(fs.readFileSync(path.join(os.homedir(), ".claude", "settings.json"), "utf8")).model) || ""; } catch {}
+  try {
+    const settingsPath = path.join(os.homedir(), ".claude", "settings.json");
+    const settings = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+    settingsModel = settings.model || "";
+    // /model picker can persist a provider-switch marker. Claude Code then treats
+    // that literal string as the model (and auto-mode's safety classifier names it).
+    // Normalize it to the provider's real model before starting the session.
+    const marker = /^provswitch\/([^/]+)$/.exec(settingsModel);
+    if (marker && cfg.providers && cfg.providers[marker[1]]) {
+      const target = cfg.providers[marker[1]];
+      const real = (cfg.override && cfg.override.provider === marker[1] && cfg.override.model) || target.model || target.defaultModel;
+      if (real) {
+        settingsModel = "prov/" + marker[1] + "/" + real;
+        settings.model = settingsModel;
+        fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n");
+      }
+    }
+  } catch {}
   const bareAnthropic = /^claude-(opus|sonnet|haiku)-[0-9]/.test(settingsModel) && !settingsModel.startsWith("prov/");
   let selectedProvider = "";
   let selectedId = "";
@@ -192,6 +209,20 @@ async function envForChild() {
   delete env.ANTHROPIC_MODEL;
   for (const k of ["CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "ANTHROPIC_CUSTOM_HEADERS", "ANTHROPIC_BEDROCK_BASE_URL", "ANTHROPIC_VERTEX_BASE_URL"]) delete env[k];
   if (model) {
+    // Auto mode's safety classifier is an extra model call. On a third-party
+    // gateway a Gemini model cannot reliably follow the classifier contract, so
+    // pin the classifier to an available Claude model from the active provider.
+    try {
+      if (!env.CLAUDE_CODE_AUTO_MODE_MODEL && cfg.active) {
+        const cp = cfg.providers[cfg.active] || {};
+        const ids = Object.keys(cp.modelsById || {});
+        const pick = ids.find((id) => /^claude-sonnet-4-6$/.test(id)) || ids.find((id) => /^claude-opus-4-6/.test(id)) || ids.find((id) => id.startsWith("claude-"));
+        if (pick) {
+          env.CLAUDE_CODE_AUTO_MODE_MODEL = pick; // bare Claude id: classifier rejects provider-qualified aliases
+          if (!env.CLAUDE_CODE_BG_CLASSIFIER_MODEL) env.CLAUDE_CODE_BG_CLASSIFIER_MODEL = pick;
+        }
+      }
+    } catch (e) { }
     if (!settingsModel || bareAnthropic) {
       // Stale/absent settings.model: pin the provider model so the session does not
       // fall back to Anthropic's built-in default (Opus). Mid-session picker changes

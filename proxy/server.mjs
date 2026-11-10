@@ -196,6 +196,7 @@ function pickRoute(model) {
   const p = CONFIG.providers[name];
   if (!p) throw new Error('no active provider in config');
   // 3) a raw provider model id for the active provider passes through untouched
+  if (p.modelsById && p.modelsById[model]) return { name, provider: p, model };
   if (catalogIds().has(model)) return { name, provider: p, model };
   const mapped = (p.models && p.models[model]) || p.model || p.defaultModel || model;
   return { name, provider: p, model: mapped };

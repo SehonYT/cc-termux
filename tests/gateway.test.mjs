@@ -167,3 +167,25 @@ test("discovery lists configured provider models and invalid JSON is rejected", 
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+test("explicit provider model ids are not remapped to the default model", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cc-gw-route-"));
+  const port = 24000 + Math.floor(Math.random() * 1000);
+  const { child, home } = startGateway(tmp, port, {
+    listen: { host: "127.0.0.1", port }, active: "p",
+    providers: { p: { type: "openai", baseUrl: "http://127.0.0.1:9", path: "/chat/completions", model: "m1", modelsById: { m1: { name: "M1" }, m2: { name: "M2" } }, retries: 1 } },
+    routing: {},
+  });
+  try {
+    assert.ok(await waitHealth(port), "gateway did not start");
+    await fetch("http://127.0.0.1:" + port + "/v1/messages", {
+      method: "POST", headers: { "content-type": "application/json", authorization: "Bearer cc-termux-local" },
+      body: JSON.stringify({ model: "m2", max_tokens: 5, messages: [{ role: "user", content: "hi" }] }),
+    }).catch(() => { });
+    const log = fs.readFileSync(path.join(home, ".cache", "cc-termux", "gateway.log"), "utf8");
+    assert.match(log, /REQ p -> m2/);
+    assert.doesNotMatch(log, /REQ p -> m1/);
+  } finally {
+    child.kill("SIGKILL");
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
