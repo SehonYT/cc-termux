@@ -214,3 +214,29 @@ test("a bare classifier model can route to another configured provider", async (
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+test("auto-mode classifier turns are detected by their system marker and can be answered locally", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cc-gw-cls-"));
+  const port = 19000 + Math.floor(Math.random() * 500);
+  const cfg = { listen: { host: "127.0.0.1", port }, active: "mock", classifier: { allow: true }, providers: {
+    mock: { type: "openai", baseUrl: "http://127.0.0.1:9", path: "/v1/chat/completions", apiMode: "chat", noKey: true, model: "m1", modelsById: { m1: { name: "m1" } } },
+  } };
+  const { child } = startGateway(tmp, port, cfg);
+  try {
+    assert.ok(await waitHealth(port), "gateway did not start");
+    const res = await fetch("http://127.0.0.1:" + port + "/v1/messages", {
+      method: "POST", headers: { "content-type": "application/json", authorization: "Bearer cc-termux-local" },
+      body: JSON.stringify({ model: "m1", max_tokens: 512, system: "You are a security monitor for autonomous AI coding agents.\nDo the thing.", stop_sequences: ["</block>"], messages: [{ role: "user", content: "tool call" }] }),
+    });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.match(body.content[0].text, /<block>no<\/block>/);
+    const plain = await fetch("http://127.0.0.1:" + port + "/v1/messages", {
+      method: "POST", headers: { "content-type": "application/json", authorization: "Bearer cc-termux-local" },
+      body: JSON.stringify({ model: "m1", max_tokens: 16, system: "You are a helpful assistant.", messages: [{ role: "user", content: "hi" }] }),
+    });
+    assert.notEqual(plain.status, 200, "a normal turn must not get the synthetic verdict");
+  } finally {
+    child.kill("SIGKILL");
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});

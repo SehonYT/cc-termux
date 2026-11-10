@@ -64,7 +64,12 @@ export function writeUsageCache(data) {
 }
 export const LOAD_CODE_ASSIST_URL = BOOTSTRAP_URL + "/v1internal:loadCodeAssist";
 export const ONBOARD_USER_URL = BOOTSTRAP_URL + "/v1internal:onboardUser";
-export const USER_AGENT = "antigravity/ide/2.5.5 darwin/arm64";
+// Native Antigravity fingerprints (ported from OmniRoute, MIT): the IDE sends
+// "antigravity/<version> darwin/arm64" on content requests (no "/ide/" segment and no
+// X-Goog-Api-Client), while OAuth/loadCodeAssist use the ide-node variant.
+export const IDE_VERSION = "2.5.5";
+export const USER_AGENT = "antigravity/" + IDE_VERSION + " darwin/arm64";
+export const IDE_NODE_USER_AGENT = "antigravity/" + IDE_VERSION + " darwin/arm64 google-api-nodejs-client/10.3.0";
 export const X_GOOG_API_CLIENT = "gl-node/22.21.1";
 
 export function configDir() {
@@ -135,10 +140,17 @@ export function antigravityHeaders(accessToken, extra = {}) {
   return {
     "content-type": "application/json",
     authorization: "Bearer " + accessToken,
-    "user-agent": USER_AGENT,
+    "user-agent": IDE_NODE_USER_AGENT,
     "x-goog-api-client": X_GOOG_API_CLIENT,
     ...extra,
   };
+}
+// Generation requests use the plain IDE identity: no X-Goog-Api-Client, and the
+// Authorization header goes last to match the native client's serialized order.
+export function antigravityContentHeaders(accessToken, extra = {}) {
+  const h = { "content-type": "application/json", "user-agent": USER_AGENT, ...extra };
+  h.authorization = "Bearer " + accessToken;
+  return h;
 }
 
 function projectIdFrom(data) {

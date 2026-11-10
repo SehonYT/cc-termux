@@ -192,6 +192,45 @@ account is entitled (paid Pro/Ultra; free/Jio AI Pro accounts do not get Argon).
 Requires an account with Antigravity access; if project discovery fails, run `agy login` once or
 add a GCP project ID. Tokens are never sent anywhere except Google.
 
+### Auto mode (safety classifier)
+
+Auto mode is a Claude Code feature: before a tool call runs, Claude Code sends one extra
+`/v1/messages` request to a *classifier* model and only proceeds when it answers
+`<block>no</block>`. That request is identified by its system prompt
+(`You are a security monitor for autonomous AI coding agents`), never by model name.
+
+- Claude Code 2.1.322+ prefers a *server-side* classifier. Behind a local gateway that
+  verdict never arrives, and auto mode then refuses **every** action it cannot check
+  (`server_no_result`). The launcher therefore sets `CLAUDE_CODE_AUTO_MODE_SERVER=0`, so
+  the CLI runs its own model classifier instead of blocking.
+- cc-termux detects that classifier turn (by its system marker, never by model name) and
+  gives it a thinking-free budget, so a third-party model spends its output on the verdict
+  instead of an essay.
+- The launcher pins a Claude-capable classifier model when any configured provider has
+  one, and routes that turn to that provider; with no Claude model anywhere the turn runs
+  on the active provider's own model.
+- Optional: `CC_TERMUX_CLASSIFIER_ALLOW=1` (or `"classifier": {"allow": true}` in
+  `config.json`) answers the classifier locally with an allow verdict instead of calling
+  upstream. This **disables Claude Code's tool-call safety check** for the session, the
+  same trust level as bypassing permissions, so it is off by default.
+
+### Antigravity 429s are usually not quota
+
+Cloud Code answers some requests with a bare `429 RESOURCE_EXHAUSTED` even when the
+account has quota left. The usual cause is the request *content*: a competing-agent line
+in the system prompt (for example `You are a Claude agent, built on Anthropic's Claude
+Agent SDK.`) makes Google's filter refuse the call. The adapter therefore:
+
+- strips those identity sentences and the `x-anthropic-billing-header` line,
+- keeps only Antigravity's own system prompt upstream and moves the client system prompt
+  into the first user turn (oversized system instructions are refused the same way),
+- retries at most twice, honours `Retry-After`/`RetryInfo`, falls back to the secondary
+  Cloud Code host, and caches an identical refusal locally for 2-30 minutes instead of
+  letting Claude Code resend the same body eleven times.
+
+Quota percentages in the status line and in `cc-termux antigravity usage` are **remaining**
+budget, and are labelled `left`.
+
 ### Local gateway without an API key
 
 Yes. Run the gateway locally (or on your LAN), then `cc-termux setup` →

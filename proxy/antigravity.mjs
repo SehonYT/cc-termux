@@ -4,7 +4,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { ensureAccessToken, loadCredentials, GENERATE_URLS, antigravityHeaders } from "../bin/cc-antigravity.mjs";
+import { ensureAccessToken, loadCredentials, GENERATE_URLS, antigravityContentHeaders } from "../bin/cc-antigravity.mjs";
 import { refreshStatusLine } from "../bin/cc-statusline.mjs";
 
 const MODEL_ALIASES = {
@@ -24,6 +24,33 @@ const MODEL_ALIASES = {
 const upstreamModel = (m) => MODEL_ALIASES[m] || m;
 
 const MAX_OUTPUT = 65536;
+// Antigravity's own IDE always sends this lightweight system prompt; the client system
+// prompt is relocated to the first user turn because an oversized systemInstruction is
+// rejected with a misleading 429 (port of OmniRoute's ANTIGRAVITY_DEFAULT_SYSTEM).
+const DEFAULT_SYSTEM =
+  "You are Antigravity, a powerful agentic AI coding assistant designed by the Google Deepmind team working on Advanced Agentic Coding.\n" +
+  "You are pair programming with a USER to solve their coding task. The task may require creating a new codebase, modifying or debugging an existing codebase, or simply answering a question.\n" +
+  "**Absolute paths only**\n" +
+  "**Proactiveness**";
+// Output ceilings Antigravity publishes per model family.
+function outputCap(model) {
+  const id = String(model || "");
+  if (/^claude|claude-/.test(id)) return 16384;
+  if (/gpt-oss/.test(id)) return 32768;
+  return MAX_OUTPUT;
+}
+// reasoning effort -> thinking budget (Antigravity's own mapping).
+function thinkingBudgetFor(body) {
+  const t = body.thinking || {};
+  const explicit = Number(t.budget_tokens);
+  if (Number.isFinite(explicit) && explicit > 0) return Math.min(explicit, MAX_OUTPUT);
+  const effort = String((body.output_config && body.output_config.effort) || body.effort || t.type || "").toLowerCase();
+  if (effort === "none" || t.type === "disabled") return 0;
+  if (effort === "low" || effort === "minimal") return 1024;
+  if (effort === "high" || effort === "auto" || effort === "max" || effort === "xhigh" || effort === "adaptive" || t.type === "adaptive") return 32768;
+  if (effort === "medium" || t.type === "enabled") return 8192;
+  return 0;
+}
 const SIGNATURE_CACHE = new Map();
 function rememberSignature(id, sig) {
   if (!id || typeof sig !== "string" || !sig) return;
@@ -187,15 +214,37 @@ export function anthropicToGemini(body, model, creds) {
         parameters: cleanSchema(t.input_schema || { type: "object", properties: {} }),
       })) }]
     : undefined;
+  // Keep only Antigravity's own system prompt upstream and relocate the client system
+  // prompt into the first user turn: an oversized systemInstruction is answered with a
+  // misleading 429 (port of OmniRoute #9030).
+  if (sys && contents.length) {
+    const first = contents[0];
+    first.parts = [{ text: sys }, ...first.parts];
+  } else if (sys) {
+    contents.push({ role: "user", parts: [{ text: sys }] });
+  }
+  const cap = outputCap(model);
+  const thinkingBudget = thinkingBudgetFor(body);
+  const isClaudeModel = /^claude-/.test(String(model || ""));
+  let maxOutputTokens = Math.min(Number(body.max_tokens) || 8192, cap);
+  if (!isClaudeModel && thinkingBudget > 0 && maxOutputTokens <= thinkingBudget) {
+    maxOutputTokens = Math.min(cap, thinkingBudget + 1);
+  }
+  const generationConfig = {
+    maxOutputTokens,
+    topK: 40,
+    topP: body.top_p != null ? body.top_p : 1.0,
+    ...(body.temperature != null ? { temperature: body.temperature } : {}),
+    // Claude-branded models go through Vertex and reject a thinkingConfig.
+    ...(!isClaudeModel && thinkingBudget > 0
+      ? { thinkingConfig: { includeThoughts: true, thinkingBudget } }
+      : {}),
+  };
   const request = {
     contents,
-    ...(sys ? { systemInstruction: { parts: [{ text: sys }] } } : {}),
+    systemInstruction: { role: "system", parts: [{ text: DEFAULT_SYSTEM }] },
     ...(tools ? { tools, toolConfig: { functionCallingConfig: { mode: "VALIDATED" } } } : {}),
-    generationConfig: {
-      maxOutputTokens: Math.min(Number(body.max_tokens) || 8192, MAX_OUTPUT),
-      ...(body.temperature != null ? { temperature: body.temperature } : {}),
-      ...(body.top_p != null ? { topP: body.top_p } : {}),
-    },
+    generationConfig,
   };
   const project = (creds && creds.project_id) || "";
   const sessionId = "-" + (crypto.randomBytes(8).readBigUInt64BE() % 9000000000000000000n).toString();
@@ -249,7 +298,7 @@ export async function proxyAntigravity(req, res, route, body, { anthropicError }
   }
   const sendUpstream = async (accessToken, url) => fetch(url, {
     method: "POST",
-    headers: antigravityHeaders(accessToken, { accept: "text/event-stream" }),
+    headers: antigravityContentHeaders(accessToken, { accept: "text/event-stream" }),
     body: JSON.stringify(envelope),
     signal: AbortSignal.timeout(15 * 60 * 1000),
   });

@@ -104,8 +104,13 @@ test("request translation maps text, system and tools", async () => {
   assert.equal(envelope.project, "project-123");
   assert.equal(envelope.model, "claude-sonnet-4-6");
   assert.equal(envelope.userAgent, "antigravity");
-  assert.equal(envelope.request.systemInstruction.parts[0].text, "be brief");
-  assert.doesNotMatch(envelope.request.systemInstruction.parts[0].text, /billing-header/);
+  // Antigravity's own system prompt stays upstream; the client system prompt is
+  // relocated into the first user turn (oversized systemInstruction -> false 429).
+  assert.match(envelope.request.systemInstruction.parts[0].text, /^You are Antigravity/);
+  const firstUser = envelope.request.contents[0];
+  assert.equal(firstUser.role, "user");
+  assert.match(firstUser.parts[0].text, /be brief/);
+  assert.doesNotMatch(firstUser.parts[0].text, /billing-header/);
   assert.equal(envelope.request.generationConfig.maxOutputTokens, 1234);
   assert.equal(envelope.request.tools[0].functionDeclarations[0].name, "read");
   assert.equal(envelope.request.tools[0].functionDeclarations[0].parameters.properties.path.exclusiveMinimum, undefined);
@@ -261,7 +266,8 @@ test("system prompt blocks are joined with newlines, billing header and competin
     max_tokens: 32,
     messages: [{ role: "user", content: "hi" }],
   }, "gemini-3.8-flash-high", { project_id: "p" });
-  const text = envelope.request.systemInstruction.parts[0].text;
+  assert.match(envelope.request.systemInstruction.parts[0].text, /^You are Antigravity/);
+  const text = envelope.request.contents[0].parts[0].text;
   assert.doesNotMatch(text, /You are a Claude agent/);
   assert.match(text, /Follow the user request/);
   assert.doesNotMatch(text, /billing-header/);

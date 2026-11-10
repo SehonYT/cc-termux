@@ -67,3 +67,41 @@ test("picking a model row switches the active provider so status line and quotas
     try { fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); } catch (e) { }
   }
 });
+
+test("the launcher forces the local auto-mode classifier and pins a Claude-capable model", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cc-launcher-env-"));
+  const home = path.join(tmp, "home");
+  const cache = path.join(home, ".cache", "cc-termux");
+  fs.mkdirSync(path.join(home, ".claude"), { recursive: true });
+  fs.mkdirSync(cache, { recursive: true });
+  const rt = makeRoot(tmp);
+  const port = 18900 + Math.floor(Math.random() * 300);
+  const cfgFile = path.join(tmp, "config.json");
+  fs.writeFileSync(cfgFile, JSON.stringify({
+    listen: { host: "127.0.0.1", port },
+    active: "antigravity",
+    override: { provider: "antigravity", model: "gemini-3.8-flash-high" },
+    providers: {
+      antigravity: { type: "antigravity", noKey: true, model: "gemini-3.8-flash-high",
+        modelsById: { "gemini-3.8-flash-high": { name: "Gemini 3.8 Flash (High)" }, "claude-sonnet-4-6": { name: "Claude Sonnet 4.6" } } },
+    },
+  }, null, 2));
+  fs.writeFileSync(path.join(home, ".claude", "settings.json"), JSON.stringify({ model: "prov/antigravity/gemini-3.8-flash-high" }));
+  const dump = path.join(tmp, "env.json");
+  try {
+    await new Promise((resolve) => {
+      const child = spawn(process.execPath, [path.join(rt, "bin", "cc-launcher.mjs"), "-e",
+        "require('fs').writeFileSync(process.env.CC_ENV_DUMP, JSON.stringify(process.env))"], {
+        env: { ...process.env, HOME: home, USERPROFILE: home, CC_TERMUX_ROOT: rt, CC_TERMUX_CONFIG: cfgFile, CC_TERMUX_CACHE: cache, CC_ENV_DUMP: dump },
+        stdio: "ignore",
+      });
+      const timer = setTimeout(() => { try { child.kill("SIGKILL"); } catch {} resolve(); }, 25000);
+      child.on("exit", () => { clearTimeout(timer); resolve(); });
+    });
+    const env = JSON.parse(fs.readFileSync(dump, "utf8"));
+    assert.equal(env.CLAUDE_CODE_AUTO_MODE_SERVER, "0", "server-side classifier must be disabled behind the gateway");
+    assert.match(env.CLAUDE_CODE_AUTO_MODE_MODEL || "", /^claude-/, "classifier must be a Claude-capable model");
+  } finally {
+    try { fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); } catch (e) { }
+  }
+});

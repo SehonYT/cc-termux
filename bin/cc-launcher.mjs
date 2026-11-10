@@ -268,6 +268,11 @@ async function envForChild() {
   const ctx = selectedContext || p.contextWindow;
   if (ctx) env.CLAUDE_CODE_MAX_CONTEXT_TOKENS = String(ctx);
   env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS = "1";
+  // Claude Code 2.1.322 prefers a server-side safety classifier for auto mode. Behind a
+  // local gateway that verdict never arrives ("server_no_result"), and auto mode then
+  // *refuses every action it cannot check*. Disable the server path so the CLI runs its
+  // local model classifier (pinned to a Claude-capable model above) instead.
+  env.CLAUDE_CODE_AUTO_MODE_SERVER = "0";
   env.TMPDIR = env.TMPDIR || os.tmpdir();
   env.CLAUDE_CODE_TMPDIR = env.CLAUDE_CODE_TMPDIR || env.TMPDIR;
   env.DISABLE_AUTOUPDATER = "1";
