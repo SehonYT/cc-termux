@@ -62,6 +62,8 @@ test("picking a model row switches the active provider so status line and quotas
     assert.equal(cfg.active, "antigravity", "selecting an antigravity model must make antigravity active");
     assert.deepEqual(cfg.override, { provider: "antigravity", model: "gemini-3.8-flash-high" });
   } finally {
-    fs.rmSync(tmp, { recursive: true, force: true });
+    // The launcher leaves a detached status-line refresh and a gateway behind for a
+    // moment; retry so cleanup cannot race their last write.
+    try { fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); } catch (e) { }
   }
 });
