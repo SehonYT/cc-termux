@@ -10,7 +10,7 @@ const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
 function runLauncher({ root: rt, home, cfgFile, cache }) {
   return new Promise((resolve) => {
-    const child = spawn(process.execPath, [path.join(rt, "bin", "cc-launcher.mjs"), "-p", "hi"], {
+    const child = spawn(process.execPath, [path.join(rt, "bin", "cc-launcher.mjs"), "-e", "0"], {
       env: { ...process.env, HOME: home, USERPROFILE: home, CC_TERMUX_ROOT: rt, CC_TERMUX_CONFIG: cfgFile, CC_TERMUX_CACHE: cache },
       stdio: "ignore",
     });
@@ -27,9 +27,11 @@ function makeRoot(tmp) {
   }
   fs.cpSync(path.join(root, "proxy"), path.join(rt, "proxy"), { recursive: true });
   // A stand-in for the 300MB Claude binary: the launcher only needs to exec something.
-  const stub = path.join(rt, "bin", "claude.bin");
-  fs.writeFileSync(stub, "#!/bin/sh\nexit 0\n");
-  fs.chmodSync(stub, 0o755);
+  // Copying the running Node binary keeps this portable (a shell script is not execable
+  // on Windows) and makes it exit immediately.
+  const stub = path.join(rt, "bin", process.platform === "win32" ? "claude.exe" : "claude.bin");
+  fs.copyFileSync(process.execPath, stub);
+  try { fs.chmodSync(stub, 0o755); } catch (e) { }
   fs.writeFileSync(path.join(rt, ".direct-exec"), "");
   fs.writeFileSync(path.join(rt, "VERSION"), "9.9.9");
   return rt;
