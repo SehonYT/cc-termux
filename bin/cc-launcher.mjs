@@ -209,17 +209,34 @@ async function envForChild() {
   delete env.ANTHROPIC_MODEL;
   for (const k of ["CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "ANTHROPIC_CUSTOM_HEADERS", "ANTHROPIC_BEDROCK_BASE_URL", "ANTHROPIC_VERTEX_BASE_URL"]) delete env[k];
   if (model) {
-    // Auto mode's safety classifier is an extra model call. On a third-party
-    // gateway a Gemini model cannot reliably follow the classifier contract, so
-    // pin the classifier to an available Claude model from the active provider.
+    // Auto mode's safety classifier is an extra Claude call. Pin it to a usable
+    // Claude model (bare id - provider-qualified aliases are rejected) from the
+    // active provider, or from another configured provider that has a key.
     try {
       if (!env.CLAUDE_CODE_AUTO_MODE_MODEL && cfg.active) {
-        const cp = cfg.providers[cfg.active] || {};
-        const ids = Object.keys(cp.modelsById || {});
-        const pick = ids.find((id) => /^claude-sonnet-4-6$/.test(id)) || ids.find((id) => /^claude-opus-4-6/.test(id)) || ids.find((id) => id.startsWith("claude-"));
+        let keys = {};
+        try { keys = JSON.parse(fs.readFileSync(path.join(path.dirname(CFG), "keys.json"), "utf8")); } catch (e) { }
+        const usable = (name, q) => name === cfg.active || keys[name] || q.noKey || q.apiKeyEnv;
+        const allowed = (id) => typeof id === "string" && id.startsWith("claude-") && !/5-5|opus-5/.test(id);
+        const candidates = [cfg.active, ...Object.keys(cfg.providers || {}).filter((n) => n !== cfg.active && !cfg.providers[n].hidden)];
+        let pick = "", pickProvider = "";
+        for (const name of candidates) {
+          const q = cfg.providers[name];
+          if (!q || !usable(name, q)) continue;
+          const ids = Object.keys(q.modelsById || {}).filter(allowed);
+          const id = ids.find((x) => /^claude-sonnet-4-6$/.test(x)) || ids.find((x) => /^claude-opus-4-6/.test(x)) || ids[0];
+          if (id) { pick = id; pickProvider = name; break; }
+        }
         if (pick) {
-          env.CLAUDE_CODE_AUTO_MODE_MODEL = pick; // bare Claude id: classifier rejects provider-qualified aliases
+          env.CLAUDE_CODE_AUTO_MODE_MODEL = pick;
           if (!env.CLAUDE_CODE_BG_CLASSIFIER_MODEL) env.CLAUDE_CODE_BG_CLASSIFIER_MODEL = pick;
+          if (pickProvider !== cfg.active) {
+            cfg.routing = cfg.routing || {};
+            if (cfg.routing[pick] !== pickProvider + "::" + pick) {
+              cfg.routing[pick] = pickProvider + "::" + pick;
+              try { fs.writeFileSync(CFG, JSON.stringify(cfg, null, 2) + "\n"); } catch (e) { }
+            }
+          }
         }
       }
     } catch (e) { }

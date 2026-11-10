@@ -189,3 +189,28 @@ test("explicit provider model ids are not remapped to the default model", async 
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+test("a bare classifier model can route to another configured provider", async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cc-gw-classifier-"));
+  const port = 25000 + Math.floor(Math.random() * 1000);
+  const { child, home } = startGateway(tmp, port, {
+    listen: { host: "127.0.0.1", port }, active: "main",
+    providers: {
+      main: { type: "openai", baseUrl: "http://127.0.0.1:9", path: "/chat/completions", model: "m", modelsById: { m: { name: "M" } }, retries: 1 },
+      claude: { type: "openai", baseUrl: "http://127.0.0.1:9", path: "/chat/completions", model: "c", modelsById: { c: { name: "C" } }, retries: 1 },
+    },
+    routing: { "claude-sonnet-4-6": "claude::c" },
+  });
+  try {
+    assert.ok(await waitHealth(port), "gateway did not start");
+    await fetch("http://127.0.0.1:" + port + "/v1/messages", {
+      method: "POST", headers: { "content-type": "application/json", authorization: "Bearer cc-termux-local" },
+      body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 5, messages: [{ role: "user", content: "hi" }] }),
+    }).catch(() => { });
+    const log = fs.readFileSync(path.join(home, ".cache", "cc-termux", "gateway.log"), "utf8");
+    assert.match(log, /REQ claude -> c/);
+    assert.doesNotMatch(log, /REQ main -> c/);
+  } finally {
+    child.kill("SIGKILL");
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
