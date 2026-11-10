@@ -211,7 +211,7 @@ async function envForChild() {
   // Claude Code refuses its default cross-session messaging socket under a user
   // namespace without a uid map (some Termux/proot devices). Give it an explicit
   // socket path inside our private cache directory instead; the directory is 0700.
-  if (!env.CLAUDE_CODE_MESSAGING_SOCKET) {
+  if (!env.CLAUDE_CODE_MESSAGING_SOCKET && process.platform !== "win32") {
     try {
       const messagingDir = path.join(CACHE, "messaging");
       fs.mkdirSync(messagingDir, { recursive: true, mode: 0o700 });
@@ -357,10 +357,10 @@ async function envForChild() {
   try { ensureMcpServer(); } catch (e) { }
   if (!trivial) {
     // Replace a stale status line left by a previous session/provider.
-    try { spawn(process.execPath, [path.join(ROOT, "bin", "cc-statusline.mjs"), "--refresh"], { stdio: "ignore", detached: true, env }).unref(); } catch (e) { }
+    try { spawn(process.execPath, [path.join(ROOT, "bin", "cc-statusline.mjs"), "--refresh"], { stdio: "ignore", detached: true, env, windowsHide: true }).unref(); } catch (e) { }
     // Claude Code rewrites its bash snapshots per session and shadows find with a bundled
     // bfs that dies with SIGSYS on Android; keep patching them back to the real find.
-    try { spawn(process.execPath, [path.join(ROOT, "bin", "cc-shimsnap.mjs")], { stdio: "ignore", detached: true, env }).unref(); } catch (e) { }
+    try { spawn(process.execPath, [path.join(ROOT, "bin", "cc-shimsnap.mjs")], { stdio: "ignore", detached: true, env, windowsHide: true }).unref(); } catch (e) { }
   }
   const isWin = process.platform === "win32";
   const bin = path.join(ROOT, "bin", isWin ? "claude.exe" : "claude.bin");

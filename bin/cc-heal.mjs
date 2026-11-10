@@ -184,7 +184,27 @@ export function healEnvironment({ root = process.env.CC_TERMUX_ROOT, home = os.h
   // 4. launcher layout: native-style ~/.local/bin/claude + cc-termux/ccp in the prefix
   const canonicalRoot = path.join(home, ".local", "share", "cc-termux");
   const isCanonical = path.resolve(root) === path.resolve(canonicalRoot);
-  if (isCanonical && installPrefix !== false && process.platform !== "win32") {
+  if (isCanonical && installPrefix !== false && process.platform === "win32") {
+    // Windows has no ~/.local/bin: install .cmd shims next to the other user tools so a
+    // fresh PowerShell/cmd can find claude and cc-termux.
+    const dirs = [
+      path.join(process.env.APPDATA || path.join(home, "AppData", "Roaming"), "npm"),
+      path.join(home, "AppData", "Local", "Microsoft", "WindowsApps"),
+    ];
+    const node = process.execPath;
+    const scripts = { claude: path.join(root, "bin", "cc-launcher.mjs"), "cc-termux": path.join(root, "bin", "cc-termux"), ccp: path.join(root, "bin", "ccp.mjs") };
+    for (const dir of dirs) {
+      try {
+        fs.mkdirSync(dir, { recursive: true });
+        fs.accessSync(dir, fs.constants.W_OK);
+        for (const [name, target] of Object.entries(scripts)) {
+          fs.writeFileSync(path.join(dir, name + ".cmd"), "@echo off\r\n\"" + node + "\" \"" + target + "\" %*\r\n");
+        }
+        changes.push("shims: " + dir);
+        break;
+      } catch (e) { }
+    }
+  } else if (isCanonical && installPrefix !== false) {
     const homeBin = path.join(home, ".local", "bin");
     fs.mkdirSync(homeBin, { recursive: true });
     const prefixBin = path.join(prefix || process.env.PREFIX || (process.platform === "android" ? "/data/data/com.termux/files/usr" : "/usr/local"), "bin");
@@ -220,7 +240,8 @@ export function healEnvironment({ root = process.env.CC_TERMUX_ROOT, home = os.h
         changes.push("shim: " + link + " -> " + targetFile);
       }
     } catch (e) { changes.push("shim: could not write ~/.local/bin/claude (" + e.code + ")"); }
-    fs.mkdirSync(prefixBin, { recursive: true });
+    // /usr/local/bin is not writable for a normal user on Linux/macOS; never abort heal.
+    try { fs.mkdirSync(prefixBin, { recursive: true }); } catch (e) { changes.push("shims: cannot write " + prefixBin + " (" + e.code + ")"); }
     for (const name of ["cc-termux", "ccp"]) {
       const target = path.join(prefixBin, name);
       const script = path.join(root, "bin", name === "ccp" ? "ccp.mjs" : "cc-termux");

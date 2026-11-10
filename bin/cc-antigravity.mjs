@@ -227,7 +227,7 @@ function openBrowser(url) {
     : [["termux-open-url", [url]], ["xdg-open", [url]], ["open", [url]]];
   for (const [cmd, args] of cmds) {
     try {
-      const child = spawn(cmd, args, { detached: true, stdio: "ignore" });
+      const child = spawn(cmd, args, { detached: true, stdio: "ignore", windowsHide: true });
       child.on("error", () => { });
       child.unref();
       return true;

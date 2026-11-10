@@ -8,6 +8,26 @@ import { execFileSync } from "node:child_process";
 
 const ROOT = process.env.CC_TERMUX_ROOT || path.join(os.homedir(), ".local", "share", "cc-termux");
 const CFG = process.env.CC_TERMUX_CONFIG || path.join(os.homedir(), ".config", "cc-termux", "config.json");
+function gatewayPids() {
+  // /proc is Linux-only; macOS/Windows fall back to the pid file the launcher writes.
+  const pids = [];
+  try {
+    for (const d of fs.readdirSync("/proc")) {
+      if (!/^\\d+$/.test(d)) continue;
+      try {
+        const cmd = fs.readFileSync("/proc/" + d + "/cmdline", "utf8");
+        if (cmd.includes("proxy/server.mjs") && Number(d) !== process.pid) pids.push(Number(d));
+      } catch (e) { }
+    }
+  } catch (e) { }
+  if (pids.length) return pids;
+  try {
+    const pid = Number(fs.readFileSync(path.join(os.homedir(), ".cache", "cc-termux", "gateway.pid"), "utf8").trim());
+    if (pid > 0 && pid !== process.pid) pids.push(pid);
+  } catch (e) { }
+  return pids;
+}
+
 const CATALOG = path.join(os.homedir(), ".cache", "cc-termux", "catalog.json");
 function refreshStatusLineFile() {
   try { execFileSync(process.execPath, [path.join(ROOT, "bin", "cc-statusline.mjs"), "--refresh"], { stdio: "ignore", timeout: 6000 }); } catch (e) { }
@@ -125,14 +145,7 @@ async function doctor(fix) {
   }
 
   try {
-    const pids = [];
-    for (const d of fs.readdirSync("/proc")) {
-      if (!/^\d+$/.test(d)) continue;
-      try {
-        const cmd = fs.readFileSync("/proc/" + d + "/cmdline", "utf8");
-        if (cmd.includes("proxy/server.mjs") && Number(d) !== process.pid) pids.push(Number(d));
-      } catch (e) { }
-    }
+    const pids = gatewayPids();
     if (pids.length > 1) warn(pids.length + " gateway processes running (run: cc-termux restart)");
   } catch (e) { }
   const portv = (c.listen && c.listen.port) || 8788;
@@ -170,9 +183,15 @@ async function doctor(fix) {
       if (fix) {
         for (const p of others) {
           try {
-            fs.renameSync(p, p + ".official-backup");
-            fs.writeFileSync(p, "#!/bin/sh\nexec \"" + process.execPath + "\" \"" + path.join(ROOT, "bin", "cc-launcher.mjs") + "\" \"$@\"\n");
-            fs.chmodSync(p, 0o755);
+            if (process.platform === "win32") {
+              // Never overwrite a .cmd with a POSIX script: write a cmd shim instead.
+              fs.renameSync(p, p + ".official-backup");
+              fs.writeFileSync(p, "@echo off\r\n\"" + process.execPath + "\" \"" + path.join(ROOT, "bin", "cc-launcher.mjs") + "\" %*\r\n");
+            } else {
+              fs.renameSync(p, p + ".official-backup");
+              fs.writeFileSync(p, "#!/bin/sh\nexec \"" + process.execPath + "\" \"" + path.join(ROOT, "bin", "cc-launcher.mjs") + "\" \"$@\"\n");
+              fs.chmodSync(p, 0o755);
+            }
             fixed++;
           } catch (e) { }
         }
@@ -228,8 +247,14 @@ async function doctor(fix) {
     if (pending) warn(pending + " TUI patches pending (cc-termux patch)"); else pass("TUI patches applied (" + applied + ")");
   } catch (e) { warn("could not read patch status"); }
 
-  const ccpPath = (process.env.PREFIX || "/data/data/com.termux/files/usr") + "/bin/ccp";
-  if (fs.existsSync(ccpPath)) pass("ccp picker installed"); else warn("ccp not installed (run install.sh)");
+  // The picker shim lives in different places per platform (and per install style).
+  const ccpCandidates = [
+    path.join(ROOT, "bin", process.platform === "win32" ? "ccp.cmd" : "ccp"),
+    path.join(os.homedir(), ".local", "bin", process.platform === "win32" ? "ccp.cmd" : "ccp"),
+    path.join(process.env.PREFIX || "", "bin", process.platform === "win32" ? "ccp.cmd" : "ccp"),
+  ].filter((p) => p && !p.startsWith(path.sep + "bin"));
+  const ccpPath = ccpCandidates.find((p) => { try { return fs.existsSync(p); } catch (e) { return false; } });
+  if (ccpPath) pass("ccp picker installed"); else warn("ccp not installed (run install.sh)");
   try {
     const log = path.join(os.homedir(), ".cache", "cc-termux", "gateway.log");
     const tail = fs.readFileSync(log, "utf8").split("\n").slice(-300).join("\n");
@@ -340,13 +365,7 @@ async function diagnose() {
   const port = (c && c.listen && c.listen.port) || 8788;
   let health = null;
   try { health = await (await fetch("http://127.0.0.1:" + port + "/health", { signal: AbortSignal.timeout(1500) })).json(); } catch (e) {}
-  let pids = [];
-  try {
-    for (const d of fs.readdirSync("/proc")) {
-      if (!/^\d+$/.test(d)) continue;
-      try { const cmd = fs.readFileSync("/proc/" + d + "/cmdline", "utf8"); if (cmd.includes("proxy/server.mjs") && Number(d) !== process.pid) pids.push(Number(d)); } catch (e) {}
-    }
-  } catch (e) {}
+  const pids = gatewayPids();
   console.log("  gateway   " + (health ? "UP active=" + health.active : "DOWN") + "  pids=" + JSON.stringify(pids));
   if (!c || !c.active || !(c.providers && c.providers[c.active])) {
     console.log("  next      run: cc-termux setup");
@@ -651,23 +670,13 @@ switch (cmd) {
     break;
   }
   case "restart": {
-    const pidf = path.join(os.homedir(), ".cache", "cc-termux", "gateway.pid");
-    try { process.kill(Number(fs.readFileSync(pidf, "utf8").trim())); } catch {}
-    try {
-      for (const d of fs.readdirSync("/proc")) {
-        if (!/^\d+$/.test(d)) continue;
-        try {
-          const cmd = fs.readFileSync("/proc/" + d + "/cmdline", "utf8");
-          if (cmd.includes("proxy/server.mjs") && Number(d) !== process.pid) process.kill(Number(d));
-        } catch (e) { }
-      }
-    } catch (e) { }
+    for (const pid of gatewayPids()) { try { process.kill(pid); } catch (e) { } }
     console.log("gateway stopped; restarts on the next claude run");
     break;
   }
   case "patch": {
     const sub = args[0] === "revert" ? "--revert" : args[0] === "status" ? "--status" : "--apply";
-    execFileSync("node", [path.join(ROOT, "bin", "cc-patch.mjs"), sub], { stdio: "inherit" });
+    execFileSync(process.execPath, [path.join(ROOT, "bin", "cc-patch.mjs"), sub], { stdio: "inherit" });
     break;
   }
   case "setup": {

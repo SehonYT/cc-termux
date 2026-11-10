@@ -47,7 +47,7 @@
         ",jkr={type:\"local\",name:",
         ",uMr={type:\"local\",name:"
       ],
-      "replace": "var Ukr=async()=>{try{Bun.spawnSync([\"ccp\"],{stdio:\"inherit\"})}catch(e){}return{type:\"text\",value:\"provider picker closed\"}}"
+      "replace": "var Ukr=async()=>{try{const w=process.platform===\"win32\";Bun.spawnSync(w?[\"cmd\",[\"/c\",\"ccp\"]]:[\"ccp\"],{stdio:\"inherit\"})}catch(e){}return{type:\"text\",value:\"provider picker closed\"}}"
     }
   ]
 }

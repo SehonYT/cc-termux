@@ -217,11 +217,26 @@ function installShims(t) {
     ccp: [path.join(ROOT, "bin", "ccp.mjs")],
   };
   if (t.win) {
-    for (const [name, argv] of Object.entries(scripts)) {
-      const line = "@echo off\r\n\"" + node + "\" \"" + argv[0] + "\" %*\r\n";
-      fs.writeFileSync(path.join(ROOT, "bin", name + ".cmd"), line);
+    // ROOT\bin is not on PATH, so a shim there is invisible to cmd/PowerShell. Write the
+    // .cmd files where Windows already looks, and keep a copy in ROOT\bin.
+    const dirs = [
+      path.join(process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming"), "npm"),
+      path.join(os.homedir(), "AppData", "Local", "Microsoft", "WindowsApps"),
+      path.join(ROOT, "bin"),
+    ];
+    let placed = null;
+    for (const dir of dirs) {
+      try {
+        fs.mkdirSync(dir, { recursive: true });
+        fs.accessSync(dir, fs.constants.W_OK);
+        for (const [name, argv] of Object.entries(scripts)) {
+          fs.writeFileSync(path.join(dir, name + ".cmd"), "@echo off\r\n\"" + node + "\" \"" + argv[0] + "\" %*\r\n");
+        }
+        placed = dir;
+        break;
+      } catch (e) { }
     }
-    console.log("  windows shims written to " + path.join(ROOT, "bin") + " (add that folder to PATH)");
+    log("windows shims: " + (placed || path.join(ROOT, "bin")) + (placed ? "" : " (add this folder to PATH)"));
     return;
   }
   const canonicalRoot = path.join(os.homedir(), ".local", "share", "cc-termux");
