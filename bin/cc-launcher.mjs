@@ -352,6 +352,9 @@ async function envForChild() {
   if (!trivial) {
     // Replace a stale status line left by a previous session/provider.
     try { spawn(process.execPath, [path.join(ROOT, "bin", "cc-statusline.mjs"), "--refresh"], { stdio: "ignore", detached: true, env }).unref(); } catch (e) { }
+    // Claude Code rewrites its bash snapshots per session and shadows find with a bundled
+    // bfs that dies with SIGSYS on Android; keep patching them back to the real find.
+    try { spawn(process.execPath, [path.join(ROOT, "bin", "cc-shimsnap.mjs")], { stdio: "ignore", detached: true, env }).unref(); } catch (e) { }
   }
   const isWin = process.platform === "win32";
   const bin = path.join(ROOT, "bin", isWin ? "claude.exe" : "claude.bin");

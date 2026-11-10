@@ -236,6 +236,17 @@ Agent SDK.`) makes Google's filter refuse the call. The adapter therefore:
 Quota percentages in the status line and in `cc-termux antigravity usage` are **remaining**
 budget, and are labelled `left`.
 
+### `find` and other shell shims
+
+Claude Code writes a bash snapshot per session that shadows `find` with an embedded `bfs`
+and `grep` with an embedded `ugrep`. On Android/Termux the embedded `bfs` dies with
+`Bad system call` (SIGSYS) inside the sandboxed shell, so every `find` returns nothing and
+agents silently conclude that files do not exist.
+
+cc-termux runs `bin/cc-shimsnap.mjs` at launch: it rewrites the `find` function in existing
+and newly created snapshots to call the real findutils binary. `grep` is left alone because
+the embedded ugrep works. Run `node bin/cc-shimsnap.mjs --once` to repair snapshots by hand.
+
 ### Web search and page fetch
 
 Claude Code's built-in `WebSearch` and `WebFetch` depend on Anthropic's servers. On
