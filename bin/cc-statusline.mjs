@@ -28,7 +28,14 @@ function rel(iso) {
   if (h < 24) return h + "h" + (mm ? mm + "m" : "");
   return Math.floor(h / 24) + "d" + (h % 24 ? h % 24 + "h" : "");
 }
-export function activeModel(cfg, explicitId) {
+export function activeModel(cfg, explicitId, explicitProvider) {
+  // A model id alone does not identify its provider: the same id can exist on several
+  // providers, so the caller must say which provider it came from.
+  if (explicitProvider && cfg.providers && cfg.providers[explicitProvider]) {
+    const p = cfg.providers[explicitProvider];
+    const id = explicitId || p.model;
+    return { provider: explicitProvider, type: p.type, name: (p.modelsById && p.modelsById[id] && p.modelsById[id].name) || id || p.type };
+  }
   let key = cfg.active;
   let p = cfg.providers && cfg.providers[key];
   let id = explicitId || (p && p.model);
@@ -74,11 +81,11 @@ function writeStatusLine(line) {
   } catch (e) { }
 }
 let refreshInFlight = null;
-export async function refreshStatusLine({ force = false, modelId = null } = {}) {
+export async function refreshStatusLine({ force = false, modelId = null, provider = null } = {}) {
   if (refreshInFlight) return refreshInFlight;
   refreshInFlight = (async () => {
   const cfg = readJson(configPath());
-  const model = activeModel(cfg, modelId);
+  const model = activeModel(cfg, modelId, provider);
   if (!model) { writeStatusLine("cc-termux"); return "cc-termux"; }
   if (model.type !== "antigravity") {
     const line = model.provider + " · " + model.name;

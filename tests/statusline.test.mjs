@@ -75,3 +75,17 @@ test("status line shows the selected non-Antigravity provider and model, never '
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+test("a model id is resolved against the provider it came from, not the active one", async () => {
+  const mod = await import("../bin/cc-statusline.mjs?t=" + Date.now());
+  const cfg = { active: "tokens", providers: {
+    tokens: { type: "openai", model: "deepseek/deepseek-v4.1-flash", modelsById: { "deepseek/deepseek-v4.1-flash": { name: "DeepSeek V4.1 Flash" } } },
+    antigravity: { type: "antigravity", model: "gemini-3.8-flash-high", modelsById: { "gemini-3.8-flash-high": { name: "Gemini 3.8 Flash (High)" } } },
+  } };
+  const wrong = mod.activeModel(cfg, "gemini-3.8-flash-high");
+  assert.equal(wrong.type, "openai", "id alone falls back to the active provider (old bug)");
+  const right = mod.activeModel(cfg, "gemini-3.8-flash-high", "antigravity");
+  assert.equal(right.provider, "antigravity");
+  assert.equal(right.type, "antigravity");
+  assert.equal(right.name, "Gemini 3.8 Flash (High)");
+});

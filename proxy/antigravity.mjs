@@ -365,6 +365,6 @@ export async function proxyAntigravity(req, res, route, body, { anthropicError }
     } catch (e2) { }
   } finally {
     try { res.end(); } catch (e) { try { res.destroy(); } catch (e2) { } }
-    refreshStatusLine({ modelId: route.model }).catch(() => { });
+    refreshStatusLine({ modelId: route.model, provider: route.name }).catch(() => { });
   }
 }

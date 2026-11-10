@@ -163,7 +163,7 @@ async function envForChild() {
   }
   env.CC_TERMUX_GATEWAY_TOKEN = GATEWAY_TOKEN;
   env.ANTHROPIC_API_KEY = GATEWAY_TOKEN;
-  const p = (cfg.providers || {})[cfg.active] || {};
+  let p = (cfg.providers || {})[cfg.active] || {};
   try { sanitizeSettings(p); } catch (e) { }
   let settingsModel = "";
   try {
@@ -193,15 +193,20 @@ async function envForChild() {
     selectedId = selectedMatch[2];
   }
   let selectedContext = null;
-  if (selectedProvider === cfg.active && selectedId) {
+  if (selectedProvider && selectedId) {
     const sp = cfg.providers[selectedProvider];
     const info = sp.modelsById && sp.modelsById[selectedId];
     if (info && info.contextTokens) selectedContext = info.contextTokens;
-    // Keep the persistent config in sync with the model Claude Code actually selected.
-    try {
-      cfg.override = { provider: cfg.active, model: selectedId };
-      fs.writeFileSync(CFG, JSON.stringify(cfg, null, 2) + "\n");
-    } catch (e) { }
+    // A /model row belongs to its own provider. Selecting one makes that provider active,
+    // so the gateway, the status line and the quota display all follow the model in use.
+    const stale = cfg.active !== selectedProvider || !cfg.override
+      || cfg.override.provider !== selectedProvider || cfg.override.model !== selectedId;
+    if (stale) {
+      cfg.active = selectedProvider;
+      cfg.override = { provider: selectedProvider, model: selectedId };
+      try { fs.writeFileSync(CFG, JSON.stringify(cfg, null, 2) + "\n"); } catch (e) { }
+      p = cfg.providers[cfg.active] || p;
+    }
   }
   const model = p.model || p.defaultModel;
   const a = p.aliases || {};
