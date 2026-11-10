@@ -24,7 +24,7 @@
       "find": [
         "For other/previous model names, specify with --model."
       ],
-      "replace": "Provider rows switch provider, model rows apply now.    "
+      "replace": "Provider rows switch provider, model rows apply now."
     }
   ],
   "regions": [
@@ -32,10 +32,12 @@
       "id": "provider-handler",
       "description": "Route the provider command to the cc-termux picker",
       "start": [
-        "var Ukr=async()=>"
+        "var Ukr=async()=>",
+        "var dMr=async()=>({type:\"text\",value:"
       ],
       "end": [
-        ",jkr={type:\"local\",name:"
+        ",jkr={type:\"local\",name:",
+        ",uMr={type:\"local\",name:"
       ],
       "replace": "var Ukr=async()=>{try{Bun.spawnSync([\"ccp\"],{stdio:\"inherit\"})}catch(e){}return{type:\"text\",value:\"provider picker closed\"}}"
     }

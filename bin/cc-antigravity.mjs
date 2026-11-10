@@ -29,6 +29,14 @@ export const SCOPES = [
 ];
 export const BOOTSTRAP_URL = process.env.CC_TERMUX_ANTIGRAVITY_BOOTSTRAP_URL || "https://cloudcode-pa.googleapis.com";
 export const GENERATE_URL = process.env.CC_TERMUX_ANTIGRAVITY_GENERATE_URL || "https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse";
+// Cloud Code answers 404/5xx on the daily host during rollouts; the plain host serves
+// the same API (same order as OmniRoute's upstream list).
+export const GENERATE_URLS = process.env.CC_TERMUX_ANTIGRAVITY_GENERATE_URL
+  ? [process.env.CC_TERMUX_ANTIGRAVITY_GENERATE_URL]
+  : [
+      "https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse",
+      "https://cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse",
+    ];
 export const FETCH_MODELS_URLS = [
   "https://daily-cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels",
   "https://cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels",
@@ -561,8 +569,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       for (const g of u.groups) {
         const parts = [];
         const rel = (iso) => { const t = Date.parse(iso || ""); if (!Number.isFinite(t)) return ""; const m = Math.round((t - Date.now()) / 60000); if (m <= 0) return " now"; if (m < 60) return " " + m + "m"; const h = Math.floor(m / 60); if (h >= 24) { const d = Math.floor(h / 24); return " " + d + "d" + (h % 24 ? (h % 24) + "h" : ""); } return " " + h + "h" + (m % 60 ? (m % 60) + "m" : ""); };
-        if (g.windows.session) parts.push("5h " + Math.round(g.windows.session.percent) + "%" + (rel(g.windows.session.resetAt) ? " (resets" + rel(g.windows.session.resetAt) + ")" : ""));
-        if (g.windows.weekly) parts.push("weekly " + Math.round(g.windows.weekly.percent) + "%" + (rel(g.windows.weekly.resetAt) ? " (resets" + rel(g.windows.weekly.resetAt) + ")" : ""));
+        if (g.windows.session) parts.push("5h " + Math.round(g.windows.session.percent) + "% left" + (rel(g.windows.session.resetAt) ? " (resets " + rel(g.windows.session.resetAt) + ")" : ""));
+        if (g.windows.weekly) parts.push("weekly " + Math.round(g.windows.weekly.percent) + "% left" + (rel(g.windows.weekly.resetAt) ? " (resets " + rel(g.windows.weekly.resetAt) + ")" : ""));
         console.log(g.label + ": " + parts.join("  "));
       }
     }).catch((e) => { console.error("usage: " + e.message); process.exit(1); });

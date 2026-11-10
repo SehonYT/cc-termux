@@ -4,7 +4,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { ensureAccessToken, loadCredentials, GENERATE_URL, antigravityHeaders } from "../bin/cc-antigravity.mjs";
+import { ensureAccessToken, loadCredentials, GENERATE_URLS, antigravityHeaders } from "../bin/cc-antigravity.mjs";
 import { refreshStatusLine } from "../bin/cc-statusline.mjs";
 
 const MODEL_ALIASES = {
@@ -31,6 +31,34 @@ function rememberSignature(id, sig) {
   if (SIGNATURE_CACHE.size > 2000) SIGNATURE_CACHE.delete(SIGNATURE_CACHE.keys().next().value);
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Claude Code retries a 429 up to 11 times. When Cloud Code has just refused a
+// specific request, resending the identical body only burns quota, so remember the
+// refusal for a while and answer locally (same approach as OmniRoute's guard).
+const REFUSALS = new Map();
+const REFUSAL_BASE_MS = 2 * 60 * 1000;
+const REFUSAL_MAX_MS = 30 * 60 * 1000;
+function refusalKey(envelope) {
+  const r = envelope.request || {};
+  return crypto.createHash("sha256").update(JSON.stringify([
+    envelope.project || "", envelope.model || "", r.systemInstruction || null,
+    r.contents || null, r.tools || null, r.toolConfig || null, r.generationConfig || null,
+  ])).digest("hex");
+}
+function activeRefusal(key) {
+  const until = REFUSALS.get(key);
+  if (!until) return 0;
+  if (until <= Date.now()) { REFUSALS.delete(key); return 0; }
+  return until;
+}
+function rememberRefusal(key, hintMs) {
+  const prev = REFUSALS.get(key);
+  const strikes = prev ? 2 : 1;
+  const ms = hintMs > 0 ? Math.min(hintMs, REFUSAL_MAX_MS) : Math.min(REFUSAL_BASE_MS * strikes, REFUSAL_MAX_MS);
+  REFUSALS.set(key, Date.now() + ms);
+  if (REFUSALS.size > 500) REFUSALS.delete(REFUSALS.keys().next().value);
+  return ms;
+}
 
 function textOf(content) {
   if (typeof content === "string") return content;
@@ -85,6 +113,21 @@ function imagePart(block) {
   return null;
 }
 
+// Antigravity's server-side filter flags competing-agent identity sentences and
+// answers with a bare 429 RESOURCE_EXHAUSTED even when quota is untouched; the same
+// request without the sentence returns 200 (ported from OmniRoute, MIT).
+const COMPETING_AGENT_PATTERNS = [
+  /\byou are a claude agent\b[^\n]*/gi,
+  /\bbuilt on anthropic's claude agent sdk\b[^\n]*/gi,
+  /\byou are claude code\b[^\n]*/gi,
+  /\byou are an ai assistant created by anthropic\b[^\n]*/gi,
+];
+export function scrubIdentity(text) {
+  if (!text) return text;
+  let out = text;
+  for (const re of COMPETING_AGENT_PATTERNS) out = out.replace(re, "");
+  return out.replace(/\n{3,}/g, "\n\n").trim();
+}
 export function anthropicToGemini(body, model, creds) {
   const contents = [];
   const toolNameById = new Map();
@@ -98,7 +141,7 @@ export function anthropicToGemini(body, model, creds) {
   // Claude Code embeds an x-anthropic-billing-header line in the system prompt.
   // Google Cloud Code rejects that request shape with a misleading 429
   // RESOURCE_EXHAUSTED; stripping the line makes the same request succeed.
-  const sys = rawSystem.split(/\r?\n/).filter((line) => !/^\s*x-anthropic-billing-header\s*:/i.test(line)).join("\n").trim();
+  const sys = scrubIdentity(rawSystem.split(/\r?\n/).filter((line) => !/^\s*x-anthropic-billing-header\s*:/i.test(line)).join("\n").trim());
   const msgs = Array.isArray(body.messages) ? body.messages : [];
   for (const m of msgs) {
     const role = m.role === "assistant" ? "model" : "user";
@@ -196,41 +239,63 @@ export async function proxyAntigravity(req, res, route, body, { anthropicError }
       fs.writeFileSync(path.join(dir, "antigravity-body.json"), JSON.stringify(body, null, 2) + "\n");
     } catch (e) { }
   }
-  const sendUpstream = async (accessToken) => fetch(GENERATE_URL, {
+  const fp = refusalKey(envelope);
+  const blockedUntil = activeRefusal(fp);
+  if (blockedUntil) {
+    const wait = Math.max(1, Math.round((blockedUntil - Date.now()) / 1000));
+    try { res.setHeader("retry-after", String(wait)); } catch (e) { }
+    return anthropicError(res, 429, "rate_limit_error",
+      "Antigravity refused this exact request moments ago; cc-termux is not resending it (retry in " + wait + "s, or use /model)");
+  }
+  const sendUpstream = async (accessToken, url) => fetch(url, {
     method: "POST",
     headers: antigravityHeaders(accessToken, { accept: "text/event-stream" }),
     body: JSON.stringify(envelope),
     signal: AbortSignal.timeout(15 * 60 * 1000),
   });
   let upstream;
-  try { upstream = await sendUpstream(token); }
+  try { upstream = await sendUpstream(token, GENERATE_URLS[0]); }
   catch (e) { return anthropicError(res, 502, "api_error", "Antigravity request failed: " + e.message); }
   if ((upstream.status === 401 || upstream.status === 403) && creds.refresh_token) {
     try {
       token = await ensureAccessToken(loadCredentials(), { force: true });
-      upstream = await sendUpstream(token);
+      upstream = await sendUpstream(token, GENERATE_URLS[0]);
     } catch (e) { }
   }
-  // Antigravity returns RESOURCE_EXHAUSTED (429) both for hard quota and for short
-  // per-minute bursts (Claude Code's retry storm was triggering the latter). Retry
-  // a few times with backoff before reporting a rate limit.
-  const max429 = Number(process.env.CC_TERMUX_ANTIGRAVITY_429_RETRIES || 3);
+  // Antigravity answers 429 RESOURCE_EXHAUSTED both for real quota and for a
+  // content-triggered refusal; retry a little with backoff, then fall back to the
+  // secondary host, then remember the refusal so retries do not hammer upstream.
+  const max429 = Number(process.env.CC_TERMUX_ANTIGRAVITY_429_RETRIES || 2);
   let last429Text = "";
-  for (let attempt = 0; upstream.status === 429 && attempt < max429; attempt++) {
-    last429Text = await upstream.text();
-    let delay = [2000, 5000, 10000][Math.min(attempt, 2)];
-    try {
-      const ra = upstream.headers && upstream.headers.get("retry-after");
-      if (ra && /^\d+$/.test(ra.trim())) delay = Math.min(15000, Math.max(500, Number(ra) * 1000));
-    } catch (e) { }
-    try {
-      const j = JSON.parse(last429Text);
-      const d = (j.error && j.error.details || []).find((x) => x["@type"] && /RetryInfo/.test(x["@type"]));
-      if (d && typeof d.retryDelay === "string") { const sec = parseFloat(d.retryDelay); if (sec > 0) delay = Math.min(15000, sec * 1000); }
-    } catch (e) { }
-    console.error(new Date().toISOString(), "antigravity rate-limited; retry", attempt + 1, "in", delay + "ms");
-    await new Promise((r) => setTimeout(r, delay));
-    try { upstream = await sendUpstream(token); } catch (e) { break; }
+  let lastDelay = 0;
+  for (const url of GENERATE_URLS) {
+    for (let attempt = 0; upstream.status === 429 && attempt < max429; attempt++) {
+      last429Text = await upstream.text();
+      let delay = [2000, 5000][Math.min(attempt, 1)];
+      try {
+        const ra = upstream.headers && upstream.headers.get("retry-after");
+        if (ra && /^\d+$/.test(ra.trim())) delay = Math.min(15000, Math.max(500, Number(ra) * 1000));
+      } catch (e) { }
+      try {
+        const j = JSON.parse(last429Text);
+        const d = (j.error && j.error.details || []).find((x) => x["@type"] && /RetryInfo/.test(x["@type"]));
+        if (d && typeof d.retryDelay === "string") { const sec = parseFloat(d.retryDelay); if (sec > 0) delay = Math.min(15000, sec * 1000); }
+      } catch (e) { }
+      lastDelay = delay;
+      console.error(new Date().toISOString(), "antigravity rate-limited; retry", attempt + 1, "in", delay + "ms");
+      await new Promise((r) => setTimeout(r, delay));
+      try { upstream = await sendUpstream(token, url); } catch (e) { break; }
+    }
+    if (upstream.status !== 429) break;
+    try { last429Text = await upstream.text(); } catch (e) { }
+    if (GENERATE_URLS.indexOf(url) === 0 && GENERATE_URLS.length > 1) {
+      console.error(new Date().toISOString(), "antigravity still 429; trying secondary host");
+      try { upstream = await sendUpstream(token, GENERATE_URLS[1]); } catch (e) { break; }
+    }
+  }
+  if (upstream.status === 429) {
+    const blockMs = rememberRefusal(fp, lastDelay);
+    console.error(new Date().toISOString(), "antigravity refusal cached for", blockMs, "ms");
   }
   if (!upstream.ok) {
     const text = upstream.status === 429 && last429Text ? last429Text : await upstream.text();

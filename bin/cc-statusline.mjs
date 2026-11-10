@@ -62,9 +62,9 @@ export function formatUsage(u) {
     const bits = [];
     if (w.session) bits.push("5h " + Math.round(w.session.percent) + "%");
     if (w.weekly) bits.push("7d " + Math.round(w.weekly.percent) + "%");
-    if (bits.length) parts.push(shortGroup(g) + " " + bits.join(" "));
+    if (bits.length) parts.push(shortGroup(g) + " " + bits.join(" ") + " left");
   }
-  return parts.join(" · ") || "usage ?";
+  return parts.length ? parts.join(" · ") : "usage ?";
 }
 function lineFor(usage, model, provider = "antigravity") {
   return provider + " · " + model + (usage ? " · " + formatUsage(usage) : "");

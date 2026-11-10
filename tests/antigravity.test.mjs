@@ -250,7 +250,7 @@ test("agentModelSorts drives the official list (paid Argon appears automatically
   });
   assert.deepEqual(models.map((m) => m.id), ["gemini-3.8-flash-high", "claude-sonnet-4-6", "gpt-oss-120b-medium", "gemini-4-argon-high"]);
 });
-test("system prompt blocks are joined with newlines and only the billing header is stripped", async () => {
+test("system prompt blocks are joined with newlines, billing header and competing-agent identity are stripped", async () => {
   const adapter = await import("../proxy/antigravity.mjs?t=" + Date.now());
   const envelope = adapter.anthropicToGemini({
     system: [
@@ -262,7 +262,7 @@ test("system prompt blocks are joined with newlines and only the billing header 
     messages: [{ role: "user", content: "hi" }],
   }, "gemini-3.8-flash-high", { project_id: "p" });
   const text = envelope.request.systemInstruction.parts[0].text;
-  assert.match(text, /You are a Claude agent/);
+  assert.doesNotMatch(text, /You are a Claude agent/);
   assert.match(text, /Follow the user request/);
   assert.doesNotMatch(text, /billing-header/);
   assert.doesNotMatch(text, /You are Gemini|built by Google/);
@@ -293,4 +293,17 @@ test("tool schemas prune required entries whose properties were stripped", async
   const params = envelope.request.tools[0].functionDeclarations[0].parameters;
   assert.deepEqual(params.required, ["a"]);
   assert.equal(params.properties.gone, undefined);
+});
+test("competing-agent identity is scrubbed so Antigravity does not answer a false 429", async () => {
+  const { scrubIdentity, anthropicToGemini } = await import("../proxy/antigravity.mjs?t=" + Date.now());
+  const raw = "x-anthropic-billing-header: cc_version=2.1.322.997; cc_entrypoint=sdk-cli;\n" +
+    "You are a Claude agent, built on Anthropic's Claude Agent SDK.\n\n" +
+    "You are an agent working with the user toward their goals.";
+  const out = scrubIdentity(raw);
+  assert.ok(!/claude agent/i.test(out), "identity sentence must be removed");
+  assert.ok(!/claude agent sdk/i.test(out), "SDK identity must be removed");
+  assert.match(out, /working with the user toward their goals/);
+  const env = anthropicToGemini({ system: raw, max_tokens: 32, messages: [{ role: "user", content: "hi" }] }, "gemini-3.8-flash-high", { project_id: "p" });
+  const sys = env.request.systemInstruction.parts.map((p) => p.text).join("\n");
+  assert.ok(!/claude agent/i.test(sys) && !/x-anthropic-billing-header/i.test(sys), "upstream system prompt must be clean");
 });
