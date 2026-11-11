@@ -250,6 +250,75 @@ export async function refreshGenerated(skillName, file, marker, line) {
   } catch (e) { return false; }
 }
 
+// Vendored skills are pinned to a source path so a sync can fetch the current version and
+// show a diff before anything is written. Generated at install time from the catalog.
+export function vendoredSources() {
+  return loadCatalog().skills
+    .filter((s) => /raw\.githubusercontent\.com|github\.com/.test(s.source || "") && s.upstream)
+    .map((s) => ({ id: s.id, name: s.name, dir: s.dir, source: s.source, upstream: s.upstream, license: s.license }));
+}
+
+// Fetches each vendored file and reports what changed, writing nothing unless apply is set.
+export async function syncUpstream({ only = null, apply = false, fetchImpl = fetch, log = () => {} } = {}) {
+  const target = skillsTarget();
+  const results = [];
+  for (const skill of vendoredSources()) {
+    if (only && !only.includes(skill.id)) continue;
+    const files = Array.isArray(skill.upstream.files) ? skill.upstream.files : [];
+    const changes = [];
+    for (const file of files) {
+      const url = skill.upstream.base.replace(/\/$/, "") + "/" + file;
+      let text = null;
+      try {
+        const r = await fetchImpl(url, { signal: AbortSignal.timeout(30000) });
+        if (!r.ok) { changes.push({ file, status: "fetch-failed", detail: "HTTP " + r.status }); continue; }
+        text = await r.text();
+      } catch (e) { changes.push({ file, status: "fetch-failed", detail: e.message.slice(0, 60) }); continue; }
+      const dest = path.join(target, skill.name, file);
+      let current = null;
+      try { current = fs.readFileSync(dest, "utf8"); } catch (e) { }
+      if (current === null) changes.push({ file, status: "missing", detail: "not installed" });
+      else if (current === text) changes.push({ file, status: "same", detail: "" });
+      else changes.push({ file, status: "different", detail: "upstream differs", next: text });
+    }
+    results.push({ id: skill.id, name: skill.name, changes });
+  }
+  if (apply) {
+    for (const r of results) {
+      for (const c of r.changes) {
+        if (c.status !== "different" && c.status !== "missing") continue;
+        if (typeof c.next !== "string") continue;
+        const dest = path.join(target, r.name, c.file);
+        try {
+          fs.mkdirSync(path.dirname(dest), { recursive: true });
+          fs.writeFileSync(dest, c.next);
+          log("updated " + r.id + "/" + c.file);
+        } catch (e) { log("failed " + r.id + "/" + c.file + ": " + e.message); }
+      }
+    }
+    recordManifest();
+  }
+  return results;
+}
+
+export function formatSync(results) {
+  if (!results.length) return "  no vendored skills to sync";
+  const lines = [];
+  for (const r of results) {
+    const changed = r.changes.filter((c) => c.status === "different");
+    const missing = r.changes.filter((c) => c.status === "missing");
+    const failed = r.changes.filter((c) => c.status === "fetch-failed");
+    const state = failed.length ? "could not check (" + failed[0].detail + ")"
+      : changed.length ? changed.length + " file(s) changed upstream"
+      : missing.length ? missing.length + " file(s) missing locally"
+      : "up to date";
+    lines.push("  " + r.id.padEnd(18) + state);
+    for (const c of changed) lines.push("      ~ " + c.file);
+    for (const c of missing) lines.push("      + " + c.file + " (not installed)");
+  }
+  return lines.join("\n");
+}
+
 export function formatSkills(status) {
   if (!status.length) return "no skills in the pack";
   const width = Math.max(...status.map((s) => s.name.length));
@@ -282,11 +351,21 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     for (const s of r.skipped) console.log("skipped:   " + s.id + " (" + s.reason + ")");
     if (!r.installed.length && !r.updated.length && !r.kept.length) console.log("nothing to do");
     if (r.kept.length) console.log("\nuse --force to overwrite a modified skill");
+  } else if (cmd === "sync") {
+    const only = args.filter((a) => !a.startsWith("-"));
+    const apply = args.includes("--apply");
+    const results = await syncUpstream({ only: only.length ? only : null, apply, log: (m) => console.log("  " + m) });
+    console.log(formatSync(results));
+    if (!apply) {
+      const any = results.some((r) => r.changes.some((c) => c.status === "different" || c.status === "missing"));
+      console.log();
+      console.log(any ? "  run again with --apply to write the upstream version" : "  nothing to do");
+    }
   } else if (cmd === "remove" || cmd === "uninstall") {
     const only = args.filter((a) => !a.startsWith("-"));
     const r = removeSkills({ only: only.length ? only : null });
     console.log("removed " + r.removed.length + " skill(s)" + (r.removed.length ? ": " + r.removed.join(", ") : ""));
   } else {
-    console.log("usage: cc-skills [status|install [id...] [--force]|remove [id...]]");
+    console.log("usage: cc-skills [status|install [id...] [--force]|sync [id...] [--apply]|remove [id...]]");
   }
 }

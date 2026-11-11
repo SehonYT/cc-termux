@@ -236,6 +236,84 @@ test("install refreshes the generated line in place", async () => {
   });
 });
 
+test("vendored skills are pinned to an upstream source", () => {
+  const vendored = catalog.skills.filter((s) => s.upstream);
+  assert.ok(vendored.length >= 3, "ponytail, frontend-design and security-audit are vendored");
+  for (const skill of vendored) {
+    assert.match(skill.upstream.base, /^https:\/\/raw\.githubusercontent\.com\//);
+    assert.ok(Array.isArray(skill.upstream.files) && skill.upstream.files.length, skill.id + " pins its files");
+    // Every pinned file must be one we actually ship, or a sync would write a new file.
+    for (const file of skill.upstream.files) {
+      assert.ok(fs.existsSync(path.join(packDir, skill.dir, file)), skill.id + " pins " + file + " but does not ship it");
+    }
+  }
+  // agent-browser is adapted for Termux, so it must NOT be synced: an upstream overwrite
+  // would silently drop the platform guidance.
+  const browser = catalog.skills.find((s) => s.id === "agent-browser");
+  assert.equal(browser.upstream, undefined, "the adapted skill must stay out of sync");
+});
+
+test("a sync reports changes and writes nothing without --apply", async () => {
+  await withTarget(async () => {
+    await skills.installSkills();
+    const upstream = new Map();
+    for (const skill of skills.vendoredSources()) {
+      for (const file of skill.upstream.files) {
+        upstream.set(skill.upstream.base + "/" + file, "upstream content for " + file);
+      }
+    }
+    const fakeFetch = async (url) => ({ ok: true, status: 200, text: async () => upstream.get(url) ?? "x" });
+
+    // Everything differs from the fake upstream, so every file is reported.
+    const dry = await skills.syncUpstream({ fetchImpl: fakeFetch, only: ["ponytail"] });
+    assert.equal(dry.length, 1);
+    assert.equal(dry[0].changes[0].status, "different");
+    const file = path.join(skills.skillsTarget(), "ponytail", "SKILL.md");
+    assert.doesNotMatch(fs.readFileSync(file, "utf8"), /upstream content/, "a dry run must not write");
+
+    const applied = await skills.syncUpstream({ fetchImpl: fakeFetch, only: ["ponytail"], apply: true });
+    assert.equal(applied[0].changes[0].status, "different");
+    assert.match(fs.readFileSync(file, "utf8"), /upstream content for SKILL\.md/, "--apply writes it");
+  });
+});
+
+test("a sync survives an unreachable or failing upstream", async () => {
+  await withTarget(async () => {
+    await skills.installSkills();
+    const before = fs.readFileSync(path.join(skills.skillsTarget(), "ponytail", "SKILL.md"), "utf8");
+    const failing = async () => { throw new Error("network down"); };
+    const results = await skills.syncUpstream({ fetchImpl: failing, only: ["ponytail"], apply: true });
+    assert.equal(results[0].changes[0].status, "fetch-failed");
+    assert.equal(fs.readFileSync(path.join(skills.skillsTarget(), "ponytail", "SKILL.md"), "utf8"), before, "a failed fetch changes nothing");
+    assert.match(skills.formatSync(results), /could not check/);
+  });
+});
+
+test("sync output names what changed", async () => {
+  await withTarget(async () => {
+    await skills.installSkills();
+    const upstream = new Map();
+    for (const skill of skills.vendoredSources()) {
+      for (const file of skill.upstream.files) upstream.set(skill.upstream.base + "/" + file, "new");
+    }
+    const fakeFetch = async (url) => ({ ok: true, status: 200, text: async () => upstream.get(url) ?? "x" });
+    const r = await skills.syncUpstream({ fetchImpl: fakeFetch, only: ["ponytail"] });
+    const text = skills.formatSync(r);
+    assert.match(text, /ponytail/);
+    assert.match(text, /1 file\(s\) changed upstream/);
+    assert.match(text, /~ SKILL\.md/);
+  });
+});
+
+test("the CLI exposes sync with a dry run by default", () => {
+  const src = fs.readFileSync(path.join(root, "bin", "cc-skills.mjs"), "utf8");
+  const cli = fs.readFileSync(path.join(root, "bin", "cc-termux"), "utf8");
+  assert.match(src, /cmd === "sync"/);
+  assert.match(src, /--apply/);
+  assert.match(src, /run again with --apply/);
+  assert.match(cli, /skills \[install\|status/);
+});
+
 test("the installer ships the pack and the launcher restores it", () => {
   const installer = fs.readFileSync(path.join(root, "install.mjs"), "utf8");
   const launcher = fs.readFileSync(path.join(root, "bin", "cc-launcher.mjs"), "utf8");

@@ -5,9 +5,21 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { installRoot, configFile, configDir, cacheDir, claudeDir } from "./cc-paths.mjs";
+import { installRoot, configFile, configDir, cacheDir, claudeDir, isWindows } from "./cc-paths.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
+
+// The launcher is a shell script on POSIX and a .cmd on Windows; both live in the same
+// place the installer chose, so resolve it the same way rather than assuming a name.
+export function shimDir() {
+  const base = process.platform === "win32"
+    ? (process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local"))
+    : path.join(os.homedir(), ".local");
+  return path.join(base, "bin");
+}
+export function shimPath() {
+  return path.join(shimDir(), process.platform === "win32" ? "claude.cmd" : "claude");
+}
 
 export function removalPlan() {
   const home = os.homedir();
@@ -20,7 +32,7 @@ export function removalPlan() {
   add("owned", "cc-termux install", root, "code, patches, bundled Claude Code copy");
   add("owned", "config and keys", configDir(), "provider keys, web search keys, antigravity login");
   add("owned", "cache and logs", cacheDir(), "errors.log, model cache, session state");
-  add("owned", "launcher shim", path.join(home, ".local", "bin", "claude"), "the shell script that starts the gateway");
+  add("owned", "launcher shim", shimPath(), "the script that starts the gateway");
 
   // Shared with Claude Code: restore, never blanket-delete.
   add("restore", "web search permission", path.join(claude, "settings.json"), "remove the two mcp__web__ allow entries");
@@ -34,12 +46,12 @@ export function removalPlan() {
 // Puts the original claude launcher back, preferring the oldest backup we made.
 export function findOfficialBackup() {
   const home = os.homedir();
-  const dirs = [path.join(home, ".local", "bin"), path.join(home, ".local", "share", "claude", "versions")];
+  const dirs = [shimDir(), path.join(home, ".local", "share", "claude", "versions")];
   const found = [];
   for (const dir of dirs) {
     try {
       for (const name of fs.readdirSync(dir)) {
-        if (/^claude\.official-backup/.test(name)) found.push(path.join(dir, name));
+        if (/^claude(\.cmd)?\.official-backup/.test(name)) found.push(path.join(dir, name));
       }
     } catch (e) { }
   }
@@ -135,9 +147,8 @@ export async function removeSkillPack() {
 
 // Puts the original claude launcher back.
 export function restoreLauncher() {
-  const home = os.homedir();
-  const shim = path.join(home, ".local", "bin", "claude");
-  const backups = findOfficialBackup().filter((p) => !p.includes("cc-termux") && !/^claude$/.test(path.basename(p)));
+  const shim = shimPath();
+  const backups = findOfficialBackup().filter((p) => !p.includes("cc-termux") && !/^claude(\.cmd)?$/.test(path.basename(p)));
   try {
     if (fs.existsSync(shim)) {
       const body = fs.readFileSync(shim, "utf8");
@@ -146,7 +157,7 @@ export function restoreLauncher() {
     }
     if (backups.length) {
       fs.copyFileSync(backups[0], shim);
-      fs.chmodSync(shim, 0o755);
+      if (process.platform !== "win32") fs.chmodSync(shim, 0o755);
       return { restored: true, from: backups[0] };
     }
     return { restored: false, reason: "no backup of the original claude launcher was found" };

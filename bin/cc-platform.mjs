@@ -32,12 +32,24 @@ export function detectTarget({
     return js("Termux " + arch + " without an AArch64 kernel");
   }
   if (platform === "linux") {
-    const musl = hasFile("/lib/ld-musl-x86_64.so.1") || hasFile("/lib/ld-musl-aarch64.so.1");
+    const musl = isMusl({ arch, hasFile });
     if (arch === "x64") return { pkg: musl ? "linux-x64-musl" : "linux-x64", bin: "claude.bin" };
     if (arch === "arm64") return { pkg: musl ? "linux-arm64-musl" : "linux-arm64", bin: "claude.bin" };
     return js("no linux build for " + arch);
   }
   return js("unsupported platform " + platform + "/" + arch);
+}
+
+// Alpine and other musl images put the loader in different places, so check every known
+// path plus the distro marker. Missing one installs the glibc build, which then cannot exec.
+export function isMusl({ arch = process.arch, hasFile = () => false } = {}) {
+  const names = arch === "arm64" || arch === "arm" ? ["aarch64", "armhf", "armv7"] : ["x86_64", "i386"];
+  const roots = ["/lib", "/usr/lib", "/lib64", "/usr/lib64"];
+  for (const root of roots) {
+    for (const name of names) if (hasFile(root + "/ld-musl-" + name + ".so.1")) return true;
+  }
+  // Alpine marks itself even when the loader lives somewhere unusual.
+  return hasFile("/etc/alpine-release");
 }
 
 export function nodeVersionOk(version = process.versions.node) {

@@ -915,13 +915,25 @@ switch (cmd) {
       for (const s of r.skipped) console.log("  skipped " + s.id + ": " + s.reason);
       break;
     }
+    if (sub === "sync") {
+      const { syncUpstream, formatSync } = await import("./cc-skills.mjs");
+      const apply = args.includes("--apply");
+      const only = args.slice(1).filter((a) => !a.startsWith("-"));
+      const results = await syncUpstream({ only: only.length ? only : null, apply, log: (m) => console.log("  " + m) });
+      console.log(formatSync(results));
+      if (!apply && results.some((r) => r.changes.some((c) => c.status === "different"))) {
+        console.log();
+        console.log("run again with --apply to write the upstream version");
+      }
+      break;
+    }
     if (sub === "remove" || sub === "uninstall") {
       const only = args.slice(1).filter((a) => !a.startsWith("-"));
       const r = removeSkills({ only: only.length ? only : null });
       console.log("removed " + r.removed.length + " skill(s)" + (r.removed.length ? ": " + r.removed.join(", ") : ""));
       break;
     }
-    console.log("usage: cc-termux skills [status|install [id...]|remove [id...]]");
+    console.log("usage: cc-termux skills [status|install [id...] [--force]|sync [id...] [--apply]|remove [id...]]");
     break;
   }
   case "web": {

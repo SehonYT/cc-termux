@@ -35,19 +35,24 @@ export function ensurePathInRcFiles(home) {
   }
   return added;
 }
-// Resolve the system prefix whose bin/ holds the user-facing launchers: an explicit
-// PREFIX wins, then Termux's usr, Homebrew on Apple Silicon, or /usr/local.
-export function resolvePrefix({ platform = process.platform, env = process.env, exists = fs.existsSync } = {}) {
+// Resolve the prefix whose bin/ holds the user-facing launchers: PREFIX wins, then Termux,
+// Homebrew on Apple Silicon, /usr/local, and %LOCALAPPDATA% on Windows where /usr/local is absent.
+export function resolvePrefix({ platform = process.platform, env = process.env, exists = fs.existsSync, home = os.homedir() } = {}) {
   try {
     if (env && env.PREFIX) return env.PREFIX;
     if (platform === "android") return TERMUX_PREFIX;
+    if (platform === "win32") {
+      return (env && (env.LOCALAPPDATA || env.APPDATA)) || path.join(home, "AppData", "Local");
+    }
     if (platform === "darwin") {
       if (env && env.HOMEBREW_PREFIX) return env.HOMEBREW_PREFIX;
       if (exists(path.join(HOMEBREW_ARM_PREFIX, "bin"))) return HOMEBREW_ARM_PREFIX;
-      return "/usr/local";
     }
+    // Linux and macOS: the system bin when present, otherwise the user's own bin.
+    if (exists("/usr/local/bin")) return "/usr/local";
+    return path.join(home, ".local");
   } catch (e) { }
-  return "/usr/local";
+  return path.join(home, ".local");
 }
 export function prefixBinDir(opts) {
   return path.join(resolvePrefix(opts), "bin");
