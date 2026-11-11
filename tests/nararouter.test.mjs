@@ -60,20 +60,65 @@ test("fetchNaraModels scopes the key's own model list to the tier and labels eac
   const realFetch = globalThis.fetch;
   globalThis.fetch = async () => ({
     ok: true, status: 200,
-    json: async () => ({ data: [{ id: "agnes-2.5-flash", name: "Agnes 2.5 Flash", context_length: 131072 }, { id: "gpt-5.6-sol", name: "GPT 5.6 Sol", context_length: 200000 }] }),
+    json: async () => ({
+      data: [
+        { id: "agnes-2.5-flash", name: "Agnes 2.5 Flash", context_window: 512000, input_idr_per_1m: 100, output_idr_per_1m: 200, max_output_tokens: 8192, vision: true, reasoning: true, web_search: true },
+        { id: "gpt-5.6-sol", name: "GPT 5.6 Sol", context_window: 1000000, input_idr_per_1m: 20000, output_idr_per_1m: 40000 },
+        { id: "some-payg-model", name: "PAYG", context_window: 128000 },
+      ],
+    }),
   });
   try {
     const free = await nara.fetchNaraModels("k", { tier: "free", plans });
     assert.deepEqual(free.map((m) => m.id), ["agnes-2.5-flash"]);
-    assert.equal(free[0].contextTokens, 131072);
     assert.equal(free[0].tier, "free");
 
     const all = await nara.fetchNaraModels("k", { tier: "all", plans });
-    assert.deepEqual(all.map((m) => m.id), ["agnes-2.5-flash", "gpt-5.6-sol"]);
-    assert.deepEqual(all.map((m) => m.tier), ["free", "paid"]);
+    assert.deepEqual(all.map((m) => m.id), ["agnes-2.5-flash", "gpt-5.6-sol", "some-payg-model"]);
+    assert.deepEqual(all.map((m) => m.tier), ["free", "paid", "payg"], "a model no plan lists is pay-as-you-go, not free");
   } finally {
     globalThis.fetch = realFetch;
   }
+});
+
+test("the gateway's context_window and Rupiah pricing map to the picker's fields", () => {
+  // The live API uses context_window (not context_length) and prices per 1M in IDR; both
+  // were being dropped, which is why every NaraRouter model showed "ctx unknown".
+  const m = nara.normalizeNaraModel({
+    id: "agnes-2.5-flash", name: "Agnes 2.5 Flash",
+    context_window: 512000, max_output_tokens: 8192,
+    input_idr_per_1m: 100, output_idr_per_1m: 200,
+    vision: true, reasoning: true, web_search: true,
+  });
+  assert.equal(m.contextTokens, 512000);
+  assert.equal(m.maxOutputTokens, 8192);
+  assert.equal(m.inIdrPer1M, 100);
+  assert.equal(m.outIdrPer1M, 200);
+  assert.equal(m.inUsd, +(100 / nara.NARA_IDR_PER_USD).toFixed(4));
+  assert.equal(m.outUsd, +(200 / nara.NARA_IDR_PER_USD).toFixed(4));
+  assert.equal(m.vision, true);
+  assert.equal(m.reasoning, true);
+  assert.equal(m.webSearch, true);
+});
+
+test("a model without context_window or pricing still normalises", () => {
+  const bare = nara.normalizeNaraModel({ id: "x", name: "X" });
+  assert.equal(bare.contextTokens, null);
+  assert.equal(bare.inUsd, null);
+  assert.equal(bare.outUsd, null);
+  const zero = nara.normalizeNaraModel({ id: "y", context_window: 0, input_idr_per_1m: 0, output_idr_per_1m: 0 });
+  assert.equal(zero.contextTokens, null, "zero context is unknown, not zero tokens");
+  assert.equal(zero.inUsd, null, "a zero price is not a real price to display");
+});
+
+test("the preset flow asks for a tier before fetching, for both routers", () => {
+  const setup = fs.readFileSync(path.join(root, "bin", "cc-setup.mjs"), "utf8");
+  assert.match(setup, /function isTieredPreset\(preset\)/);
+  assert.match(setup, /preset\.tiered \|\| preset\.id === "nararouter" \|\| preset\.id === "openrouter"/);
+  assert.match(setup, /const tier = isTieredPreset\(preset\) \? await askTier\(preset\.id\) : undefined;/);
+  assert.match(setup, /fetchPresetModels\(preset, key, \{ tier \}\)/);
+  assert.match(setup, /if \(preset\.id === "nararouter"\) return await fetchNaraRouterModels\(key, \{ tier: tier \|\| "free" \}\);/);
+  assert.match(setup, /noKey: !!\(preset\.noKey \|\| preset\.local\), tier,/, "the chosen tier must be stored on the provider");
 });
 
 test("fetchNaraModels surfaces the gateway's own error message", async () => {

@@ -91,19 +91,42 @@ export async function fetchNaraModels(key, { fetchImpl = fetch, timeoutMs = 2000
   }
   const j = await res.json();
   const rows = j.data || j.models || j;
-  const models = (Array.isArray(rows) ? rows : [])
-    .map((m) => ({
-      id: String(m.id || m.name || ""),
-      name: String(m.name || m.id || ""),
-      contextTokens: Number(m.context_length || m.contextLength || 0) || null,
-      inUsd: null, outUsd: null,
-    }))
-    .filter((m) => m.id);
+  const models = (Array.isArray(rows) ? rows : []).map(normalizeNaraModel).filter((m) => m.id);
   const scoped = tier === "all" ? models : (plans ? filterModelsForTier(models, plans, tier) : models);
-  const { free } = splitByTier(plans || []);
-  for (const m of scoped) m.tier = free.includes(m.id) ? "free" : "paid";
+  const { free, paidOnly } = splitByTier(plans || []);
+  for (const m of scoped) {
+    // A model advertised on a free plan is free; one only paid plans list is paid; a model
+    // that no plan mentions is still reachable (PAYG) but is not part of the free tier.
+    m.tier = free.includes(m.id) ? "free" : paidOnly.includes(m.id) ? "paid" : "payg";
+  }
   return scoped;
 }
+
+// The gateway reports context_window (not context_length) and prices in Rupiah per 1M
+// tokens, so they are normalised to the fields the wizard and picker already understand.
+export function normalizeNaraModel(m) {
+  const ctx = Number(m.context_window || m.contextTokens || 0) || null;
+  const inIdr = Number(m.input_idr_per_1m);
+  const outIdr = Number(m.output_idr_per_1m);
+  const toUsd = (v) => (Number.isFinite(v) && v > 0 ? +(v / NARA_IDR_PER_USD).toFixed(4) : null);
+  return {
+    id: String(m.id || m.name || ""),
+    name: String(m.name || m.id || ""),
+    contextTokens: ctx,
+    maxOutputTokens: Number(m.max_output_tokens || 0) || null,
+    inUsd: toUsd(inIdr),
+    outUsd: toUsd(outIdr),
+    inIdrPer1M: Number.isFinite(inIdr) ? inIdr : null,
+    outIdrPer1M: Number.isFinite(outIdr) ? outIdr : null,
+    vision: Boolean(m.vision),
+    reasoning: Boolean(m.reasoning),
+    webSearch: Boolean(m.web_search),
+  };
+}
+
+// Prices arrive in Rupiah; the picker and the wizard speak USD, so convert at a fixed rate
+// and keep the original figure alongside it.
+export const NARA_IDR_PER_USD = 16000;
 
 // The gateway reports limits through 429 bodies and response headers, not a usage endpoint,
 // so consumption is reconstructed from what the gateway observes plus the plan's own caps.

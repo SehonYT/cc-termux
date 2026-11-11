@@ -229,8 +229,15 @@ function presetStaticModels(preset) {
   });
 }
 
-async function fetchPresetModels(preset, key) {
+// Routers publish free and paid models in one catalog, so they need a tier question.
+function isTieredPreset(preset) {
+  return Boolean(preset && (preset.tiered || preset.id === "nararouter" || preset.id === "openrouter"));
+}
+
+async function fetchPresetModels(preset, key, { tier } = {}) {
   if (preset.kind === "gemini") return await fetchGeminiModels(key);
+  if (preset.id === "nararouter") return await fetchNaraRouterModels(key, { tier: tier || "free" });
+  if (preset.id === "openrouter") return await fetchOpenRouterModels(key, { tier: tier || "free" });
   if (preset.modelsPath === null && (preset.models || []).length) return presetStaticModels(preset);
   const url = String(preset.baseUrl).replace(/\/$/, "") + (preset.modelsPath || "/models");
   try {
@@ -617,23 +624,27 @@ async function presetFlow(c, presetOverride) {
     key = await askHidden("API key (hidden) > ");
     if (!key) { console.log(cyan("  no key entered")); return null; }
   }
-  console.log(dim("  fetching models..."));
-  let models;
-  try { models = await fetchPresetModels(preset, key); }
-  catch (e) { console.log(cyan("  " + errText(e))); return null; }
-  if (!models.length) { console.log(cyan("  no models returned")); return null; }
-  console.log(cyan("  \u2714 " + models.length + " models available"));
-  const main = await pickModel(models, "Main model");
+  // A tiered router must be asked before fetching, or every paid model lands in a
+  // free-only setup and no free/paid label reaches the picker.
+  const tier = isTieredPreset(preset) ? await askTier(preset.id) : undefined;
   const c2 = c;
   const existing = visible(c2).find(([n, p]) => p.baseUrl === preset.baseUrl || n === preset.id);
   const name = existing ? existing[0] : providerName(c2, preset.id);
-  const family = preset.id === "tokens" ? "tokens" : "custom";
+  console.log(dim("  fetching models..."));
+  let models;
+  try { models = await fetchPresetModels(preset, key, { tier }); }
+  catch (e) { console.log(cyan("  " + errText(e))); return null; }
+  if (!models.length) { console.log(cyan("  no models returned")); return null; }
+  console.log(cyan("  \u2714 " + models.length + " models available" + (tier ? " (" + tier + " tier)" : "")));
+  const main = await pickModel(models, "Main model");
+  const family = preset.id === "tokens" ? "tokens" : isTieredPreset(preset) ? preset.id : "custom";
   addProvider(c2, name, {
     family, type: "openai", baseUrl: preset.baseUrl, path: preset.path || "/chat/completions",
     key, models, main: main.id, contextWindow: main.contextTokens || 128000,
     aliases: { opus: main.id, sonnet: main.id, haiku: main.id, subagent: main.id },
-    noKey: !!(preset.noKey || preset.local),
+    noKey: !!(preset.noKey || preset.local), tier,
   });
+  if (tier) console.log(dim("  " + (tier === "free" ? "free tier only - no credits spent" : tier === "paid" ? "paid models only" : "free and paid models")));
   summary(c2, name);
   await ensureStatusLine();
   if ((await ask("\nSend a small test request now? (y/N) > ")).toLowerCase().startsWith("y")) await runSmokeTest();
@@ -711,15 +722,16 @@ async function envMode() {
     }
     const c = loadCfg();
     const key = process.env.CC_SETUP_KEY || "";
-    const models = await fetchPresetModels(preset, key);
+    const tier = isTieredPreset(preset) ? (process.env.CC_SETUP_TIER || "free") : undefined;
+    const models = await fetchPresetModels(preset, key, { tier });
     const want = process.env.CC_SETUP_MODEL || "";
     const main = models.find((m) => m.id === want) || sortModels(models)[0];
     const name = providerName(c, preset.id);
     addProvider(c, name, {
-      family: "custom", type: "openai", baseUrl: preset.baseUrl, path: preset.path || "/chat/completions",
+      family: isTieredPreset(preset) ? preset.id : "custom", type: "openai", baseUrl: preset.baseUrl, path: preset.path || "/chat/completions",
       key, models, main: main.id, contextWindow: main.contextTokens || 128000,
       aliases: { opus: main.id, sonnet: main.id, haiku: main.id, subagent: main.id },
-      noKey: !!(preset.noKey || preset.local),
+      noKey: !!(preset.noKey || preset.local), tier,
     });
     summary(c, name);
     await ensureStatusLine();
