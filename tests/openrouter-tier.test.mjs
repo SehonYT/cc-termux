@@ -11,7 +11,8 @@ const setup = fs.readFileSync(path.join(root, "bin", "cc-setup.mjs"), "utf8");
 // evaluated in isolation with the smallest stub set that satisfies them.
 function load() {
   const start = setup.indexOf("function openRouterTier(");
-  const end = setup.indexOf("// The /v1beta/models endpoint");
+  // Bracket the helpers by the next top-level declaration, not by a comment.
+  const end = setup.indexOf("function geminiChatModel(");
   assert.ok(start > 0 && end > start, "OpenRouter helpers must stay in bin/cc-setup.mjs");
   const stub = "const dim = () => {}; const CACHE_DIR = '/tmp'; const fetchT = (u, o) => fetch(u, o);";
   return new Function("fs", stub + "\n" + setup.slice(start, end) + "; return { openRouterTier, fetchOpenRouterModels };")(

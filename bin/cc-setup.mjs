@@ -115,9 +115,7 @@ async function fetchTokensModels(key) {
   return models;
 }
 
-// OpenRouter marks a free model twice: the id ends in ":free" and both prices are "0".
-// Checking the prices as well catches the router aliases (openrouter/free) and rejects the
-// rare model that is priced at zero but still reserved for a paid plan.
+// Free means both prices are "0", which also catches aliases like openrouter/free.
 function openRouterTier(m) {
   const p = m.pricing || {};
   const inUsd = p.prompt != null ? parseFloat(p.prompt) * 1e6 : null;
@@ -159,11 +157,7 @@ async function fetchOpenRouterModels(key, { tier = "free" } = {}) {
   return usable;
 }
 
-// The /v1beta/models endpoint lists every model the key can see, including image, audio,
-// video, embedding and agents that cannot answer a chat completion. Keep only model ids
-// that work through the OpenAI-compatible chat endpoint:
-//   dropped: *-tts / *-image / imagen / veo / lyria / embedding / *-live / transcribe /
-//            robotics / computer-use / deep-research / antigravity-* / aqa / native-audio.
+// Drop image, TTS, Live, embedding, video and agent ids: they cannot answer a chat call.
 function geminiChatModel(id) {
   return !/(-tts|-image|image-preview|nano-banana|embedding|imagen|veo|lyria|live|transcribe|robotics|computer-use|deep-research|antigravity-|-aqa|native-audio|gemma-)/i.test(id);
 }
@@ -177,9 +171,7 @@ const GEMINI_PRICE = {
   "gemini-2.5-flash": [0.3, 2.5], "gemini-2.5-flash-lite": [0.1, 0.4], "gemini-2.5-pro": [1.25, 10],
 };
 
-// Free tier is per key and per model, so it cannot be read from the API. This is the
-// published availability (Standard tier): a 429 on a free key means the key is out of
-// quota or the model needs billing enabled.
+// Published free-tier availability; a 429 on a free key means quota or billing.
 const GEMINI_FREE = /^(gemini-3\.8-flash|gemini-3\.7-flash|gemini-3\.6-flash|gemini-3\.5-flash|gemini-3\.5-flash-lite|gemini-3\.1-flash-lite|gemini-3-flash-preview)$/;
 const GEMINI_PAID = /^(gemini-4-carbon|gemini-4-argon|gemini-3\.1-pro-preview)$/;
 // Gemini 2.5 is retired for keys created after its shutdown: the API lists it but every

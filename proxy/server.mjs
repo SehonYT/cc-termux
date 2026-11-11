@@ -99,11 +99,8 @@ function saveConfig() {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const RETRYABLE = new Set([408, 409, 425, 429, 500, 502, 503, 504]);
 
-// Google returns the same "You exceeded your current quota" body for three different
-// limits, so the metric id is the only reliable signal. Per-minute limits (RPM/TPM) are
-// transient and worth retrying; a per-day limit (RPD) is terminal for the day.
-// Reading: "metric: generativelanguage.googleapis.com/generate_content_free_tier_requests,
-// limit: 20, model: gemini-3.8-flash, description: ... requests per day limit exceeded".
+// Google sends one body for RPM, TPM and RPD, so the metric line is the only signal:
+// per-minute is transient and retried, per-day is terminal.
 const GEMINI_METRIC_RE = /metric:\s*\S*?\/(\w+),\s*limit:\s*(\d+),[\s\S]*?description:\s*([^.]*)/gi;
 
 function classifyGemini429(text) {
