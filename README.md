@@ -80,7 +80,7 @@ time with `cc-termux setup`.
 | **No hidden fallback** | A request is only ever sent to the provider you selected. No cross-provider silent rerouting. |
 | **Tool calling** | Anthropic tools, tool choice and tool results are translated to the upstream schema, including streamed partial arguments. |
 | **Auto mode** | Claude Code's safety classifier works behind the gateway: the launcher forces the local classifier and the gateway gives it a fast verdict budget. |
-| **Web Search + Web Fetch** | A bundled MCP server gives the agent real web access on Termux, with SSRF protection, browser-like headers and prompt-injection fencing. |
+| **Web Search + Web Fetch** | A bundled MCP server searches Google, Brave, DuckDuckGo and Bing, merges and ranks what comes back, reports which engines answered, and fetches pages with SSRF protection and prompt-injection fencing. |
 | **Antigravity (OAuth)** | Google-account access to Cloud Code models, quota reporting in the status line, and model discovery from Google's own list. |
 | **Self-healing installs** | Install and update repair PATH, settings, picker, patches and stale config automatically. `cc-termux doctor --fix` on demand. |
 | **Performance mode** | One opt-in switch that turns off animations, mouse, checkpoints, background work and more on phones and slow machines. |
@@ -98,6 +98,9 @@ time with `cc-termux setup`.
   `patches.json`, skipped automatically when an anchor is missing, revertible at any time.
 - **Failure logs**: every upstream, stream and gateway failure is persisted and shown by
   `cc-termux errors`, with secrets redacted.
+- **Search backends**: a SearXNG endpoint (`CC_TERMUX_SEARX_URL`) or a Google Custom Search
+  key is used automatically when configured, which is the reliable option on networks where
+  Google and Brave answer with an anti-bot wall.
 
 </details>
 

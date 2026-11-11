@@ -128,19 +128,58 @@ which exposes two tools to the model:
 
 | Tool | Escapes as | What it returns |
 |---|---|---|
-| `mcp__web__search` | Web Search | Bing results (DuckDuckGo fallback), deduplicated, title + URL + snippet |
-| `mcp__web__fetch` | Web Fetch | readable page text: title, description, headings, lists, links |
+| `mcp__web__search` | Web Search | results from several engines, merged and ranked, with a per-engine status line |
+| `mcp__web__fetch` | Web Fetch | readable page text: title, description, headings, lists, tables, code and links |
 
-Implementation notes:
+### Search engines
+
+`bin/cc-search.mjs` holds one parser per engine plus the merge/rank logic. The HTML of each
+engine is decoded rather than scraped blindly:
+
+| Engine | Endpoint | Redirect format |
+|---|---|---|
+| DuckDuckGo | `html.duckduckgo.com/html/` | `/l/?uddg=<url-encoded>` |
+| DuckDuckGo Lite | `lite.duckduckgo.com/lite/` | same, `result-link` attributes use single quotes |
+| Google | `google.com/search` | `/url?q=<url-encoded>` |
+| Brave | `search.brave.com/search` | plain links inside SvelteKit `.snippet` cards |
+| Bing | `bing.com/search` | `/ck/a?u=a1<base64url>` |
+| Startpage | POST `startpage.com/sp/search` with an `sc` token | plain links (Google index) |
+
+- **Relevance gate**: each result must cover a meaningful part of the query (stopwords are
+  dropped). An engine whose page mostly does not match is *quarantined* as a whole — this is
+  what stops Bing, which sometimes answers with a completely different query from certain
+  networks or caches, from injecting coincidental junk into the ranking.
+- **Reciprocal-rank fusion** merges the surviving lists: a page found by two engines outranks
+  a page found by one, and duplicates are collapsed on a canonical URL (tracking parameters,
+  `www.`, fragments and trailing slashes are normalised away).
+- **Per-engine status** is reported to the model, e.g. `google: blocked - HTTP 200 or bot
+  check; bing: irrelevant - engine returned results for a different query`. A search never
+  silently returns nothing without saying why.
+- **Google fallback**: when google.com serves its JavaScript wall, the same index is requested
+  from Startpage. A configured SearXNG instance (`CC_TERMUX_SEARX_URL`, JSON API) or Google
+  Custom Search (`CC_TERMUX_GOOGLE_KEY` + `CC_TERMUX_GOOGLE_CX`) is used when available.
+- Requests use browser headers, a shared cookie jar and up to five redirects. Each engine
+  gets a short per-request timeout so one slow engine cannot hold the whole search up.
+
+### Fetch
 
 - Requests look like a real browser: rotating Chrome/Safari/Firefox user agents, full
   `Accept` / `Accept-Language` / `Sec-Fetch-*` / `Sec-CH-UA` headers, same-origin `Referer`,
-  a shared cookie jar, up to five redirects, and one retry with a second fingerprint on
-  403/429/503.
-- JavaScript challenges (Cloudflare, Anubis, DataDome) cannot be solved by headers; they are
-  detected and reported as *blocked by a bot check* instead of being returned as content.
-- Bodies are decoded from gzip/brotli, charsets are detected from headers or `<meta>`, and
-  long pages are paginated with `offset`.
+  a shared cookie jar, up to five redirects, `<meta http-equiv="refresh">` following, and one
+  retry with a second fingerprint on 403/429/503.
+- **Address-family fallback**: every DNS answer is validated, IPv4 is tried first and IPv6 is
+  tried when the first address is refused with 403/429/451/503. This is what makes
+  `google.com` fetchable on networks where one family is blocked outright.
+- Forms can be POSTed (used by the Startpage search flow) while keeping the same SSRF checks
+  on every redirect hop.
+- Bodies are decoded from gzip/brotli, charsets are detected from headers or `<meta>`, JSON
+  responses are pretty-printed, and long pages are paginated with `offset`.
+- **HTML extraction** keeps the main/article region, headings, lists, pipe-separated table
+  rows and fenced `<pre>` blocks; it drops navigation, sidebars, footers, forms and duplicate
+  consecutive lines, and decodes entities exactly once.
+- **Challenge detection** recognises Cloudflare/Anubis/DataDome interstitials and Google's
+  "enable JavaScript" wall, and says *blocked by a bot check* instead of returning the wall as
+  page content.
 - **SSRF protection**: only `http(s)`, no credentials in the URL, every redirect hop is
   validated, private/loopback/link-local/CGNAT/ULA/metadata addresses are refused, and the
   connection is pinned to the vetted IP so a second DNS answer cannot rebind it.
@@ -151,7 +190,8 @@ Implementation notes:
 
 Environment: `CC_TERMUX_WEB_TIMEOUT_MS` (20000), `CC_TERMUX_WEB_MAX_BYTES` (4000000),
 `CC_TERMUX_WEB_ALLOW_PRIVATE`, `CC_TERMUX_WEB_READER_PROXY=1` (read blocked pages through
-`r.jina.ai`).
+`r.jina.ai`), `CC_TERMUX_SEARX_URL` (SearXNG base URL with JSON enabled),
+`CC_TERMUX_GOOGLE_KEY` + `CC_TERMUX_GOOGLE_CX` (Google Custom Search API).
 
 ## WebFetch domain check
 

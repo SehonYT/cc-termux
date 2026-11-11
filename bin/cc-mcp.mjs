@@ -21,7 +21,22 @@ import zlib from "node:zlib";
 import readline from "node:readline";
 import { fileURLToPath } from "node:url";
 
-const VERSION = "2.0.0";
+import {
+  parseBing,
+  parseBrave,
+  parseDuckDuckGo,
+  parseDuckDuckGoLite,
+  parseGoogle,
+  parseStartpage,
+  unwrapBingUrl,
+  unwrapDuckDuckGoUrl,
+  unwrapGoogleUrl,
+  unwrapStartpageUrl,
+  searchWeb as runSearchWeb,
+  formatSearchReport,
+} from "./cc-search.mjs";
+
+const VERSION = "2.1.0";
 const TIMEOUT_MS = Number(process.env.CC_TERMUX_WEB_TIMEOUT_MS || 20000);
 const MAX_BYTES = Number(process.env.CC_TERMUX_WEB_MAX_BYTES || 4_000_000);
 const MAX_REDIRECTS = 5;
@@ -78,20 +93,24 @@ export function validateUrl(raw) {
   return u;
 }
 
-function resolveSafe(host) {
+function resolveSafeAll(host) {
   return new Promise((resolve, reject) => {
-    if (net.isIP(host)) {
+    const literal = net.isIP(host);
+    if (literal) {
       if (isBlockedIp(host)) return reject(new Error("blocked address: " + host));
-      return resolve(host);
+      return resolve([{ address: host, family: literal }]);
     }
     dns.lookup(host, { all: true, verbatim: true }, (err, addresses) => {
       if (err) return reject(new Error("DNS lookup failed for " + host + ": " + err.code));
       if (!addresses || !addresses.length) return reject(new Error("no DNS records for " + host));
       const bad = addresses.find((a) => isBlockedIp(a.address));
       if (bad) return reject(new Error("blocked address for " + host + " (" + bad.address + ")"));
-      // Many mobile networks advertise IPv6 that does not actually work, so prefer IPv4.
-      const preferred = addresses.find((a) => a.family === 4) || addresses[0];
-      resolve(preferred.address); // pinned for this hop
+      const unique = [];
+      for (const a of addresses) if (!unique.some((x) => x.address === a.address)) unique.push(a);
+      // Many mobile networks advertise IPv6 that does not actually work: try IPv4 first,
+      // then the v6 path when IPv4 is refused (Google's "unusual traffic" block, for one).
+      unique.sort((a, b) => a.family - b.family);
+      resolve(unique); // every entry is vetted and pinned for this hop
     });
   });
 }
@@ -144,15 +163,20 @@ function decompress(buffer, encoding) {
   return buffer;
 }
 
-function requestOnce(url, { method = "GET", headers, uaIndex = 0, timeoutMs = TIMEOUT_MS } = {}) {
+function requestOnce(url, { method = "GET", headers, uaIndex = 0, timeoutMs = TIMEOUT_MS, body, ip } = {}) {
   return new Promise(async (resolve, reject) => {
     let u;
     try { u = validateUrl(url); } catch (e) { return reject(e); }
-    let ip;
-    try { ip = await resolveSafe(u.hostname.replace(/^\[|\]$/g, "")); } catch (e) { return reject(e); }
+    let pinned = ip;
+    if (!pinned) {
+      try { pinned = (await resolveSafeAll(u.hostname.replace(/^\[|\]$/g, "")))[0].address; } catch (e) { return reject(e); }
+    }
     const isHttps = u.protocol === "https:";
     const mod = isHttps ? https : http;
     const hdrs = { host: u.host, ...browserHeaders(url, uaIndex), ...(headers || {}) };
+    if (body != null && hdrs["content-length"] == null && hdrs["Content-Length"] == null) {
+      hdrs["content-length"] = Buffer.byteLength(body);
+    }
     const req = mod.request({
       protocol: u.protocol,
       hostname: u.hostname.replace(/^\[|\]$/g, ""),
@@ -163,10 +187,10 @@ function requestOnce(url, { method = "GET", headers, uaIndex = 0, timeoutMs = TI
       servername: isHttps ? u.hostname.replace(/^\[|\]$/g, "") : undefined,
       // Pin the connection to the IP validated above: a second DNS answer cannot redirect it.
       lookup: (_host, options, cb) => {
-        const family = net.isIP(ip);
+        const family = net.isIP(pinned);
         // net.connect may ask for all addresses; answer with the single vetted one.
-        if (options && options.all) return cb(null, [{ address: ip, family }]);
-        cb(null, ip, family);
+        if (options && options.all) return cb(null, [{ address: pinned, family }]);
+        cb(null, pinned, family);
       },
       timeout: timeoutMs,
     }, (res) => {
@@ -190,23 +214,63 @@ function requestOnce(url, { method = "GET", headers, uaIndex = 0, timeoutMs = TI
     });
     req.on("timeout", () => req.destroy(new Error("request timed out after " + timeoutMs + "ms")));
     req.on("error", reject);
+    if (body != null) req.write(body);
     req.end();
   });
 }
 
+// Status codes that usually mean "this IP is not welcome, try the other address family".
+const BLOCKED_STATUS = new Set([403, 429, 451, 503]);
+
 export async function fetchPage(rawUrl, opts = {}) {
   let url = String(rawUrl);
+  let requestOpts = { ...opts };
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
-    let res = await requestOnce(url, opts);
-    if (res.status >= 300 && res.status < 400 && res.headers.location) {
+    const u = validateUrl(url);
+    const host = u.hostname.replace(/^\[|\]$/g, "");
+    const method = String(requestOpts.method || "GET").toUpperCase();
+    const addresses = requestOpts.ip ? [{ address: requestOpts.ip }] : await resolveSafeAll(host);
+    let res = null;
+    let lastErr = null;
+    // Two address families at most: IPv4 first, then IPv6. This is what gets past
+    // networks where one family is blocked outright (e.g. Google returns 429 on IPv4
+    // and a normal page on IPv6, or the reverse).
+    const tries = Math.min(addresses.length, 2);
+    for (let i = 0; i < tries; i++) {
+      try {
+        res = await requestOnce(url, { ...requestOpts, method, ip: addresses[i].address });
+        if (BLOCKED_STATUS.has(res.status) && i < tries - 1) continue;
+        break;
+      } catch (e) {
+        lastErr = e;
+        if (i === tries - 1) throw e;
+      }
+    }
+    if (!res) throw lastErr || new Error("request failed");
+    if ([301, 302, 303, 307, 308].includes(res.status) && res.headers.location) {
       const next = new URL(res.headers.location, url).href;
       validateUrl(next); // fail fast on a redirect into a blocked address
+      // 303 always becomes a GET; 301/302 do too for a POST in practice. 307/308 keep both.
+      if (res.status === 303 || (method === "POST" && res.status !== 307 && res.status !== 308)) {
+        requestOpts = { ...requestOpts, method: "GET", body: undefined };
+      }
       url = next;
       continue;
     }
+    // <meta http-equiv="refresh" content="0; url=..."> is a redirect that is easy to miss.
+    if (hop < MAX_REDIRECTS && method === "GET" && /html/i.test(String(res.headers["content-type"] || "")) && res.body.length < 200000) {
+      const head = decodeBody(res.body, res.headers["content-type"]).slice(0, 5000);
+      const meta = /<meta[^>]+http-equiv=["']refresh["'][^>]*content=["'][^"']*url=([^"']+)["']/i.exec(head) ||
+        /<meta[^>]+content=["'][^"']*url=([^"']+)["'][^>]*http-equiv=["']refresh["']/i.exec(head);
+      if (meta) {
+        const next = new URL(decodeEntities(meta[1].trim().replace(/^['"]|['"]$/g, "")), url).href;
+        if (next !== url) { validateUrl(next); url = next; continue; }
+      }
+    }
     // A WAF/challenge page: retry once with another UA and the cookies we just got.
-    if ([403, 429, 503].includes(res.status) && (opts.uaIndex || 0) === 0) {
-      res = await requestOnce(url, { ...opts, uaIndex: 1 });
+    // Search passes skipUaRetry because a blocked engine is reported instead of retried.
+    if (!requestOpts.skipUaRetry && [403, 429, 503].includes(res.status) && (requestOpts.uaIndex || 0) === 0) {
+      res = await requestOnce(url, { ...requestOpts, method, uaIndex: 1 });
     }
     return res;
   }
@@ -224,7 +288,14 @@ export function decodeBody(body, contentType) {
   try { return new TextDecoder(charset).decode(body); } catch (e) { return body.toString("utf8"); }
 }
 
-const ENTITIES = { nbsp: " ", amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", "#39": "'", hellip: "…", mdash: "-", ndash: "-", rsquo: "'", lsquo: "'", ldquo: '"', rdquo: '"' };
+const ENTITIES = {
+  nbsp: " ", amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", "#39": "'",
+  hellip: "…", mdash: "-", ndash: "-", rsquo: "'", lsquo: "'", ldquo: '"', rdquo: '"',
+  copy: "©", reg: "®", trade: "™", middot: "·", bull: "•", deg: "°",
+  times: "×", divide: "÷", euro: "€", pound: "£", yen: "¥", cent: "¢",
+  laquo: "«", raquo: "»", sect: "§", para: "¶", plusmn: "±", micro: "µ",
+  frac12: "½", frac14: "¼", frac34: "¾", sup2: "²", sup3: "³",
+};
 export function decodeEntities(s) {
   return String(s)
     .replace(/&#x([0-9a-f]+);/gi, (_, h) => { try { return String.fromCodePoint(parseInt(h, 16)); } catch (e) { return ""; } })
@@ -232,42 +303,120 @@ export function decodeEntities(s) {
     .replace(/&([a-z]+|#\d+);/gi, (m, name) => (ENTITIES[name.toLowerCase()] !== undefined ? ENTITIES[name.toLowerCase()] : m));
 }
 
-export function htmlToText(html) {
+// Visible text of an HTML page, shaped for a model: headings, lists, tables and code are
+// preserved, navigation/boilerplate is dropped, and links stay readable as "label (url)".
+// `pageUrl` resolves relative hrefs; when it is missing, relative hrefs are kept as labels.
+export function htmlToText(html, pageUrl = "") {
   const src = String(html || "");
+  const stripTags = (x) => String(x)
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ");
+  const inlineText = (x) => stripTags(x).replace(/\s+/g, " ").trim();
+
   const title = (() => {
     const m = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(src);
-    return m ? decodeEntities(m[1].replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim() : "";
+    if (m && inlineText(m[1])) return decodeEntities(inlineText(m[1]));
+    const h = /<h1[^>]*>([\s\S]*?)<\/h1>/i.exec(src);
+    return h ? decodeEntities(inlineText(h[1])) : "";
   })();
-  const metaDesc = (() => {
-    const m = /<meta[^>]+name=["']description["'][^>]+content=["']([^"']*)/i.exec(src) || /<meta[^>]+content=["']([^"']*)["'][^>]+name=["']description/i.exec(src);
+  const description = (() => {
+    const m = /<meta[^>]+name=["']description["'][^>]+content=["']([^"']*)/i.exec(src) ||
+      /<meta[^>]+content=["']([^"']*)["'][^>]+name=["']description/i.exec(src) ||
+      /<meta[^>]+property=["']og:description["'][^>]+content=["']([^"']*)/i.exec(src);
     return m ? decodeEntities(m[1]).trim() : "";
   })();
-  // Prefer the main content region when the page marks one up.
+  const baseHref = (() => {
+    const m = /<base[^>]+href=["']([^"']+)["']/i.exec(src);
+    if (m) { try { return new URL(decodeEntities(m[1]), pageUrl || undefined).href; } catch (e) { } }
+    return pageUrl;
+  })();
+
   let body = src
+    .replace(/<head[\s\S]*?<\/head>/gi, " ")
     .replace(/<script[\s\S]*?<\/script>/gi, " ")
     .replace(/<style[\s\S]*?<\/style>/gi, " ")
     .replace(/<noscript[\s\S]*?<\/noscript>/gi, " ")
     .replace(/<svg[\s\S]*?<\/svg>/gi, " ")
+    .replace(/<iframe[\s\S]*?<\/iframe>/gi, " ")
+    .replace(/<template[\s\S]*?<\/template>/gi, " ")
     .replace(/<!--[\s\S]*?-->/g, " ");
+
+  // Prefer the main content region when the page marks one up.
   const main = /<(main|article)[^>]*>([\s\S]*?)<\/\1>/i.exec(body);
   if (main && main[2].replace(/<[^>]+>/g, "").trim().length > 600) body = main[2];
-  const text = body
-    .replace(/<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi, (m, href, label) => {
-      const t = decodeEntities(label.replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim();
-      if (!t) return " ";
-      if (/^(javascript:|#|mailto:)/i.test(href)) return t;
-      return t + " (" + href + ")";
-    })
-    .replace(/<h([1-6])[^>]*>/gi, "\n\n" + "#".repeat(1) + " ")
-    .replace(/<\/(h[1-6])>/gi, "\n")
+
+  // Boilerplate that is never page content.
+  body = body
+    .replace(/<(nav|aside|footer|form|button|select|option)[^>]*>[\s\S]*?<\/\1>/gi, " ")
+    .replace(/<dialog[^>]*>[\s\S]*?<\/dialog>/gi, " ");
+
+  // Keep <pre> blocks verbatim (code samples are a large part of what agents fetch).
+  const preBlocks = [];
+  body = body.replace(/<pre[^>]*>([\s\S]*?)<\/pre>/gi, (_m, code) => {
+    const text = decodeEntities(code.replace(/<[^>]+>/g, ""));
+    preBlocks.push(text.replace(/\s+$/, ""));
+    return "\n\n\u0000PRE" + (preBlocks.length - 1) + "\u0000\n\n";
+  });
+
+  // Links: label plus the absolute target, so the model can cite or fetch it later.
+  body = body.replace(/<a\b([^>]*)>([\s\S]*?)<\/a>/gi, (_m, attrs, label) => {
+    const text = inlineText(label);
+    if (!text) return " ";
+    const hrefMatch = /href\s*=\s*["']([^"']*)["']/i.exec(attrs);
+    if (!hrefMatch) return text;
+    const href = decodeEntities(hrefMatch[1]).trim();
+    if (!href || /^(#|javascript:|mailto:|tel:|data:)/i.test(href)) return text;
+    let abs = href;
+    try { if (baseHref) abs = new URL(href, baseHref).href; } catch (e) { }
+    if (!/^https?:\/\//i.test(abs)) return text;
+    return text + " (" + abs + ")";
+  });
+
+  // Tables become pipe rows; headings keep their level; list items become "- ".
+  body = body
+    .replace(/<\/t[dh]>\s*<t[dh][^>]*>/gi, " | ")
+    .replace(/<\/tr>/gi, "\n")
+    .replace(/<h([1-6])[^>]*>([\s\S]*?)<\/h\1>/gi, (_m, level, text) => "\n\n" + "#".repeat(Number(level)) + " " + inlineText(text) + "\n")
     .replace(/<li[^>]*>/gi, "\n- ")
-    .replace(/<\/(p|div|li|tr|section|article|header|footer|table|blockquote|pre)>/gi, "\n")
     .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/[ \t\u00a0]+/g, " ")
-    .replace(/\n\s*\n+/g, "\n\n")
-    .trim();
-  return { title, description: metaDesc, text: decodeEntities(text) };
+    .replace(/<\/?(p|div|section|article|header|blockquote|ul|ol|dl|dt|dd|table|thead|tbody|figure|figcaption)>/gi, "\n")
+    .replace(/<[^>]+>/g, " ");
+
+  // Decode once, at the end, so text like "&amp;lt;" is not decoded twice.
+  let text = decodeEntities(body);
+  // Normalise whitespace, collapse blank runs and drop consecutive duplicate lines
+  // (repeated navigation labels and footers otherwise flood the model with noise).
+  const lines = [];
+  let lastNonEmpty = null;
+  for (const rawLine of text.split("\n")) {
+    const line = rawLine.replace(/[ \t\u00a0]+/g, " ").trim();
+    if (line === "") {
+      if (lines.length && lines[lines.length - 1] !== "") lines.push("");
+      continue;
+    }
+    if (line === lastNonEmpty) continue;
+    lastNonEmpty = line;
+    lines.push(line);
+  }
+  text = lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+
+  // Restore the code blocks after normalisation so their indentation survives.
+  text = text.replace(/\u0000PRE(\d+)\u0000/g, (_m, i) => {
+    const code = preBlocks[Number(i)];
+    return code != null ? "\n```\n" + code + "\n```\n" : "";
+  });
+
+  return { title, description, text };
+}
+
+// JSON APIs are common fetch targets; pretty-print them instead of mangling them as text.
+export function jsonToText(raw) {
+  try {
+    return JSON.stringify(JSON.parse(String(raw)), null, 2);
+  } catch (e) {
+    return String(raw);
+  }
 }
 
 // ---------------------------------------------------------------- prompt-injection guard
@@ -328,12 +477,18 @@ function cacheSet(key, value) {
 // ---------------------------------------------------------------- tools
 // Cloudflare/Anubis/DataDome style interstitials are not page content; say so instead of
 // handing the model a "Making sure you're not a bot" page as if it were the site.
-const CHALLENGE_RE = /(just a moment|checking your browser|making sure you're not a bot|anubis|enable javascript and cookies|cf-challenge|cf_chl_|captcha-delivery|datadome|_incapsula_|access denied|attention required!)/i;
+// Strong markers are anti-bot walls on their own, even for large pages.
+const CHALLENGE_RE = /(just a moment|checking your browser|making sure you're not a bot|verify you are human|anubis|cf-challenge|cf_chl_|captcha-delivery|datadome|_incapsula_|access denied|attention required!|unusual traffic from your computer network|our systems have detected unusual traffic|in order to continue, please enable javascript|please click .{0,80}if you are not redirected|enablejs|javascript is required|please turn javascript on|update your browser.{0,80}isn't supported)/i;
+// Weaker hints only count on small pages, so a real article that quotes "captcha" is not
+// mistaken for a wall.
+const WEAK_CHALLENGE_RE = /(captcha|enable javascript|consent\.google)/i;
 export function isChallengePage(status, html) {
   if (status === 403 || status === 429 || status === 503) return true;
   if (status !== 200) return false;
-  const head = String(html).slice(0, 6000);
-  return CHALLENGE_RE.test(head) && String(html).length < 60000;
+  const body = String(html);
+  const head = body.slice(0, 6000);
+  if (CHALLENGE_RE.test(head)) return true;
+  return body.length < 60000 && WEAK_CHALLENGE_RE.test(head);
 }
 
 export async function webFetch(url, { maxChars = 15000, offset = 0 } = {}) {
@@ -360,8 +515,12 @@ export async function webFetch(url, { maxChars = 15000, offset = 0 } = {}) {
       }
     }
   }
-  const isHtml = /html|xml/i.test(typeOf(res)) || /<html/i.test(raw.slice(0, 400));
-  const parsed = isHtml ? htmlToText(raw) : { title: "", description: "", text: raw };
+  const type = typeOf(res);
+  const isJson = /json/i.test(type) || (/^\s*[\[{]/.test(raw) && !/<html/i.test(raw.slice(0, 400)));
+  const isHtml = !isJson && (/html/i.test(type) || /<html/i.test(raw.slice(0, 400)));
+  const parsed = isJson
+    ? { title: "", description: "", text: jsonToText(raw) }
+    : isHtml ? htmlToText(raw, res.url) : { title: "", description: "", text: raw };
   const clean = sanitizeUntrusted(parsed.text);
   const cap = Math.max(500, Math.min(60000, Number(maxChars) || 15000));
   const start = Math.max(0, Number(offset) || 0);
@@ -385,86 +544,35 @@ export async function webFetch(url, { maxChars = 15000, offset = 0 } = {}) {
 
 export function htmlToTextLite(html) { return htmlToText(html); }
 
-export function parseBing(html) {
-  const out = [];
-  const blocks = String(html).split(/<li class="b_algo"/i).slice(1);
-  for (const block of blocks) {
-    const a = /<h2[^>]*>\s*<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/i.exec(block);
-    if (!a) continue;
-    const href = unwrapBingUrl(decodeEntities(a[1]));
-    if (!/^https?:\/\//i.test(href)) continue;
-    const snippet = /<p[^>]*>([\s\S]*?)<\/p>/i.exec(block);
-    out.push({
-      title: htmlToText(a[2]).text.replace(/\s+/g, " ").trim(),
-      url: href,
-      snippet: snippet ? htmlToText(snippet[1]).text.replace(/\s+/g, " ").trim().slice(0, 300) : "",
-    });
-  }
-  return out;
-}
+// ---------------------------------------------------------------- search
+// The engines, parsers, relevance gate and rank merge live in cc-search.mjs; this file
+// supplies the HTTP client and re-exports the parsers for tests.
+export {
+  parseBing,
+  parseBrave,
+  parseDuckDuckGo,
+  parseDuckDuckGoLite,
+  parseGoogle,
+  parseStartpage,
+  unwrapBingUrl,
+  unwrapDuckDuckGoUrl,
+  unwrapGoogleUrl,
+  unwrapStartpageUrl,
+};
 
-export function unwrapBingUrl(href) {
-  const m = /[?&]u=a1([A-Za-z0-9_-]+)/.exec(href);
-  if (m) {
-    try {
-      const decoded = Buffer.from(m[1].replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8");
-      if (/^https?:\/\//i.test(decoded)) return decoded;
-    } catch (e) { }
-  }
-  return href;
-}
-
-export function parseDuckDuckGo(html) {
-  const out = [];
-  const linkRe = /<a[^>]+class="[^"]*result__a[^"]*"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
-  const snippets = [...String(html).matchAll(/<a[^>]+class="[^"]*result__snippet[^"]*"[^>]*>([\s\S]*?)<\/a>/gi)].map((m) => htmlToText(m[1]).text.replace(/\s+/g, " ").trim());
-  let m, i = 0;
-  while ((m = linkRe.exec(html))) {
-    let href = decodeEntities(m[1]);
-    const target = /[?&]uddg=([^&]+)/.exec(href);
-    if (target) href = decodeURIComponent(target[1]);
-    if (href.startsWith("//")) href = "https:" + href;
-    out.push({ title: htmlToText(m[2]).text.replace(/\s+/g, " ").trim(), url: href, snippet: snippets[i] || "" });
-    i++;
-  }
-  return out.filter((r) => /^https?:\/\//.test(r.url) && !/duckduckgo\.com/.test(r.url));
-}
-
-async function bingSearch(query) {
-  const res = await fetchPage("https://www.bing.com/search?q=" + encodeURIComponent(query) + "&setlang=en&cc=US");
-  return parseBing(decodeBody(res.body, res.headers["content-type"]));
-}
-
-async function duckSearch(query) {
-  const res = await fetchPage("https://html.duckduckgo.com/html/?q=" + encodeURIComponent(query), {
-    headers: { referer: "https://html.duckduckgo.com/", origin: "https://html.duckduckgo.com" },
-  });
-  let rows = parseDuckDuckGo(decodeBody(res.body, res.headers["content-type"]));
-  if (!rows.length) {
-    const lite = await fetchPage("https://lite.duckduckgo.com/lite/?q=" + encodeURIComponent(query)).catch(() => null);
-    if (lite) rows = parseDuckDuckGo(decodeBody(lite.body, lite.headers["content-type"]));
-  }
-  return rows;
-}
-
-export async function webSearch(query, { maxResults = 8 } = {}) {
+export async function webSearch(query, { maxResults = 8, engines } = {}) {
   const q = String(query || "").trim();
   if (!q) throw new Error("query is required");
-  const key = "s:" + q + ":" + maxResults;
+  const engineList = Array.isArray(engines) ? engines : String(engines || "").split(/[,\s]+/).filter(Boolean);
+  const searxUrl = process.env.CC_TERMUX_SEARX_URL || "";
+  const googleApi = process.env.CC_TERMUX_GOOGLE_KEY && process.env.CC_TERMUX_GOOGLE_CX
+    ? { key: process.env.CC_TERMUX_GOOGLE_KEY, cx: process.env.CC_TERMUX_GOOGLE_CX }
+    : null;
+  const key = "s:" + q + ":" + maxResults + ":" + (engineList.join(",") || "auto") + (searxUrl ? ":sx" : "") + (googleApi ? ":gapi" : "");
   const cached = cacheGet(key);
   if (cached) return cached;
-  // DuckDuckGo first: from many networks Bing answers with ad-only/irrelevant blocks.
-  let rows = [];
-  try { rows = await duckSearch(q); } catch (e) { }
-  if (!rows.length) { try { rows = await bingSearch(q); } catch (e) { } }
-  // Keep results that mention the query when there are enough of them; never hide all.
-  const tokens = q.toLowerCase().split(/\s+/).filter((t) => t.length > 2);
-  if (tokens.length) {
-    const relevant = rows.filter((r) => tokens.some((t) => (r.title + " " + r.url + " " + r.snippet).toLowerCase().includes(t)));
-    if (relevant.length >= 2) rows = relevant;
-  }
-  const limit = Math.max(1, Math.min(20, maxResults));
-  const result = rows.slice(0, limit).map((r) => ({ ...r, title: sanitizeUntrusted(r.title).slice(0, 200), snippet: sanitizeUntrusted(r.snippet).slice(0, 400) }));
+  const outcome = await runSearchWeb(q, { maxResults, engines: engineList, fetchPage, decodeBody, searxUrl, googleApi });
+  const result = { ...outcome, summary: formatSearchReport(outcome.report) };
   cacheSet(key, result);
   return result;
 }
@@ -479,8 +587,8 @@ const TOOLS = [
   {
     name: "search",
     title: "Web Search",
-    description: "Search the web (Bing, DuckDuckGo fallback) and return titles, URLs and snippets. Use this instead of WebSearch.",
-    inputSchema: { type: "object", properties: { query: { type: "string", description: "Search query" }, max_results: { type: "number", description: "How many results (default 8)" } }, required: ["query"] },
+    description: "Search the web across Google, Brave, DuckDuckGo and Bing, merge and rank the results, and report which engines answered. Use this instead of WebSearch.",
+    inputSchema: { type: "object", properties: { query: { type: "string", description: "Search query" }, max_results: { type: "number", description: "How many results (default 8)" }, engines: { type: "string", description: "Optional comma-separated engines: google, brave, duckduckgo, bing, startpage" } }, required: ["query"] },
     annotations: { title: "Web Search", readOnlyHint: true, openWorldHint: true },
   },
   {
@@ -494,9 +602,14 @@ const TOOLS = [
 
 export async function callTool(name, args = {}) {
   if (name === "search" || name === "web_search") {
-    const rows = await webSearch(String(args.query || ""), { maxResults: Number(args.max_results) || 8 });
-    if (!rows.length) return { text: "No results found for: " + args.query };
-    return { text: rows.map((r, i) => (i + 1) + ". " + r.title + "\n   " + r.url + (r.snippet ? "\n   " + r.snippet : "")).join("\n\n") };
+    const out = await webSearch(String(args.query || ""), { maxResults: Number(args.max_results) || 8, engines: args.engines });
+    const status = out.summary ? "\n\nEngine status: " + out.summary : "";
+    if (!out.results.length) return { text: "No results found for: " + out.query + status };
+    const lines = out.results.map((r, i) => {
+      const via = (r.engines && r.engines.length ? r.engines : [r.engine]).filter(Boolean).join("+");
+      return (i + 1) + ". " + r.title + (via ? "  [" + via + "]" : "") + "\n   " + r.url + (r.snippet ? "\n   " + r.snippet : "");
+    }).join("\n\n");
+    return { text: lines + status };
   }
   if (name === "fetch" || name === "web_fetch") {
     const r = await webFetch(String(args.url || ""), { maxChars: Number(args.max_chars) || 15000, offset: Number(args.offset) || 0 });

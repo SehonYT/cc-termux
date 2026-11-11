@@ -20,6 +20,8 @@ Pure or in-process: no network, no installed Claude Code, fast enough to run on 
 
 | File | Covers |
 |---|---|
+| `search.test.mjs` | engine parsers against saved pages (DuckDuckGo HTML + Lite, Bing, Brave, Google, Startpage), redirect unwrapping, canonical URLs, relevance gate and engine quarantine, reciprocal-rank merge, SearXNG JSON and Google Custom Search backends, per-engine status |
+| `fetch.test.mjs` | HTML extraction (headings, tables, code blocks, boilerplate removal, entity decoding, dedupe), JSON pretty-printing, challenge detection, meta-refresh following, walled pages reported as blocked |
 | `translate.test.mjs` | every protocol translator: `toOpenAI` / `fromOpenAI`, `toResponses` / `fromResponses`, `sanitizeBody`, `stripCache`, `flatten`, `mapStop`, `requestShapeError`, `estimate`, and both streaming factories (chunk splitting, parallel tool calls, upstream errors) |
 | `antigravity.test.mjs` | Antigravity request translation, identity scrubbing, SSE proxying, live model/quota parsing against a local fake Google endpoint |
 | `presets.test.mjs` | preset schema, endpoints, ordering, static model lists |
@@ -53,6 +55,12 @@ Spawn a real gateway, fake upstream servers or the installer in a temp directory
 | `perf.test.mjs` | opt-in performance mode, defaults, env flags |
 | `assets.test.mjs` | the installer ships every runtime file and every relative import resolves |
 | `docs.test.mjs` | README/docs integrity: links resolve, sections and badge set exist, every suite is documented here |
+
+Saved engine pages live in `tests/fixtures/search/` (`duckduckgo.html`, `duckduckgo-lite.html`,
+`bing.html`, `brave.html`, `google.html`, `startpage.html`, plus `google-js-wall.html` and
+`brave-wall.html` for the blocked-page paths). The Brave/Google result fixtures are hand-built
+from the documented DOM shapes because live pages return an anti-bot wall from most networks;
+the DuckDuckGo/Bing ones are trimmed real responses.
 
 ## Fixtures
 
