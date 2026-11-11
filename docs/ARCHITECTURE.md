@@ -95,6 +95,24 @@ hang the agent. Every observation is recorded in `~/.cache/cc-termux/quota.json`
 `kind` (`burst` or `daily`) and `classes`; `cc-termux doctor` only warns about a burst for
 ten minutes, while a daily limit stays visible for a day.
 
+## OpenRouter model tiers
+
+OpenRouter publishes one catalog of ~470 models where free and paid entries are mixed.
+Setup asks which tier to import:
+
+| Choice | What is imported |
+|---|---|
+| free only (default) | models whose prompt **and** completion prices are `0` |
+| paid only | everything that costs anything |
+| everything | both, each labelled in `/model` |
+
+Free detection reads `pricing` rather than trusting the `:free` id suffix, because the
+router aliases (`openrouter/free`) carry no suffix and a suffix alone would mislabel a
+priced model. A free model that does not advertise `tools` in `supported_parameters` is
+skipped: Claude Code cannot do anything with a model that cannot call tools. The choice is
+stored on the provider as `tier`, so `cc-termux sync` keeps refreshing the same list instead
+of quietly pulling 450+ paid models into a free-only setup.
+
 ## Google AI Studio model list
 
 `GET /v1beta/models` returns every model the key can see, and only some of them can answer

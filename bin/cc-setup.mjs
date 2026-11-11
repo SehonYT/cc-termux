@@ -115,16 +115,48 @@ async function fetchTokensModels(key) {
   return models;
 }
 
-async function fetchOpenRouterModels(key) {
+// OpenRouter marks a free model twice: the id ends in ":free" and both prices are "0".
+// Checking the prices as well catches the router aliases (openrouter/free) and rejects the
+// rare model that is priced at zero but still reserved for a paid plan.
+function openRouterTier(m) {
+  const p = m.pricing || {};
+  const inUsd = p.prompt != null ? parseFloat(p.prompt) * 1e6 : null;
+  const outUsd = p.completion != null ? parseFloat(p.completion) * 1e6 : null;
+  const priced = (inUsd != null && inUsd > 0) || (outUsd != null && outUsd > 0);
+  if (priced) return "paid";
+  // Both prices are zero, or the model exposes none at all: fall back to the id suffix,
+  // which is what OpenRouter itself uses on the free variants.
+  if (inUsd === 0 && outUsd === 0) return "free";
+  return String(m.id || "").endsWith(":free") ? "free" : "paid";
+}
+
+// A paid-only key cannot call free models older than the cut-off: OpenRouter answers
+// "is not available for free" / 402. The wizard offers them but labels the tier.
+async function fetchOpenRouterModels(key, { tier = "free" } = {}) {
   const r = await fetchT("https://openrouter.ai/api/v1/models", { headers: key ? { authorization: "Bearer " + key } : {} });
   if (!r.ok) throw new Error("OpenRouter /models HTTP " + r.status);
   const j = await r.json();
-  const arr = (j.data || []).map(m => ({ id: m.id, name: m.name || m.id, contextTokens: m.context_length || null,
-    inUsd: m.pricing && m.pricing.prompt != null ? +(parseFloat(m.pricing.prompt) * 1e6).toFixed(3) : null,
-    outUsd: m.pricing && m.pricing.completion != null ? +(parseFloat(m.pricing.completion) * 1e6).toFixed(3) : null }));
-  const ids = arr.map(m => m.id);
-  try { fs.mkdirSync(CACHE_DIR, { recursive: true }); fs.writeFileSync(CATALOG, JSON.stringify({ fetchedAt: new Date().toISOString(), models: arr }, null, 1)); } catch (e) { }
-  return arr;
+  const all = (j.data || []).map(m => {
+    const p = m.pricing || {};
+    return {
+      id: m.id, name: m.name || m.id, contextTokens: m.context_length || null,
+      inUsd: p.prompt != null ? +(parseFloat(p.prompt) * 1e6).toFixed(3) : null,
+      outUsd: p.completion != null ? +(parseFloat(p.completion) * 1e6).toFixed(3) : null,
+      tier: openRouterTier(m),
+      tools: (m.supported_parameters || []).includes("tools"),
+    };
+  });
+  const freeCount = all.filter(m => m.tier === "free").length;
+  let arr = all;
+  if (tier === "free") arr = all.filter(m => m.tier === "free");
+  else if (tier === "paid") arr = all.filter(m => m.tier === "paid");
+  // Free models must be able to call tools, otherwise Claude Code cannot do anything with them.
+  const usable = arr.filter(m => m.tier !== "free" || m.tools);
+  const skipped = arr.length - usable.length;
+  try { fs.mkdirSync(CACHE_DIR, { recursive: true }); fs.writeFileSync(CATALOG, JSON.stringify({ fetchedAt: new Date().toISOString(), tier, freeCount, models: usable }, null, 1)); } catch (e) { }
+  if (tier === "paid") console.log(dim("  " + freeCount + " free model(s) available on this provider (run: cc-termux setup, choose the free option)"));
+  if (skipped) console.log(dim("  skipped " + skipped + " free model(s) that cannot call tools"));
+  return usable;
 }
 
 // The /v1beta/models endpoint lists every model the key can see, including image, audio,
@@ -351,13 +383,18 @@ function providerName(c, base) {
 function addProvider(c, name, opts) {
   const family = opts.family;
   const modelsById = {};
-  for (const m of opts.models) modelsById[m.id] = { name: m.name, contextTokens: m.contextTokens || null, inUsd: m.inUsd ?? null, outUsd: m.outUsd ?? null };
+  for (const m of opts.models) {
+    modelsById[m.id] = { name: m.name, contextTokens: m.contextTokens || null, inUsd: m.inUsd ?? null, outUsd: m.outUsd ?? null };
+    if (m.tier) modelsById[m.id].tier = m.tier;
+  }
   const p = {
     type: opts.type, baseUrl: opts.baseUrl, path: opts.path, apiMode: opts.type === 'openai' ? 'auto' : undefined,
     model: opts.main, defaultModel: opts.main, contextWindow: opts.contextWindow || 128000,
     aliases: opts.aliases, modelsById,
   };
   if (opts.noKey) p.noKey = true;
+  // Remember which tier list this provider was built from, so a refresh can keep it.
+  if (opts.tier) p.tier = opts.tier;
   c.providers[name] = p;
   const needsNative = family === "tokens" || opts.models.some(m => m.id.startsWith("claude-") || m.id.startsWith("anthropic/"));
   if (needsNative && opts.type === "openai" && family === "tokens") {
@@ -397,9 +434,25 @@ function summary(c, name) {
 }
 
 
-async function fetchFor(kind, key, base) {
+// "free" keeps only zero-cost models, "paid" keeps only billed ones, "all" keeps both.
+// Non-interactive runs pick it with CC_SETUP_TIER; the wizard asks.
+async function askTier() {
+  if (!process.stdin.isTTY) return process.env.CC_SETUP_TIER || "free";
+  console.log();
+  console.log("  " + bold("OpenRouter model tier"));
+  console.log("  " + dim("1") + " free only    " + dim("zero-cost models, no credits needed"));
+  console.log("  " + dim("2") + " paid only    " + dim("models billed against your credits"));
+  console.log("  " + dim("3") + " everything   " + dim("both lists, labelled in the picker"));
+  const a = (await ask("Choose [1] > ")).trim().toLowerCase();
+  return a === "2" || a === "paid" ? "paid" : a === "3" || a === "all" ? "all" : "free";
+}
+
+async function fetchFor(kind, key, base, tier) {
   if (kind === "tokens") return { models: await fetchTokensModels(key), type: "openai", baseUrl: "https://tokens.bd", path: "/v1/chat/completions", family: "tokens" };
-  if (kind === "openrouter") return { models: await fetchOpenRouterModels(key), type: "anthropic", baseUrl: "https://openrouter.ai/api", path: "/v1/messages", family: "openrouter" };
+  if (kind === "openrouter") {
+    const t = tier || process.env.CC_SETUP_TIER || (process.stdin.isTTY ? "free" : "free");
+    return { models: await fetchOpenRouterModels(key, { tier: t }), type: "anthropic", baseUrl: "https://openrouter.ai/api", path: "/v1/messages", family: "openrouter", tier: t };
+  }
   if (kind === "gemini") return { models: await fetchGeminiModels(key), type: "openai", baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai", path: "/chat/completions", family: "gemini" };
   const type = kind === "custom-anthropic" ? "anthropic" : "openai";
   const norm = normalizeBase(base);
@@ -423,6 +476,9 @@ function errText(e) {
 
 async function fetchAnyModels(p, key) {
   if (p.kind === "gemini" || /generativelanguage/.test(p.baseUrl || "")) return await fetchGeminiModels(key);
+  // Refresh an OpenRouter provider with the tier it was created with, so a free-only
+  // setup never silently gains 460+ paid models.
+  if (p.tier && /openrouter\.ai/.test(p.baseUrl || "")) return await fetchOpenRouterModels(key, { tier: p.tier });
   const base = String(p.baseUrl).replace(/\/$/, "");
   const candidates = [...new Set([
     base.replace(/\/(v1|v1beta|v1beta\/openai|openai)$/, "") + "/v1/models",
@@ -656,7 +712,7 @@ async function envMode() {
   const kind = process.env.CC_SETUP_PROVIDER || "openrouter";
   const key = process.env.CC_SETUP_KEY || process.env.TOKENS_BD_KEY || "";
   const base = process.env.CC_SETUP_BASE_URL || "";
-  const f = await fetchFor(kind, key, base);
+  const f = await fetchFor(kind, key, base, process.env.CC_SETUP_TIER);
   if (process.env.CC_SETUP_TYPE) f.type = process.env.CC_SETUP_TYPE;
   if (process.env.CC_SETUP_PATH) f.path = process.env.CC_SETUP_PATH;
   const want = process.env.CC_SETUP_MODEL || "";
@@ -675,7 +731,7 @@ async function envMode() {
   if (same) name = same[0];
   delete c.providers["native"];
   addProvider(c, name, { family: f.family, type: f.type, baseUrl: f.baseUrl, path: f.path, key, noKey: !key, models: f.models, main: main.id, contextWindow: ctx,
-    aliases: { opus: main.id, sonnet: main.id, haiku: bg.id, subagent: bg.id } });
+    aliases: { opus: main.id, sonnet: main.id, haiku: bg.id, subagent: bg.id }, tier: f.tier });
   summary(c, name);
   await ensureStatusLine();
 }
@@ -712,8 +768,9 @@ async function addFlow(c) {
   const key = await askHidden("API key (hidden, empty = no key / local gateway) > ");
   if (!key) console.log(dim("  no key - calling the endpoint without Authorization"));
   console.log(dim("  fetching models..."));
+  const tier = kind === "openrouter" ? await askTier() : undefined;
   let f;
-  try { f = await fetchFor(kind, key, base); }
+  try { f = await fetchFor(kind, key, base, tier); }
   catch (e) { console.log(cyan("  " + errText(e))); return null; }
   if (!f.models.length) { console.log(cyan("  no models returned - key may be invalid or have no access")); return null; }
   if (kind.startsWith("custom")) {
@@ -738,7 +795,8 @@ async function addFlow(c) {
   }
   const same = visible(c).find(([, p]) => p.baseUrl === f.baseUrl && p.type === f.type);
   const name = same ? same[0] : providerName(c, f.family);
-  addProvider(c, name, { family: f.family, type: f.type, baseUrl: f.baseUrl, path: f.path, key, noKey: !key, models: f.models, main: main.id, contextWindow: ctx, aliases: aliasModels });
+  addProvider(c, name, { family: f.family, type: f.type, baseUrl: f.baseUrl, path: f.path, key, noKey: !key, models: f.models, main: main.id, contextWindow: ctx, aliases: aliasModels, tier: f.tier });
+  if (f.tier === "free") console.log(dim("  free tier only - no credits are spent; switch to paid with: cc-termux setup"));
   summary(c, name);
   if ((await ask("\nSend a small test request now? (y/N) > ")).toLowerCase().startsWith("y")) await runSmokeTest();
   return name;

@@ -8,8 +8,7 @@
       "baseUrl": "https://openrouter.ai/api/v1",
       "path": "/chat/completions",
       "keyUrl": "https://openrouter.ai/keys",
-      "filterSuffix": ":free",
-      "notes": "Free models end with :free"
+      "notes": "Setup asks for a tier: free only (zero-cost models), paid only, or both. Free models are detected from zero pricing, not just the :free suffix"
     },
     {
       "id": "gemini",
