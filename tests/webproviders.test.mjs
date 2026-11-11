@@ -169,22 +169,43 @@ test("an empty remote result set falls through instead of winning", async () => 
   } finally { globalThis.fetch = realFetch; }
 });
 
-test("Antigravity requests carry Google Search grounding on its own", () => {
+test("Antigravity uses Google Search grounding only when no tools are declared", () => {
   const req = (body, model = "gemini-3.8-flash") => antigravity.anthropicToGemini(body, model, { project_id: "p" }).request;
   const base = { messages: [{ role: "user", content: "hi" }], max_tokens: 100 };
-  const tools = { ...base, tools: [{ name: "bash", description: "run", input_schema: { type: "object", properties: {} } }] };
+  const tools = { ...base, tools: [{ name: "Bash", description: "run", input_schema: { type: "object", properties: {} } }] };
 
-  assert.deepEqual(req(base).tools, [{ googleSearch: {} }], "search grounding is on by default");
+  assert.deepEqual(req(base).tools, [{ googleSearch: {} }], "a tool-free call is grounded");
+  assert.equal(req(base).toolConfig, undefined, "grounding does not need a toolConfig");
+
+  // Cloud Code answers 400 when googleSearch and functionDeclarations share one request,
+  // and Claude Code always sends tools, so grounding must not be attached to them.
   const withTools = req(tools).tools;
   assert.equal(withTools.length, 1);
-  assert.ok(withTools[0].googleSearch, "grounding rides along with function declarations");
-  assert.equal(withTools[0].functionDeclarations[0].name, "bash");
+  assert.equal(withTools[0].googleSearch, undefined, "grounding must never be combined with function calling");
+  assert.equal(withTools[0].functionDeclarations.length, 1);
+  assert.deepEqual(req(tools).toolConfig, { functionCallingConfig: { mode: "VALIDATED" } });
 
   process.env.CC_TERMUX_ANTIGRAVITY_SEARCH = "0";
   try {
-    assert.equal(req(base).tools, undefined, "search can be turned off");
-    assert.equal(req(tools).tools[0].googleSearch, undefined);
+    assert.equal(req(base).tools, undefined, "search can be turned off entirely");
+    assert.equal(req(base).toolConfig, undefined);
+    assert.equal(req(tools).tools[0].functionDeclarations.length, 1, "tool calling still works with search off");
   } finally { delete process.env.CC_TERMUX_ANTIGRAVITY_SEARCH; }
+});
+
+test("an Antigravity request never sends both built-in and declared tools", () => {
+  const body = {
+    messages: [{ role: "user", content: "hi" }], max_tokens: 100,
+    tools: [
+      { name: "Bash", description: "run", input_schema: { type: "object", properties: {} } },
+      { name: "Read", description: "read", input_schema: { type: "object", properties: {} } },
+    ],
+  };
+  const r = antigravity.anthropicToGemini(body, "gemini-3.8-flash", { project_id: "p" }).request;
+  const entry = r.tools[0];
+  assert.ok(entry.functionDeclarations, "the declared tools are sent");
+  assert.equal(entry.googleSearch, undefined, "googleSearch alongside them is a 400");
+  assert.ok(!/include_server_side_tool_invocations/i.test(JSON.stringify(r)), "the flag Google names is not needed");
 });
 
 test("the installer and setup both offer the web providers", () => {

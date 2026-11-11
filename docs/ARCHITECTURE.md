@@ -225,6 +225,22 @@ which exposes two tools to the model:
 | `mcp__web__search` | Web Search | results from several engines, merged and ranked, with a per-engine status line |
 | `mcp__web__fetch` | Web Fetch | readable page text: title, description, headings, lists, tables, code and links |
 
+### Antigravity and Google search
+
+An Antigravity account includes Google Search grounding, and Cloud Code accepts it for a
+**tool-free** request: `{"tools":[{"googleSearch":{}}]}` returns real `groundingMetadata`.
+
+It cannot be combined with function calling. Every arrangement of `googleSearch` and
+`functionDeclarations` in one request is rejected with `400 Please enable
+tool_config.include_server_side_tool_invocations`, and that field does not exist at any level
+of this API — `toolConfig`, request, tool entry and envelope were all tried and all fail with
+`Unknown name` or the same 400. **Claude Code always sends tools**, so in practice an
+Antigravity session gets its web results from the same provider chain as everything else,
+not from Google.
+
+`CC_TERMUX_ANTIGRAVITY_SEARCH=0` turns grounding off. Tool-free calls still use it, so the
+capability is kept for anything that calls the gateway without declaring tools.
+
 ### Provider chain
 
 Search tries a chain of providers and stops at the first one that answers. A quota error, a

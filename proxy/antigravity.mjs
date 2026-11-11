@@ -152,8 +152,8 @@ export function scrubIdentity(text) {
   for (const re of COMPETING_AGENT_PATTERNS) out = out.replace(re, "");
   return out.replace(/\n{3,}/g, "\n\n").trim();
 }
-// Antigravity accounts include Google Search grounding, so the provider can answer web
-// questions itself. The caller sets CC_TERMUX_ANTIGRAVITY_SEARCH=0 to turn it off.
+// Cloud Code refuses googleSearch together with functionDeclarations, and the flag it asks
+// for does not exist in this API. Grounding is therefore limited to a tool-free call.
 export function antigravitySearchEnabled() {
   const flag = process.env.CC_TERMUX_ANTIGRAVITY_SEARCH;
   if (flag != null) return flag !== "0" && flag !== "false";
@@ -210,8 +210,6 @@ export function anthropicToGemini(body, model, creds) {
   }
   while (contents.length && contents[contents.length - 1].role === "model") contents.pop();
   if (!contents.length) contents.push({ role: "user", parts: [{ text: "continue" }] });
-  // Google Search grounding rides along with the function declarations, so an Antigravity
-  // session can search the web without any of the external providers.
   const declarations = Array.isArray(body.tools) && body.tools.length
     ? body.tools.filter((t) => t && t.name).map((t) => ({
         name: t.name,
@@ -219,8 +217,11 @@ export function anthropicToGemini(body, model, creds) {
         parameters: cleanSchema(t.input_schema || { type: "object", properties: {} }),
       }))
     : [];
-  const tools = (declarations.length || antigravitySearchEnabled())
-    ? [{ ...(declarations.length ? { functionDeclarations: declarations } : {}), ...(antigravitySearchEnabled() ? { googleSearch: {} } : {}) }]
+  // Cloud Code 400s when googleSearch and functionDeclarations share a request, so
+  // grounding is only used for a tool-free call.
+  const useGrounding = antigravitySearchEnabled() && !declarations.length;
+  const tools = useGrounding ? [{ googleSearch: {} }]
+    : declarations.length ? [{ functionDeclarations: declarations }]
     : undefined;
   // Keep only Antigravity's own system prompt upstream and move the client prompt into the
   // first user turn: an oversized systemInstruction is answered with a misleading 429.
@@ -250,7 +251,8 @@ export function anthropicToGemini(body, model, creds) {
   const request = {
     contents,
     systemInstruction: { role: "system", parts: [{ text: DEFAULT_SYSTEM }] },
-    ...(tools ? { tools, toolConfig: { functionCallingConfig: { mode: "VALIDATED" } } } : {}),
+    ...(tools ? { tools } : {}),
+    ...(declarations.length ? { toolConfig: { functionCallingConfig: { mode: "VALIDATED" } } } : {}),
     generationConfig,
   };
   const project = (creds && creds.project_id) || "";
