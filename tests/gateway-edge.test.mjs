@@ -84,9 +84,19 @@ async function api(port, pathname, { method = "POST", body, headers = {}, signal
 }
 
 async function health(port) {
-  const r = await fetch("http://127.0.0.1:" + port + "/health");
-  assert.equal(r.status, 200);
-  return r.json();
+  // Retry briefly: a rejected oversized upload closes its connection, and on slow CI
+  // runners the pool can need a moment to open a fresh one.
+  let last = null;
+  for (let i = 0; i < 5; i++) {
+    try {
+      const r = await fetch("http://127.0.0.1:" + port + "/health", { signal: AbortSignal.timeout(5000) });
+      last = r;
+      if (r.status === 200) return r.json();
+    } catch (e) { last = null; }
+    await new Promise((res) => setTimeout(res, 300));
+  }
+  assert.equal(last && last.status, 200, "health must answer 200");
+  return last.json();
 }
 
 function assertAnthropicError(r, { status, type, message } = {}) {

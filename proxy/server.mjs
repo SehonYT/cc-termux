@@ -813,7 +813,14 @@ const server = http.createServer(async (req, res) => {
     let total = 0;
     for await (const c of req) {
       total += c.length;
-      if (total > 10 * 1024 * 1024) { res.writeHead(413); return res.end('{}'); }
+      if (total > 10 * 1024 * 1024) {
+        // Reject and CLOSE: leaving the rest of the upload unread poisons the keep-alive
+        // connection, so the next request on it stalls until it times out.
+        const payload = JSON.stringify({ type: 'error', error: { type: 'invalid_request_error', message: 'request body too large (limit 10MB)' } });
+        res.writeHead(413, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(payload), connection: 'close' });
+        res.end(payload, () => { try { req.destroy(); } catch (e) { } });
+        return;
+      }
       chunks.push(c);
     }
     const raw = Buffer.concat(chunks).toString('utf8');
