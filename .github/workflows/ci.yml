@@ -11,8 +11,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, macos-latest, macos-13, windows-latest]
         node: [18, 20, 22]
+        exclude:
+          # macos-13 is Intel; one run per Node is enough and keeps the matrix affordable.
+          - os: macos-13
+            node: 18
+          - os: macos-13
+            node: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -21,6 +27,49 @@ jobs:
       - run: npm run check
       - run: node install.mjs --check
       - run: npm test
+
+  # The check matrix above runs on glibc Linux. Alpine is musl and is where a wrong libc
+  # choice shows up, so it gets real containers rather than a simulated filesystem.
+  alpine:
+    name: check (alpine, node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [18, 20, 22]
+    container:
+      image: node:${{ matrix.node }}-alpine
+    steps:
+      - uses: actions/checkout@v4
+      - name: Confirm this really is musl
+        run: |
+          set -e
+          test -f /etc/alpine-release || { echo 'not Alpine'; exit 1; }
+          ldd --version 2>&1 | grep -qi musl || { echo 'not musl'; exit 1; }
+          echo "alpine $(cat /etc/alpine-release), $(ldd --version 2>&1 | head -1)"
+      - run: node --version
+      # git and bash are not in the node:alpine image and the suite reads the worktree.
+      - run: apk add --no-cache git bash
+      - run: npm run check
+      - run: node install.mjs --check
+      - run: npm test
+      - name: Alpine really is musl, and detection agrees
+        run: |
+          node -e "
+          const fs = require('node:fs');
+          import('./bin/cc-platform.mjs').then((m) => {
+            const real = (p) => fs.existsSync(p);
+            const musl = m.isMusl({ arch: process.arch, hasFile: real });
+            const t = m.detectTarget({ platform: 'linux', arch: process.arch, hasFile: real });
+            console.log('arch:', process.arch, '| isMusl:', musl, '| target:', t.pkg);
+            if (!musl) { console.error('isMusl() failed to see this Alpine host'); process.exit(1); }
+            if (!/-musl$/.test(t.pkg || '')) { console.error('must select a musl build, got ' + t.pkg); process.exit(1); }
+            console.log('ok: this musl host resolves to the musl build');
+          });
+          "
+      # The full suite must also pass on musl, not just the detection check.
+      - name: Full suite on musl
+        run: npm test
 
   # Run install.mjs --code-only on every OS into an isolated HOME, then verify the files,
   # shims and CLI. The Claude Code binary is faked, so nothing is downloaded.

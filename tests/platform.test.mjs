@@ -113,3 +113,110 @@ test("config, cache and install roots resolve per platform", () => {
     for (const [k, v] of Object.entries(prev)) process.env[k] = v;
   }
 });
+
+test("every OS we claim to support has a usable target", () => {
+  // This is the support contract. If a platform is dropped or mis-detected, this fails
+  // before a user on that platform can hit it.
+  const supported = [
+    { platform: "win32", arch: "x64", expect: "win32-x64" },
+    { platform: "win32", arch: "arm64", expect: "win32-arm64" },
+    { platform: "darwin", arch: "x64", expect: "darwin-x64" },      // Intel Mac
+    { platform: "darwin", arch: "arm64", expect: "darwin-arm64" },  // Apple Silicon
+    { platform: "linux", arch: "x64", expect: "linux-x64" },        // Ubuntu, Debian, Fedora
+    { platform: "linux", arch: "arm64", expect: "linux-arm64" },    // ARM servers, Pi
+    { platform: "android", arch: "arm64", expect: "linux-arm64-musl" }, // Termux
+    { platform: "android", arch: "x64", expect: "linux-x64-musl" },
+  ];
+  for (const c of supported) {
+    const t = detectTarget({ platform: c.platform, arch: c.arch, hasFile: () => false });
+    assert.equal(t.pkg, c.expect, c.platform + "/" + c.arch + " must resolve to " + c.expect);
+    assert.ok(t.bin, c.platform + "/" + c.arch + " needs a binary name");
+  }
+});
+
+test("musl distros get a musl build and glibc distros do not", () => {
+  // A musl host given the glibc binary installs fine and then cannot exec.
+  // Each loader path only counts for the architecture it belongs to.
+  const muslMarkers = [
+    ["/etc/alpine-release", "x64"], ["/etc/alpine-release", "arm64"],
+    ["/lib/ld-musl-x86_64.so.1", "x64"], ["/lib/ld-musl-aarch64.so.1", "arm64"],
+    ["/usr/lib/ld-musl-x86_64.so.1", "x64"],
+  ];
+  for (const [marker, arch] of muslMarkers) {
+    const t = detectTarget({ platform: "linux", arch, hasFile: (p) => p === marker });
+    assert.ok(/-musl$/.test(t.pkg), marker + " on " + arch + " must select a musl build, got " + t.pkg);
+  }
+  for (const glibcOnly of [["/etc/os-release"], ["/lib/x86_64-linux-gnu/libc.so.6"], []]) {
+    const t = detectTarget({ platform: "linux", arch: "x64", hasFile: (p) => glibcOnly.includes(p) });
+    assert.ok(!/-musl$/.test(t.pkg), "a glibc distro must not get a musl build");
+  }
+});
+
+test("every platform resolves to a usable, distinct prefix", () => {
+  // path.isAbsolute is platform-bound: a Windows path looks relative to POSIX, so the
+  // assertion checks the shape each platform must produce instead.
+  const winEnv = { LOCALAPPDATA: "C:/Users/x/AppData/Local" };
+  const cases = [
+    ["win32", winEnv, /AppData/],
+    ["darwin", {}, /^\//],
+    ["linux", {}, /^\//],
+    ["android", {}, /^\//],
+  ];
+  const byPlatform = {};
+  for (const [platform, env, shape] of cases) {
+    const root = resolvePrefix({ platform, env, home: "/home/x", exists: () => false });
+    assert.ok(typeof root === "string" && root.length > 1, platform + " prefix must be a real path");
+    assert.match(root, shape, platform + " prefix must have the right shape, got " + root);
+    const bin = prefixBinDir({ platform, env, home: "/home/x", exists: () => false });
+    assert.ok(bin.endsWith("bin"), platform + " bin dir must end in bin");
+    byPlatform[platform] = root;
+  }
+  // POSIX platforms may share /usr/local legitimately; Windows must never.
+  assert.notEqual(byPlatform.win32, byPlatform.linux, "windows must not resolve like linux");
+  assert.notEqual(byPlatform.win32, byPlatform.darwin, "windows must not resolve like macOS");
+  // An explicit PREFIX still wins everywhere, which custom roots and Alpine rely on.
+  for (const platform of ["win32", "darwin", "linux", "android"]) {
+    assert.equal(resolvePrefix({ platform, env: { PREFIX: "/custom" }, home: "/home/x", exists: () => false }), "/custom");
+  }
+  // Windows specifically must never be given a POSIX system path.
+  const win = resolvePrefix({ platform: "win32", env: {}, home: "C:/Users/x", exists: () => false });
+  assert.ok(!win.startsWith("/usr"), "windows must never resolve to /usr/local");
+});
+
+test("an unknown platform degrades to the JS build instead of crashing", () => {
+  // Better a slower working install than an exception on a platform we have not seen.
+  for (const [platform, arch] of [["freebsd", "x64"], ["sunos", "x64"], ["linux", "ia32"], ["darwin", "ia32"], ["win32", "ia32"]]) {
+    const t = detectTarget({ platform, arch });
+    assert.equal(t.js, true, platform + "/" + arch + " must fall back to the JS build");
+    assert.equal(t.pkg, null);
+    assert.ok(t.reason, "the fallback must say why");
+  }
+});
+
+test("the CI matrix covers every operating system we claim", () => {
+  // The workflow is part of the support claim: a platform with no job is a promise nobody
+  // is checking.
+  const repoRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+  const wf = fs.readFileSync(path.join(repoRoot, ".github", "workflows", "ci.yml"), "utf8");
+  const matrix = /os: \[([^\]]+)\]/.exec(wf);
+  assert.ok(matrix, "the check job has an os matrix");
+  const oses = matrix[1].split(",").map((s) => s.trim());
+  for (const needed of ["ubuntu-latest", "macos-latest", "macos-13", "windows-latest"]) {
+    assert.ok(oses.includes(needed), "CI must run on " + needed);
+  }
+  // macOS Intel takes a different branch from Apple Silicon, so both must be present.
+  assert.ok(oses.includes("macos-13"), "Intel macOS must be covered");
+  // Alpine is musl: a real container, not a simulated filesystem.
+  assert.match(wf, /^  alpine:/m, "there is an alpine job");
+  assert.match(wf, /node:\$\{\{ matrix\.node \}\}-alpine/, "alpine runs a real musl image");
+  assert.match(wf, /ldd --version[\s\S]{0,80}musl/, "the alpine job proves it is musl");
+  // Every OS we support must also get an install smoke run.
+  const smokeIdx = wf.indexOf("install smoke (");
+  assert.ok(smokeIdx > 0, "there is an install smoke job");
+  const smokeBlock = wf.slice(smokeIdx, smokeIdx + 600);
+  for (const needed of ["ubuntu-latest", "macos-latest", "windows-latest"]) {
+    assert.ok(smokeBlock.includes(needed), "install smoke must run on " + needed);
+  }
+  // Windows needs its own branch: the paths are not POSIX.
+  assert.match(wf, /if: runner\.os == 'Windows'/, "windows needs a native-path smoke step");
+});
