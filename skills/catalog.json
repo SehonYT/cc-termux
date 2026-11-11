@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "note": "Shipped skill pack. Installed into ~/.claude/skills by install/launcher; each entry keeps its upstream licence and source.",
   "skills": [
     {
@@ -14,6 +14,16 @@
         "base": "https://raw.githubusercontent.com/DietrichGebert/ponytail/main/skills/ponytail",
         "files": [
           "SKILL.md"
+        ],
+        "commit": "96608e078b2d",
+        "syncedAt": "2026-10-29T11:59:31Z",
+        "repo": "DietrichGebert/ponytail",
+        "tree": "https://api.github.com/repos/DietrichGebert/ponytail/contents/skills/ponytail",
+        "extra": [
+          {
+            "file": "LICENSE.txt",
+            "url": "https://raw.githubusercontent.com/DietrichGebert/ponytail/main/LICENSE"
+          }
         ]
       }
     },
@@ -24,7 +34,9 @@
       "source": "https://github.com/vercel-labs/agent-browser",
       "license": "Apache-2.0",
       "default": true,
-      "description": "Drive a real browser from the agent: navigate, click, type, screenshot, extract and QA a page."
+      "description": "Drive a real browser from the agent: navigate, click, type, screenshot, extract and QA a page.",
+      "adapted": true,
+      "adaptationNote": "Upstream ships a discovery stub that loads its guide from the installed CLI and is marked hidden. cc-termux ships a standalone skill that works with no agent-browser installed, detects what browser exists on the device, and routes to mcp__web__fetch otherwise. Syncing would delete that."
     },
     {
       "id": "frontend-design",
@@ -37,8 +49,13 @@
       "upstream": {
         "base": "https://raw.githubusercontent.com/anthropics/skills/main/skills/frontend-design",
         "files": [
+          "LICENSE.txt",
           "SKILL.md"
-        ]
+        ],
+        "commit": "2c5958ecac7c",
+        "syncedAt": "2026-11-06T22:32:28Z",
+        "repo": "anthropics/skills",
+        "tree": "https://api.github.com/repos/anthropics/skills/contents/skills/frontend-design"
       }
     },
     {
@@ -99,7 +116,11 @@
           "validate-coverage-ledger.test.cjs",
           "validate-findings.cjs",
           "validate-findings.test.cjs"
-        ]
+        ],
+        "commit": "c1c8a8c14710",
+        "syncedAt": "2026-09-14T19:28:54Z",
+        "repo": "cloudflare/security-audit-skill",
+        "tree": "https://api.github.com/repos/cloudflare/security-audit-skill/contents/skills/security-audit"
       }
     },
     {

@@ -292,17 +292,105 @@ test("a sync survives an unreachable or failing upstream", async () => {
 test("sync output names what changed", async () => {
   await withTarget(async () => {
     await skills.installSkills();
-    const upstream = new Map();
-    for (const skill of skills.vendoredSources()) {
-      for (const file of skill.upstream.files) upstream.set(skill.upstream.base + "/" + file, "new");
-    }
-    const fakeFetch = async (url) => ({ ok: true, status: 200, text: async () => upstream.get(url) ?? "x" });
+    const fakeFetch = async (url) => {
+      if (url.includes("/commits") || url.includes("/contents/")) return { ok: true, status: 200, json: async () => [] };
+      return { ok: true, status: 200, text: async () => "different from what is installed" };
+    };
     const r = await skills.syncUpstream({ fetchImpl: fakeFetch, only: ["ponytail"] });
     const text = skills.formatSync(r);
     assert.match(text, /ponytail/);
-    assert.match(text, /1 file\(s\) changed upstream/);
+    assert.match(text, /\d+ file\(s\) changed upstream/, "the count is reported");
     assert.match(text, /~ SKILL\.md/);
   });
+});
+
+test("a sync reports how far behind upstream it is", async () => {
+  await withTarget(async () => {
+    await skills.installSkills();
+    // Fake the API: upstream head differs from the pinned commit.
+    const fakeFetch = async (url) => {
+      if (url.includes("/commits")) {
+        return { ok: true, status: 200, json: async () => [{ sha: "aaaaaaaaaaaa", commit: { committer: { date: "2026-11-01T00:00:00Z" } } }] };
+      }
+      // Serve exactly what is installed so nothing reads as changed; the drift case is the
+      // commit, not the content.
+      if (url.includes("raw.githubusercontent.com")) {
+        const local = path.join(skills.skillsTarget(), "ponytail", "SKILL.md");
+        const licence = path.join(skills.skillsTarget(), "ponytail", "LICENSE.txt");
+        const body = url.endsWith("LICENSE") ? fs.readFileSync(licence, "utf8") : fs.readFileSync(local, "utf8");
+        return { ok: true, status: 200, text: async () => body };
+      }
+      if (url.includes("/contents/")) return { ok: true, status: 200, json: async () => [] };
+      return { ok: true, status: 200, text: async () => "unchanged" };
+    };
+    const r = await skills.syncUpstream({ fetchImpl: fakeFetch, only: ["ponytail"] });
+    assert.ok(r[0].behind, "drift is reported");
+    assert.equal(r[0].behind.behind, true);
+    assert.equal(r[0].behind.head, "aaaaaaaaaaaa");
+    assert.match(skills.formatSync(r), /behind upstream/);
+    assert.match(skills.formatSync(r), /pinned 96608e078b2d/);
+
+    // On the pinned commit, nothing is reported.
+    const sameFetch = async (url) => {
+      if (url.includes("/commits")) return { ok: true, status: 200, json: async () => [{ sha: "96608e078b2d", commit: { committer: { date: "2026-10-29T00:00:00Z" } } }] };
+      if (url.includes("/contents/")) return { ok: true, status: 200, json: async () => [] };
+      if (url.includes("raw.githubusercontent.com")) {
+        const local = path.join(skills.skillsTarget(), "ponytail", "SKILL.md");
+        const licence = path.join(skills.skillsTarget(), "ponytail", "LICENSE.txt");
+        const body = url.endsWith("LICENSE") ? fs.readFileSync(licence, "utf8") : fs.readFileSync(local, "utf8");
+        return { ok: true, status: 200, text: async () => body };
+      }
+      return { ok: true, status: 200, text: async () => "x" };
+    };
+    const r2 = await skills.syncUpstream({ fetchImpl: sameFetch, only: ["ponytail"] });
+    assert.equal(r2[0].behind.behind, 0);
+    assert.match(skills.formatSync(r2), /up to date/);
+  });
+});
+
+test("a sync notices upstream files this pack never pinned", async () => {
+  await withTarget(async () => {
+    await skills.installSkills();
+    const fakeFetch = async (url) => {
+      if (url.includes("/contents/")) {
+        // Upstream added a reference doc we do not ship.
+        return { ok: true, status: 200, json: async () => [{ type: "file", name: "SKILL.md" }, { type: "file", name: "NEW-ATTACK-CLASS.md" }] };
+      }
+      if (url.includes("/commits")) return { ok: true, status: 200, json: async () => [] };
+      return { ok: true, status: 200, text: async () => "x" };
+    };
+    const r = await skills.syncUpstream({ fetchImpl: fakeFetch, only: ["security-audit"] });
+    assert.deepEqual(r[0].added, ["NEW-ATTACK-CLASS.md"], "a new upstream file is surfaced");
+    assert.match(skills.formatSync(r), /upstream also has: NEW-ATTACK-CLASS\.md/);
+  });
+});
+
+test("a licence kept at the repo root is tracked too", async () => {
+  const po = catalog.skills.find((s) => s.id === "ponytail");
+  // ponytail keeps its LICENSE at the repo root, not beside the skill.
+  assert.ok(Array.isArray(po.upstream.extra) && po.upstream.extra.length, "extra sources are pinned");
+  assert.match(po.upstream.extra[0].url, /\/LICENSE$/);
+  assert.equal(po.upstream.extra[0].file, "LICENSE.txt");
+  // We ship the licence file we claim.
+  assert.ok(fs.existsSync(path.join(packDir, "ponytail", "LICENSE.txt")), "the vendored licence is present");
+  assert.match(fs.readFileSync(path.join(packDir, "ponytail", "LICENSE.txt"), "utf8"), /MIT License/);
+  // Every skill with an upstream pin records the commit it was taken from.
+  for (const skill of catalog.skills.filter((s) => s.upstream)) {
+    assert.match(skill.upstream.commit, /^[0-9a-f]{7,40}$/, skill.id + " must pin a commit");
+    assert.ok(skill.upstream.repo, skill.id + " must name its repo");
+  }
+});
+
+test("the adapted skill says so instead of looking like a stale copy", () => {
+  const ab = catalog.skills.find((s) => s.id === "agent-browser");
+  assert.equal(ab.adapted, true);
+  assert.ok(ab.adaptationNote && ab.adaptationNote.length > 40, "the divergence is explained in the catalog");
+  assert.equal(ab.upstream, undefined, "an adapted skill is never auto-synced");
+  // The reason is real: upstream is a stub that needs the CLI, ours must work without it.
+  const ours = fs.readFileSync(path.join(packDir, "agent-browser", "SKILL.md"), "utf8");
+  assert.match(ours, /command -v agent-browser/, "ours detects rather than assuming the CLI");
+  assert.match(ours, /mcp__web__fetch/, "and falls back when there is no browser");
+  assert.ok(!/allowed-tools: Bash\(agent-browser:\*\)/.test(ours), "ours is not the upstream stub");
 });
 
 test("the CLI exposes sync with a dry run by default", () => {

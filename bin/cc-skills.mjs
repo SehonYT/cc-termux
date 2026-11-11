@@ -258,30 +258,72 @@ export function vendoredSources() {
     .map((s) => ({ id: s.id, name: s.name, dir: s.dir, source: s.source, upstream: s.upstream, license: s.license }));
 }
 
+// How far behind upstream we are, using the pinned commit rather than guessing.
+export async function upstreamHead(repo, { fetchImpl = fetch } = {}) {
+  try {
+    const r = await fetchImpl("https://api.github.com/repos/" + repo + "/commits?per_page=1", {
+      headers: { accept: "application/vnd.github+json" },
+      signal: AbortSignal.timeout(20000),
+    });
+    if (!r.ok) return null;
+    const j = await r.json();
+    const head = Array.isArray(j) ? j[0] : null;
+    if (!head || !head.sha) return null;
+    const date = (head.commit && head.commit.committer && head.commit.committer.date) || null;
+    return { sha: String(head.sha).slice(0, 12), date };
+  } catch (e) { return null; }
+}
+
+// Files upstream has that this pack never pinned, so a new reference doc cannot go unnoticed.
+export async function upstreamListing(tree, { fetchImpl = fetch } = {}) {
+  if (!tree) return null;
+  try {
+    const r = await fetchImpl(tree, { headers: { accept: "application/vnd.github+json" }, signal: AbortSignal.timeout(20000) });
+    if (!r.ok) return null;
+    const j = await r.json();
+    return Array.isArray(j) ? j.filter((e) => e.type === "file").map((e) => e.name) : null;
+  } catch (e) { return null; }
+}
+
 // Fetches each vendored file and reports what changed, writing nothing unless apply is set.
-export async function syncUpstream({ only = null, apply = false, fetchImpl = fetch, log = () => {} } = {}) {
+export async function syncUpstream({ only = null, apply = false, fetchImpl = fetch, checkUpstream = true, log = () => {} } = {}) {
   const target = skillsTarget();
   const results = [];
   for (const skill of vendoredSources()) {
     if (only && !only.includes(skill.id)) continue;
     const files = Array.isArray(skill.upstream.files) ? skill.upstream.files : [];
+    // Some upstreams keep a licence at the repo root rather than beside the skill.
+    const extra = Array.isArray(skill.upstream.extra) ? skill.upstream.extra : [];
     const changes = [];
-    for (const file of files) {
-      const url = skill.upstream.base.replace(/\/$/, "") + "/" + file;
+    let behind = null, added = null;
+    if (checkUpstream && skill.upstream.repo) {
+      const head = await upstreamHead(skill.upstream.repo, { fetchImpl });
+      if (head && skill.upstream.commit) {
+        behind = head.sha === skill.upstream.commit
+          ? { behind: 0, head: head.sha, pinned: skill.upstream.commit }
+          : { behind: true, head: head.sha, pinned: skill.upstream.commit, date: head.date };
+      } else if (head) {
+        behind = { behind: null, head: head.sha, pinned: null };
+      }
+      const listing = await upstreamListing(skill.upstream.tree, { fetchImpl });
+      const tracked = [...files, ...extra.map((e) => e.file)];
+      if (listing) added = listing.filter((f) => !tracked.includes(f));
+    }
+    for (const file of [...files.map((f) => ({ file: f, url: skill.upstream.base.replace(/\/$/, "") + "/" + f })), ...extra]) {
       let text = null;
       try {
-        const r = await fetchImpl(url, { signal: AbortSignal.timeout(30000) });
-        if (!r.ok) { changes.push({ file, status: "fetch-failed", detail: "HTTP " + r.status }); continue; }
+        const r = await fetchImpl(file.url, { signal: AbortSignal.timeout(30000) });
+        if (!r.ok) { changes.push({ file: file.file, status: "fetch-failed", detail: "HTTP " + r.status }); continue; }
         text = await r.text();
-      } catch (e) { changes.push({ file, status: "fetch-failed", detail: e.message.slice(0, 60) }); continue; }
-      const dest = path.join(target, skill.name, file);
+      } catch (e) { changes.push({ file: file.file, status: "fetch-failed", detail: e.message.slice(0, 60) }); continue; }
+      const dest = path.join(target, skill.name, file.file);
       let current = null;
       try { current = fs.readFileSync(dest, "utf8"); } catch (e) { }
-      if (current === null) changes.push({ file, status: "missing", detail: "not installed" });
-      else if (current === text) changes.push({ file, status: "same", detail: "" });
-      else changes.push({ file, status: "different", detail: "upstream differs", next: text });
+      if (current === null) changes.push({ file: file.file, status: "missing", detail: "not installed" });
+      else if (current === text) changes.push({ file: file.file, status: "same", detail: "" });
+      else changes.push({ file: file.file, status: "different", detail: "upstream differs", next: text });
     }
-    results.push({ id: skill.id, name: skill.name, changes });
+    results.push({ id: skill.id, name: skill.name, changes, behind, added });
   }
   if (apply) {
     for (const r of results) {
@@ -311,8 +353,13 @@ export function formatSync(results) {
     const state = failed.length ? "could not check (" + failed[0].detail + ")"
       : changed.length ? changed.length + " file(s) changed upstream"
       : missing.length ? missing.length + " file(s) missing locally"
+      : r.behind && r.behind.behind ? "behind upstream (" + r.behind.pinned + " -> " + r.behind.head + ")"
       : "up to date";
     lines.push("  " + r.id.padEnd(18) + state);
+    if (r.behind && r.behind.behind) {
+      lines.push("      pinned " + r.behind.pinned + ", upstream head " + r.behind.head + (r.behind.date ? " (" + r.behind.date.slice(0, 10) + ")" : ""));
+    }
+    if (r.added && r.added.length) lines.push("      upstream also has: " + r.added.join(", "));
     for (const c of changed) lines.push("      ~ " + c.file);
     for (const c of missing) lines.push("      + " + c.file + " (not installed)");
   }
