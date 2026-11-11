@@ -1,12 +1,5 @@
-// Single source of truth for cc-termux's own directories.
-//
-// POSIX keeps the XDG-ish layout it has always used (~/.local/share, ~/.config, ~/.cache).
-// Windows uses the conventional LOCALAPPDATA/APPDATA locations instead of dot-directories.
-// An existing legacy Windows install in ~/.local/share/cc-termux keeps working: the legacy
-// path wins when the new one does not exist.
-//
-// Claude Code's own config directory (~/.claude) is intentionally NOT resolved here: the
-// CLI uses the home directory on every platform, so we must too.
+// Single source of truth for cc-termux's own directories (XDG on POSIX, APPDATA on Windows).
+// Claude Code's ~/.claude is deliberately not resolved here; the CLI must agree with it.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";

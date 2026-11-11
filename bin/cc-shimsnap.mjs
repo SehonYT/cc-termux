@@ -1,12 +1,6 @@
 #!/usr/bin/env node
-// Claude Code appends shims to every bash snapshot it generates: "find" is redefined to
-// exec an embedded bfs, and "grep" to an embedded ugrep. On Termux/Android the embedded
-// bfs dies with SIGSYS ("Bad system call") inside Claude Code's sandboxed shell, so every
-// find call fails and agents get empty results - a silent false negative.
-//
-// This module rewrites that one function in existing and newly created snapshots so find
-// is the real findutils binary again. The launcher spawns it detached at startup; it also
-// works standalone (--once / --watch).
+// Rewrites the "find" shim in Claude Code's bash snapshots: the embedded bfs dies with
+// SIGSYS on Termux. Spawned detached by the launcher; also runs standalone (--once/--watch).
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";

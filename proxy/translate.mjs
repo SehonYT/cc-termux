@@ -1,9 +1,5 @@
-// Pure protocol translation between the Anthropic Messages API and the OpenAI-compatible
-// APIs (chat completions and the Responses API).
-//
-// Everything here is side-effect free apart from the streaming factories, which call the
-// supplied `send` and optional logging hooks. Keeping it in its own module is what makes
-// the translators unit-testable: the gateway itself cannot be imported without listening.
+// Protocol translation between the Anthropic Messages API and the OpenAI-compatible APIs.
+// Side-effect free apart from the streaming factories, which call the supplied `send`.
 
 
 const mapStop = (fr, hasTools) =>
@@ -32,9 +28,8 @@ function sanitizeBody(body) {
   return out;
 }
 
-// Client mistakes must be answered with 400, not surfaced as a 500 with an internal
-// TypeError from deep inside a translator. Only the request shape is checked here:
-// model/provider semantics stay pass-through, and the adapters still sanitise.
+// Answer malformed requests with 400 instead of a 500 TypeError from inside a translator.
+// Only the shape is checked; model and provider semantics stay pass-through.
 function requestShapeError(body) {
   if (body === null || typeof body !== 'object' || Array.isArray(body)) return 'request body must be a JSON object';
   if (body.model != null && typeof body.model !== 'string') return 'model must be a string';

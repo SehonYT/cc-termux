@@ -1,13 +1,5 @@
-// Edge-case suite for the cc-termux control CLI and the web-tools MCP server.
-//
-// Every CLI invocation runs the real entry point in a throw-away HOME. A command may
-// legitimately exit non-zero (unknown provider, usage error) but it must never leak a
-// crash: TypeError / ReferenceError / unhandled rejection / a source-mapped stack frame
-// in stdout+stderr is a failure.
-//
-// Process spawns are expensive on phones, so the config matrix runs the crash-prone
-// commands (status, provider) for every shape and the remaining commands against a small
-// representative set of broken configs.
+// Edge cases for the control CLI and the web MCP server, run in a throw-away HOME.
+// A non-zero exit is fine; a leaked TypeError or unhandled rejection is not.
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -270,8 +262,7 @@ test("provider list with zero providers is friendly", async () => {
 // ---------------------------------------------------------------------------
 // MCP server: protocol + SSRF guards (imported directly)
 // ---------------------------------------------------------------------------
-// Two module instances: the first must see CC_TERMUX_WEB_ALLOW_PRIVATE unset so the
-// SSRF guard is live; the second is allowed to reach the loopback test servers.
+// Two module instances: the first sees CC_TERMUX_WEB_ALLOW_PRIVATE unset (SSRF live).
 delete process.env.CC_TERMUX_WEB_ALLOW_PRIVATE;
 delete process.env.CC_TERMUX_WEB_TIMEOUT_MS;
 const mcpUrl = pathToFileURL(MCP).href;

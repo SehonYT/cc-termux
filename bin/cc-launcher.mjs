@@ -173,10 +173,8 @@ function sanitizeSettings(p) {
   }
 }
 
-// WebFetch/WebSearch cannot work on some platforms (for example Termux, where the musl
-// build of Claude Code cannot read /etc/resolv.conf, so every DNS lookup inside it fails
-// with EAI_AGAIN, and WebFetch's domain check needs api.anthropic.com). Register our own
-// MCP server so the model still has working web search and page fetching.
+// The built-in web tools cannot work on Termux (no resolv.conf for the bundled musl build),
+// so register our own MCP server to keep Web Search and Web Fetch available.
 function ensureMcpServer() {
   const file = path.join(os.homedir(), ".claude.json");
   let cfg = {};
@@ -231,13 +229,11 @@ function ensureMcpServer() {
 async function envForChild() {
   const env = { ...process.env };
   env.ANTHROPIC_BASE_URL = base;
-  // Exactly one credential: Claude Code 2.1.322+ warns (and may pick the wrong header)
-  // when both ANTHROPIC_AUTH_TOKEN and ANTHROPIC_API_KEY are set. The gateway accepts
-  // both "Authorization: Bearer" and "x-api-key", so keep just the API key form.
+  // Exactly one credential: Claude Code 2.1.322+ warns when both auth env vars are set,
+  // and the gateway accepts either header form.
   delete env.ANTHROPIC_AUTH_TOKEN;
-  // Claude Code refuses its default cross-session messaging socket under a user
-  // namespace without a uid map (some Termux/proot devices). Give it an explicit
-  // socket path inside our private cache directory instead; the directory is 0700.
+  // Some Termux/proot devices have no uid map, so give Claude Code an explicit messaging
+  // socket inside our 0700 cache directory.
   if (!env.CLAUDE_CODE_MESSAGING_SOCKET && process.platform !== "win32") {
     try {
       const messagingDir = path.join(CACHE, "messaging");
@@ -256,9 +252,8 @@ async function envForChild() {
     const settingsPath = path.join(claudeDir(), "settings.json");
     const settings = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
     settingsModel = settings.model || "";
-    // /model picker can persist a provider-switch marker. Claude Code then treats
-    // that literal string as the model (and auto-mode's safety classifier names it).
-    // Normalize it to the provider's real model before starting the session.
+    // The /model picker can persist a provswitch/ marker; normalize it to the provider's
+    // real model before the session starts.
     const marker = /^provswitch\/([^/]+)$/.exec(settingsModel);
     if (marker && cfg.providers && cfg.providers[marker[1]]) {
       const target = cfg.providers[marker[1]];
@@ -300,9 +295,8 @@ async function envForChild() {
   delete env.ANTHROPIC_MODEL;
   for (const k of ["CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "ANTHROPIC_CUSTOM_HEADERS", "ANTHROPIC_BEDROCK_BASE_URL", "ANTHROPIC_VERTEX_BASE_URL"]) delete env[k];
   if (model) {
-    // Auto mode's safety classifier is an extra Claude call. Pin it to a usable
-    // Claude model (bare id - provider-qualified aliases are rejected) from the
-    // active provider, or from another configured provider that has a key.
+    // Auto mode's classifier is an extra call: pin it to a bare Claude model id, since
+    // provider-qualified aliases are rejected.
     try {
       if (!env.CLAUDE_CODE_AUTO_MODE_MODEL && cfg.active) {
         let keys = {};
@@ -332,9 +326,8 @@ async function envForChild() {
       }
     } catch (e) { }
     if (!settingsModel || bareAnthropic) {
-      // Stale/absent settings.model: pin the provider model so the session does not
-      // fall back to Anthropic's built-in default (Opus). Mid-session picker changes
-      // still work because only the stale cases are pinned.
+      // A stale or absent settings.model would fall back to Anthropic's default, so pin
+      // the provider model; mid-session picker changes still work.
       env.ANTHROPIC_MODEL = cfg.active && p.model ? "prov/" + cfg.active + "/" + p.model : model;
     }
     env.ANTHROPIC_DEFAULT_OPUS_MODEL = composite(a.opus || model);
@@ -354,10 +347,8 @@ async function envForChild() {
   const ctx = selectedContext || p.contextWindow;
   if (ctx) env.CLAUDE_CODE_MAX_CONTEXT_TOKENS = String(ctx);
   env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS = "1";
-  // Claude Code 2.1.322 prefers a server-side safety classifier for auto mode. Behind a
-  // local gateway that verdict never arrives ("server_no_result"), and auto mode then
-  // *refuses every action it cannot check*. Disable the server path so the CLI runs its
-  // local model classifier (pinned to a Claude-capable model above) instead.
+  // Auto mode would refuse every action behind a local gateway (server_no_result), so use
+  // the CLI's own model classifier, pinned to a Claude-capable model above.
   env.CLAUDE_CODE_AUTO_MODE_SERVER = "0";
   env.TMPDIR = env.TMPDIR || os.tmpdir();
   env.CLAUDE_CODE_TMPDIR = env.CLAUDE_CODE_TMPDIR || env.TMPDIR;

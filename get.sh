@@ -1,13 +1,6 @@
 #!/bin/sh
-# cc-termux bootstrap installer.
-#
-# Downloads the repository archive and runs install.mjs. Use it directly or via:
+# cc-termux bootstrap installer. Env: CC_TERMUX_REPO, CC_TERMUX_REF, CC_TERMUX_ARCHIVE.
 #   curl -fsSL https://raw.githubusercontent.com/SehonYT/cc-termux/main/get.sh | bash
-#
-# Environment:
-#   CC_TERMUX_REPO     GitHub owner/repo (default: SehonYT/cc-termux)
-#   CC_TERMUX_REF      branch, tag or commit (default: main)
-#   CC_TERMUX_ARCHIVE  use a local .tar.gz instead of downloading (testing/offline)
 set -eu
 
 REPO="${CC_TERMUX_REPO:-SehonYT/cc-termux}"

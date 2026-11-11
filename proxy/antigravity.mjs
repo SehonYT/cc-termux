@@ -24,9 +24,8 @@ const MODEL_ALIASES = {
 const upstreamModel = (m) => MODEL_ALIASES[m] || m;
 
 const MAX_OUTPUT = 65536;
-// Antigravity's own IDE always sends this lightweight system prompt; the client system
-// prompt is relocated to the first user turn because an oversized systemInstruction is
-// rejected with a misleading 429.
+// Antigravity sends this lightweight system prompt itself; an oversized systemInstruction
+// is rejected with a misleading 429, so the client prompt moves to the first user turn.
 const DEFAULT_SYSTEM =
   "You are Antigravity, a powerful agentic AI coding assistant designed by the Google Deepmind team working on Advanced Agentic Coding.\n" +
   "You are pair programming with a USER to solve their coding task. The task may require creating a new codebase, modifying or debugging an existing codebase, or simply answering a question.\n" +
@@ -59,9 +58,8 @@ function rememberSignature(id, sig) {
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// Claude Code retries a 429 up to 11 times. When Cloud Code has just refused a
-// specific request, resending the identical body only burns quota, so remember the
-// refusal for a while and answer locally.
+// Claude Code retries a 429 up to 11 times, so remember a refusal briefly and answer
+// locally instead of resending an identical body.
 const REFUSALS = new Map();
 const REFUSAL_BASE_MS = 2 * 60 * 1000;
 const REFUSAL_MAX_MS = 30 * 60 * 1000;
@@ -140,9 +138,8 @@ function imagePart(block) {
   return null;
 }
 
-// Antigravity's server-side filter flags competing-agent identity sentences and
-// answers with a bare 429 RESOURCE_EXHAUSTED even when quota is untouched; the same
-// request without the sentence returns 200.
+// A competing-agent identity sentence makes the server-side filter answer a bare
+// RESOURCE_EXHAUSTED; the same request without it returns 200.
 const COMPETING_AGENT_PATTERNS = [
   /\byou are a claude agent\b[^\n]*/gi,
   /\bbuilt on anthropic's claude agent sdk\b[^\n]*/gi,
@@ -165,9 +162,8 @@ export function anthropicToGemini(body, model, creds) {
     else contents.push({ role, parts });
   };
   const rawSystem = body.system ? textOf(body.system) : "";
-  // Claude Code embeds an x-anthropic-billing-header line in the system prompt.
-  // Google Cloud Code rejects that request shape with a misleading 429
-  // RESOURCE_EXHAUSTED; stripping the line makes the same request succeed.
+  // Cloud Code rejects the x-anthropic-billing-header line with a misleading 429, so drop
+  // it before the prompt goes upstream.
   const sys = scrubIdentity(rawSystem.split(/\r?\n/).filter((line) => !/^\s*x-anthropic-billing-header\s*:/i.test(line)).join("\n").trim());
   const msgs = Array.isArray(body.messages) ? body.messages : [];
   for (const m of msgs) {
@@ -183,9 +179,8 @@ export function anthropicToGemini(body, model, creds) {
         else if (b.type === "tool_use") {
           toolNameById.set(b.id, b.name);
           const part = { functionCall: { name: b.name, args: b.input || {}, ...(b.id ? { id: b.id } : {}) } };
-          // Claude-via-Antigravity tool calls carry no thoughtSignature; Cloud Code
-          // rejects signature-less native tool history. The official Antigravity
-          // path uses this bypass sentinel.
+          // Cloud Code rejects signature-less native tool history; this is the bypass
+          // sentinel the official Antigravity path uses.
           part.thoughtSignature = SIGNATURE_CACHE.get(b.id) || "skip_thought_signature_validator";
           parts.push(part);
         } else if (b.type === "tool_result") {
@@ -214,9 +209,8 @@ export function anthropicToGemini(body, model, creds) {
         parameters: cleanSchema(t.input_schema || { type: "object", properties: {} }),
       })) }]
     : undefined;
-  // Keep only Antigravity's own system prompt upstream and relocate the client system
-  // prompt into the first user turn: an oversized systemInstruction is answered with a
-  // misleading 429.
+  // Keep only Antigravity's own system prompt upstream and move the client prompt into the
+  // first user turn: an oversized systemInstruction is answered with a misleading 429.
   if (sys && contents.length) {
     const first = contents[0];
     first.parts = [{ text: sys }, ...first.parts];
@@ -311,9 +305,8 @@ export async function proxyAntigravity(req, res, route, body, { anthropicError }
       upstream = await sendUpstream(token, GENERATE_URLS[0]);
     } catch (e) { }
   }
-  // Antigravity answers 429 RESOURCE_EXHAUSTED both for real quota and for a
-  // content-triggered refusal; retry a little with backoff, then fall back to the
-  // secondary host, then remember the refusal so retries do not hammer upstream.
+  // A 429 can mean real quota or a content-triggered refusal: retry with backoff, fall back
+  // to the secondary host, then remember the refusal so retries do not hammer upstream.
   const max429 = Number(process.env.CC_TERMUX_ANTIGRAVITY_429_RETRIES || 2);
   let last429Text = "";
   let lastDelay = 0;

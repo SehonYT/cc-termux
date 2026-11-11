@@ -1,11 +1,5 @@
-# cc-termux bootstrap installer for Windows.
-#
-#   irm https://raw.githubusercontent.com/SehonYT/cc-termux/main/get.ps1 | iex
-#
-# Environment:
-#   CC_TERMUX_REPO     GitHub owner/repo (default: SehonYT/cc-termux)
-#   CC_TERMUX_REF      branch or tag (default: main)
-#   CC_TERMUX_ARCHIVE  use a local .tar.gz instead of downloading (testing/offline)
+# cc-termux bootstrap installer for Windows: irm .../get.ps1 | iex
+# Env: CC_TERMUX_REPO, CC_TERMUX_REF, CC_TERMUX_ARCHIVE (offline tarball).
 $ErrorActionPreference = "Stop"
 
 $Repo = if ($env:CC_TERMUX_REPO) { $env:CC_TERMUX_REPO } else { "SehonYT/cc-termux" }

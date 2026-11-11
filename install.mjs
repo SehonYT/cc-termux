@@ -1,8 +1,6 @@
 #!/usr/bin/env node
 // Installer for Linux, macOS, Windows and Termux.
-//
-// Resolves the official Claude Code package for the host platform, installs it under
-// the install root, writes launcher shims and runs the provider setup wizard.
+// Resolves the official Claude Code package, installs it, then writes shims and setup.
 
 import fs from "node:fs";
 import os from "node:os";

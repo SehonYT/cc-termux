@@ -1,10 +1,6 @@
 #!/usr/bin/env node
 // Optional equal-length byte patches for the installed Claude Code binary.
-//
-// Patch definitions live in patches.json next to the install root, so a new Claude Code
-// release can be supported by editing JSON instead of this script. Each `find`/`start`
-// entry may be a list of alternatives; the first one present wins. Missing anchors are
-// reported and skipped, never forced, and the original binary is kept as claude.bin.orig.
+// Definitions live in patches.json; missing anchors are skipped and the original is kept.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -14,9 +10,8 @@ const ROOT = process.env.CC_TERMUX_ROOT || path.join(os.homedir(), ".local", "sh
 const BIN = path.join(ROOT, "bin", process.platform === "win32" ? "claude.exe" : "claude.bin");
 const BACKUP = BIN + ".orig";
 const BACKUP_META = BACKUP + ".json";
-// Marker written after a successful --apply and removed by --revert. The launcher uses it
-// to notice that the installed binary lost its patches (a reinstall, a manual copy or a
-// stray --revert) and re-apply them without re-reading the 300 MB binary on every start.
+// Written by --apply, removed by --revert, so the launcher can spot a binary that lost
+// its patches without re-reading 300 MB on every start.
 const PATCH_STAMP = BIN + ".patched";
 const sha256 = (b) => crypto.createHash("sha256").update(b).digest("hex");
 const HINT_BUFFERS = [Buffer.from("Switch between AI providers"), Buffer.from("Provider rows switch provider"), Buffer.from('name:"provider"')];

@@ -1,17 +1,6 @@
 #!/usr/bin/env node
-// Environment self-heal: makes an install usable without manual steps.
-//
-// Repair list:
-//   - ~/.claude/settings.json env overrides + stale model
-//   - foreign claude binaries earlier in PATH
-//   - sample provider entries from older releases
-//   - config sanity: active/override/routing, file permissions
-//   - /model picker regeneration
-//   - missing launcher shims in the prefix bin directory
-//   - stale session files and duplicate gateway processes
-//   - oversized logs
-//
-// Used by install.mjs after every install/update and available as `cc-termux heal`.
+// Environment self-heal: repairs settings, PATH shims, config, picker and stale sessions.
+// Run by install.mjs after every install/update, and on demand as `cc-termux heal`.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -46,9 +35,8 @@ export function ensurePathInRcFiles(home) {
   }
   return added;
 }
-// Resolve the system prefix whose bin/ holds the user-facing launchers.
-// An explicit PREFIX wins (Termux and the test harness set it), then the platform
-// default: Termux's usr, Homebrew's /opt/homebrew on Apple Silicon, /usr/local.
+// Resolve the system prefix whose bin/ holds the user-facing launchers: an explicit
+// PREFIX wins, then Termux's usr, Homebrew on Apple Silicon, or /usr/local.
 export function resolvePrefix({ platform = process.platform, env = process.env, exists = fs.existsSync } = {}) {
   try {
     if (env && env.PREFIX) return env.PREFIX;
@@ -114,9 +102,8 @@ export function healEnvironment({ root, home = os.homedir(), prefix, killGateway
   if (!root) root = installRoot();
   if (!root) throw new Error("install root is required");
   const changes = [];
-  // Production always calls heal with the real home, so the shared resolver decides where
-  // config/cache live (Windows: APPDATA/LOCALAPPDATA). Tests and embedders that pass an
-  // explicit home keep the historical home-relative layout so they stay self-contained.
+  // Production passes the real home, so the shared resolver decides config/cache paths.
+  // Tests passing an explicit home keep the home-relative layout and stay self-contained.
   const nativeHome = home === os.homedir();
   const cfgDefault = nativeHome ? configFile() : path.join(home, ".config", "cc-termux", "config.json");
   const cfgPath = process.env.CC_TERMUX_CONFIG || cfgDefault;
@@ -232,11 +219,8 @@ export function healEnvironment({ root, home = os.homedir(), prefix, killGateway
     catch (e) { changes.push("claude binary: could not replace " + p + " (" + e.code + ")"); }
   }
 
-  // 4. launcher layout: native-style ~/.local/bin/claude + cc-termux/ccp in the prefix
-  // Ignore a CC_TERMUX_ROOT override when deciding whether this is a canonical install:
-  // the platform default is what "canonical" means for shims. A detected legacy Windows
-  // install in ~/.local/share/cc-termux still resolves to itself here (resolver handles it),
-  // so heal repairs the shims instead of fighting the legacy layout.
+  // 4. launcher layout: native-style ~/.local/bin/claude + cc-termux/ccp in the prefix.
+  // Canonical means the platform default root, so a CC_TERMUX_ROOT override is ignored here.
   const canonicalRoot = nativeHome ? installRoot({ ...process.env, CC_TERMUX_ROOT: "" }) : path.join(home, ".local", "share", "cc-termux");
   const isCanonical = path.resolve(root) === path.resolve(canonicalRoot);
   if (isCanonical && installPrefix !== false && process.platform === "win32") {

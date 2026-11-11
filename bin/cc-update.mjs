@@ -1,8 +1,6 @@
 #!/usr/bin/env node
-// Update checking and self-update for cc-termux itself (not the Claude Code binary).
-//
-// Installed state lives in <root>/cc-termux.json: { version, sha, installedAt }.
-// Remote state is the latest commit sha on main plus package.json version.
+// Update checking and self-update for cc-termux itself, not the Claude Code binary.
+// Installed state: <root>/cc-termux.json; remote state: latest commit sha on main.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -176,9 +174,8 @@ export async function selfUpdate({ root = DEFAULT_ROOT, repo = DEFAULT_REPO, arc
     if (archivePath) {
       fs.copyFileSync(archivePath, tgz);
     } else {
-      // Resolve the commit first, then download that exact commit. Downloading "main"
-      // can serve a cached archive that is older than the atom feed and cause an
-      // endless "update available" loop.
+      // Resolve the commit first: downloading "main" can serve a cached archive older
+      // than the feed and cause an endless "update available" loop.
       try { const info = await remoteInfo({ repo, fetchImpl }); targetSha = info.sha || null; targetDate = info.updatedAt || null; } catch (e) { }
       if (!targetSha) throw new Error("could not resolve the latest commit - check your connection and retry");
       const local = localInfo(root);

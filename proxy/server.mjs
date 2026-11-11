@@ -1,13 +1,6 @@
 #!/usr/bin/env node
-// Local API gateway for Claude Code.
-//
-// Claude Code speaks the Anthropic Messages API. This process accepts that protocol and
-// forwards each request using one of three adapters, selected per provider:
-//   - Anthropic Messages passthrough (Anthropic-compatible endpoints)
-//   - OpenAI chat completions (translated)
-//   - OpenAI Responses API (translated)
-//
-// It also handles provider routing, retries, request sanitising and the /model provider switch.
+// Local API gateway for Claude Code: Anthropic Messages in, provider adapter out.
+// Handles routing, retries, request sanitising and the /model provider switch.
 
 import http from 'node:http';
 import fs from 'node:fs';
@@ -101,11 +94,8 @@ function saveConfig() {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const RETRYABLE = new Set([408, 409, 425, 429, 500, 502, 503, 504]);
 
-// The caller always passes an abort signal (client disconnect), so the old
-// "opts.signal || AbortSignal.timeout(900000)" fallback never applied: a provider that
-// accepted the connection and then went silent held the request open forever. Compose
-// the caller signal with a per-attempt timeout instead. Per-provider overrides:
-//   "retries": 5, "retryBaseMs": 800, "timeoutMs": 900000
+// Compose the caller's abort signal with a per-attempt timeout, so a silent upstream
+// cannot hold the request open. Overrides: retries, retryBaseMs, timeoutMs.
 function attemptSignal(signal, ms) {
   const ac = new AbortController();
   const onAbort = () => { try { ac.abort(signal.reason); } catch (e) { ac.abort(); } };
@@ -121,9 +111,8 @@ function attemptSignal(signal, ms) {
   if (timer.unref) timer.unref();
   return {
     signal: ac.signal,
-    // Headers arrived: the response may legitimately stream for a long time, so stop
-    // the header timer but keep forwarding the caller's abort signal (a client that
-    // disconnects must still stop the upstream body read).
+    // Headers arrived: stop the timer but keep forwarding the caller's abort signal, so a
+    // client disconnect still stops the upstream body read.
     settle: () => clearTimeout(timer),
     cleanup: () => { clearTimeout(timer); if (signal) signal.removeEventListener('abort', onAbort); },
   };
@@ -525,11 +514,8 @@ const server = http.createServer(async (req, res) => {
           body.model = model;
         }
       }
-      // Claude Code's auto-mode safety classifier is an ordinary /v1/messages call whose
-      // system prompt is a fixed marker. It needs a short
-      // verdict, not an essay, so give it a thinking-free turn; when the operator opts in
-      // (classifier.allow / CC_TERMUX_CLASSIFIER_ALLOW=1) answer it locally instead of
-      // spending third-party quota.
+      // Auto mode's classifier is a /v1/messages call with a fixed system marker. Give it
+      // a thinking-free turn, or answer locally when classifier.allow is enabled.
       if (process.env.CC_TERMUX_DEBUG_BODIES === '1') {
         try {
           const dir = path.join(CACHE_DIR, 'bodies');
@@ -592,16 +578,8 @@ server.listen(port, listenHost, () => {
   LOG('gateway listening on', port, 'active=' + CONFIG.active, 'config=' + CONFIG_PATH);
 });
 
-// Claude Code asks https://api.anthropic.com/api/web/domain_info?domain=<host> before
-// WebFetch. Behind a third-party setup that call has no Anthropic account behind it and
-// fails ("Unable to verify if domain ... is safe to fetch"), which blocks every fetch.
-// A binary patch rewrites that URL to this loopback endpoint (same byte length), so the
-// check answers "fetchable" locally. Loopback only; it never proxies content.
-//
-// The port is NOT configurable. The patch in patches.json replaces the URL with an
-// equal-length string that bakes 8799 in ("http://127.0.0.1:8799/..."), so any override
-// would leave the binary talking to 8799 while this helper listened elsewhere and WebFetch
-// would fail silently. An env value from an older version is reported and ignored.
+// WebFetch's domain check, patched to this loopback helper so it answers can_fetch:true.
+// The port is fixed because the patch bakes it into an equal-length URL string.
 const DOMAIN_CHECK_PORT = 8799;
 const DOMAIN_CHECK_ENV = process.env.CC_TERMUX_DOMAIN_CHECK_PORT;
 if (DOMAIN_CHECK_ENV != null && DOMAIN_CHECK_ENV !== '' && Number(DOMAIN_CHECK_ENV) !== DOMAIN_CHECK_PORT) {

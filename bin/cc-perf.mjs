@@ -1,9 +1,6 @@
 #!/usr/bin/env node
-// Mobile / low-end device performance profile.
-//
-// Enabled only when the user chooses it (`cc-termux tune on`, install prompt, or CC_TERMUX_PERF=1).
-// The profile disables expensive UI/IO features Claude Code exposes as env flags
-// and turns on reduced motion. Nothing here changes the model or provider.
+// Mobile / low-end performance profile, opt-in via `cc-termux tune on` or CC_TERMUX_PERF=1.
+// Turns off expensive UI/IO features; never changes the model or provider.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";

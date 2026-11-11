@@ -63,9 +63,8 @@ export function writeUsageCache(data) {
 }
 export const LOAD_CODE_ASSIST_URL = BOOTSTRAP_URL + "/v1internal:loadCodeAssist";
 export const ONBOARD_USER_URL = BOOTSTRAP_URL + "/v1internal:onboardUser";
-// Native Antigravity fingerprints: the IDE sends
-// "antigravity/<version> darwin/arm64" on content requests (no "/ide/" segment and no
-// X-Goog-Api-Client), while OAuth/loadCodeAssist use the ide-node variant.
+// Native Antigravity fingerprints: "antigravity/<version> darwin/arm64" on content
+// requests, plus the ide-node variant for OAuth and loadCodeAssist.
 export const IDE_VERSION = "2.5.5";
 export const USER_AGENT = "antigravity/" + IDE_VERSION + " darwin/arm64";
 export const IDE_NODE_USER_AGENT = "antigravity/" + IDE_VERSION + " darwin/arm64 google-api-nodejs-client/10.3.0";
@@ -244,9 +243,8 @@ function askLine(prompt) {
 }
 function closePrompt() { if (activePrompt) { try { activePrompt.close(); } catch (e) { } activePrompt = null; } }
 
-// The Cloud Code catalog includes legacy aliases and plan-gated/internal models.
-// The official Antigravity CLI only exposes: Claude Opus 4.6, Claude Sonnet 4.6,
-// Gemini 3.8 Flash tiers, GPT-OSS 120B and (paid plans only) Gemini 4 Argon.
+// The catalog also lists legacy aliases and plan-gated models; keep the official set:
+// Opus/Sonnet 4.6, Gemini 3.8 Flash tiers, GPT-OSS 120B and (paid) Gemini 4 Argon.
 const OFFICIAL_MODEL_RE = /^(claude-opus-4-6-thinking|claude-sonnet-4-6|gemini-3\.8-flash-(high|medium|low)|gpt-oss-120b-medium)$/;
 const ARGON_MODEL_RE = /^gemini-4-argon-(high|medium|low)$/;
 export function parseAvailableModels(data) {

@@ -26,9 +26,7 @@ function makeRoot(tmp) {
     if (f.endsWith(".mjs")) fs.copyFileSync(path.join(root, "bin", f), path.join(rt, "bin", f));
   }
   fs.cpSync(path.join(root, "proxy"), path.join(rt, "proxy"), { recursive: true });
-  // A stand-in for the 300MB Claude binary: the launcher only needs to exec something.
-  // Copying the running Node binary keeps this portable (a shell script is not execable
-  // on Windows) and makes it exit immediately.
+  // Stand-in for the 300MB Claude binary; copying Node keeps it portable and instant.
   const stub = path.join(rt, "bin", process.platform === "win32" ? "claude.exe" : "claude.bin");
   fs.copyFileSync(process.execPath, stub);
   try { fs.chmodSync(stub, 0o755); } catch (e) { }

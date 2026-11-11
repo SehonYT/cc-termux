@@ -1,8 +1,6 @@
 #!/usr/bin/env node
 // Platform detection shared by the installer and the test suite.
-//
-// Claude Code publishes native builds for: linux-x64, linux-arm64, their musl variants,
-// darwin-x64/arm64 and win32-x64/arm64. Everything else falls back to the JS build.
+// Native builds exist for linux/darwin/win32 on x64+arm64; everything else uses the JS build.
 
 export function detectTarget({
   platform = process.platform,

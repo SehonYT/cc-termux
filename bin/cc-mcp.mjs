@@ -1,18 +1,6 @@
 #!/usr/bin/env node
-// cc-termux web tools (stdio MCP server).
-//
-// Gives Claude Code working web access where the built-in tools cannot work (on Termux the
-// bundled musl build cannot resolve DNS, and WebFetch's domain check needs api.anthropic.com).
-//
-// Design notes:
-//  - Requests are made with node:http/https so DNS is resolved here (Node's resolver works)
-//    and every hop can be validated against SSRF: private, loopback, link-local, CGNAT and
-//    metadata addresses are refused, and the connection is pinned to the vetted IP so a
-//    DNS-rebinding answer cannot swap it afterwards.
-//  - Fetched text is untrusted input: it is fenced, labelled, stripped of control characters
-//    and checked for instruction-smuggling patterns before the model ever sees it.
-//  - Browser-like headers keep ordinary sites from bouncing the request; a second UA and a
-//    reader proxy are optional fallbacks for WAF pages.
+// cc-termux web tools (stdio MCP server): Web Fetch and Web Search for Claude Code.
+// Every hop is SSRF-checked and pinned; fetched text is fenced as untrusted data.
 import http from "node:http";
 import https from "node:https";
 import dns from "node:dns";
@@ -232,9 +220,8 @@ export async function fetchPage(rawUrl, opts = {}) {
     const addresses = requestOpts.ip ? [{ address: requestOpts.ip }] : await resolveSafeAll(host);
     let res = null;
     let lastErr = null;
-    // Two address families at most: IPv4 first, then IPv6. This is what gets past
-    // networks where one family is blocked outright (e.g. Google returns 429 on IPv4
-    // and a normal page on IPv6, or the reverse).
+    // Try at most two address families, IPv4 first: one of them is often blocked outright
+    // (Google answers 429 on IPv4 and a normal page on IPv6).
     const tries = Math.min(addresses.length, 2);
     for (let i = 0; i < tries; i++) {
       try {
@@ -303,9 +290,8 @@ export function decodeEntities(s) {
     .replace(/&([a-z]+|#\d+);/gi, (m, name) => (ENTITIES[name.toLowerCase()] !== undefined ? ENTITIES[name.toLowerCase()] : m));
 }
 
-// Visible text of an HTML page, shaped for a model: headings, lists, tables and code are
-// preserved, navigation/boilerplate is dropped, and links stay readable as "label (url)".
-// `pageUrl` resolves relative hrefs; when it is missing, relative hrefs are kept as labels.
+// Visible text of an HTML page, shaped for a model: headings, lists, tables and code kept,
+// boilerplate dropped, links readable as "label (url)". `pageUrl` resolves relative hrefs.
 export function htmlToText(html, pageUrl = "") {
   const src = String(html || "");
   const stripTags = (x) => String(x)
@@ -475,9 +461,7 @@ function cacheSet(key, value) {
 }
 
 // ---------------------------------------------------------------- tools
-// Cloudflare/Anubis/DataDome style interstitials are not page content; say so instead of
-// handing the model a "Making sure you're not a bot" page as if it were the site.
-// Strong markers are anti-bot walls on their own, even for large pages.
+// Bot-check interstitials are not page content: report them instead of returning the wall.
 const CHALLENGE_RE = /(just a moment|checking your browser|making sure you're not a bot|verify you are human|anubis|cf-challenge|cf_chl_|captcha-delivery|datadome|_incapsula_|access denied|attention required!|unusual traffic from your computer network|our systems have detected unusual traffic|in order to continue, please enable javascript|please click .{0,80}if you are not redirected|enablejs|javascript is required|please turn javascript on|update your browser.{0,80}isn't supported)/i;
 // Weaker hints only count on small pages, so a real article that quotes "captcha" is not
 // mistaken for a wall.
@@ -545,8 +529,7 @@ export async function webFetch(url, { maxChars = 15000, offset = 0 } = {}) {
 export function htmlToTextLite(html) { return htmlToText(html); }
 
 // ---------------------------------------------------------------- search
-// The engines, parsers, relevance gate and rank merge live in cc-search.mjs; this file
-// supplies the HTTP client and re-exports the parsers for tests.
+// Engines and parsers live in cc-search.mjs; this file supplies the HTTP client.
 export {
   parseBing,
   parseBrave,

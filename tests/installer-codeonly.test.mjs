@@ -10,9 +10,8 @@ const repo = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const installer = path.join(repo, "install.mjs");
 const isWin = process.platform === "win32";
 
-// Sandbox with an isolated HOME/USERPROFILE, APPDATA and LOCALAPPDATA. The installer is
-// spawned with these, so the resolver sees the fake home and never touches the developer's
-// real cc-termux install, config or cache.
+// Sandbox with an isolated HOME/USERPROFILE, APPDATA and LOCALAPPDATA, so the installer
+// never touches the developer's real cc-termux install.
 function sandbox(label) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), label));
   const home = path.join(tmp, "home");
@@ -130,11 +129,8 @@ test("installer --check prints the resolver paths and honours env overrides", ()
   }
 });
 
-// cc-paths decides the layout from process.platform, not from the environment, so the
-// Windows branch cannot be reached by env injection alone. This probe runs in a child
-// process that flips process.platform to win32 *before* importing the resolver, then
-// feeds it a fake LOCALAPPDATA/APPDATA/home. That is the portable way to prove the
-// Windows layout locally, on every CI runner.
+// The Windows branch is unreachable by env injection alone, so this probe flips
+// process.platform to win32 in a child process and feeds it a fake APPDATA/home.
 function resolverProbe(s, extraEnv = {}) {
   const probe = path.join(s.tmp, "cc-paths-probe.mjs");
   const href = JSON.stringify(pathToFileURL(path.join(repo, "bin", "cc-paths.mjs")).href);

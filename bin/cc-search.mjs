@@ -1,21 +1,5 @@
-// Multi-engine web search for the cc-termux web MCP server.
-//
-// Why this exists: the HTML of each engine is machine-readable, but each one differs in
-// markup, redirect format, and anti-bot behaviour. This module keeps one parser per engine,
-// a relevance gate that throws away junk (Bing is known to answer with results for a
-// different query from some networks), and a reciprocal-rank merge that turns several
-// partial lists into one ranked list with a per-engine status report.
-//
-// Everything here is pure apart from the engine runners, which use an injected
-// `fetchPage`/`decodeBody` pair so they can be unit-tested against saved HTML.
-//
-// Engine markup decoded from live responses (2026-01):
-//   DuckDuckGo HTML  .result__a / .result__snippet          (redirect: /l/?uddg=)
-//   DuckDuckGo Lite  a.result-link / td.result-snippet      (single-quoted class attrs)
-//   Bing             li.b_algo > h2 > a / .b_caption p      (redirect: /ck/a?u=a1<base64url>)
-//   Brave            #results .snippet .result-content a    (SvelteKit SSR)
-//   Startpage        a.result-title.result-link > h2        (POST with sc token, Google index)
-//   Google           div.MjjYud/div.g > a[href="/url?q="] > h3
+// Multi-engine web search: one parser per engine, relevance gate, ranked merge.
+// Testable because the engine runners take an injected fetchPage/decodeBody pair.
 
 // ---------------------------------------------------------------- small HTML helpers
 
@@ -160,9 +144,8 @@ export function coverage(tokens, row) {
   return matched.length / tokens.length;
 }
 
-// A result is kept when it covers most of the query. This is what removes engine junk:
-// e.g. Bing answering "github actions workflow syntax" with the GitHub homepage covers 1/4
-// and is dropped, while a real workflow-syntax page covers 4/4.
+// A result is kept when it covers most of the query, which is what removes engine junk
+// (a GitHub homepage for "github actions workflow syntax" covers 1/4 and is dropped).
 export function isRelevant(tokens, row, { minCoverage = 0.5, minMatched = 2 } = {}) {
   if (!tokens.length) return true;
   const matched = tokens.filter((t) => ((row.title || "") + " " + (row.snippet || "") + " " + (row.url || "")).toLowerCase().includes(t));
@@ -274,9 +257,8 @@ export function parseStartpage(html) {
   return out;
 }
 
-// Google's result markup has two shapes in the wild:
-//   classic  <div class="g"><a href="/url?q=..."><h3>..</h3></a><div class="VwiC3b">snippet</div>
-//   modern   <div class="MjjYud"><div class="g">... or <a jsname="UWckNb" href="/url?q=...">
+// Google ships two shapes: classic <div class="g"><a href="/url?q="> and the modern
+// <div class="MjjYud"> wrapper over the same anchors.
 export function parseGoogle(html) {
   const src = String(html || "");
   const out = [];
@@ -391,9 +373,8 @@ export function isWall(engine, status, html) {
 
 const DEFAULT_ENGINES = ["duckduckgo", "google", "brave", "bing"];
 
-// Optional backends that need configuration. SEARXNG gives Google/Bing/Brave results through
-// an instance the user controls (search.formats must include "json"); Google's own JSON API
-// needs a key and a custom-search engine id.
+// Optional backends: a SearXNG instance the user controls (JSON enabled), or Google's own
+// Custom Search API with a key and engine id.
 function configuredEngines(searxUrl) {
   const list = DEFAULT_ENGINES.slice();
   if (searxUrl) list.push("searxng");
@@ -414,9 +395,8 @@ function finalizeEngine(engine, rows, attempts, tokens) {
   }
   const notes = (attempts || []).filter((a) => a.status !== "ok");
   const blocked = notes.find((a) => a.status === "blocked");
-  // Engine-level quarantine: if most of an engine's page does not match the query, that
-  // engine is answering a different question (Bing does this from some networks/caches).
-  // Keeping the few coincidental matches would inject junk into the merged ranking.
+  // Quarantine an engine whose page mostly does not match the query: it is answering a
+  // different question, and its coincidental matches would pollute the merged ranking.
   const quarantined = rows.length >= 3 && kept.length / rows.length < 0.5;
   let status = "ok";
   if (!kept.length || quarantined) {

@@ -22,9 +22,8 @@ jobs:
       - run: node install.mjs --check
       - run: npm test
 
-  # Live installer smoke test: actually run install.mjs in "code only" mode on every OS
-  # into an isolated HOME/USERPROFILE, then verify the installed files, the per-OS shims
-  # and that the installed CLI runs. The Claude Code binary is faked, so no download.
+  # Run install.mjs --code-only on every OS into an isolated HOME, then verify the files,
+  # shims and CLI. The Claude Code binary is faked, so nothing is downloaded.
   install-smoke:
     name: install smoke (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
