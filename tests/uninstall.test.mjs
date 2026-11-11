@@ -16,6 +16,9 @@ function sandbox() {
   const bin = path.join(home, ".local", "bin");
   fs.mkdirSync(claude, { recursive: true });
   fs.mkdirSync(bin, { recursive: true });
+  // Windows resolves its shim dir from LOCALAPPDATA, so the sandbox must set it too.
+  process.env.LOCALAPPDATA = path.join(home, "AppData", "Local");
+  process.env.APPDATA = path.join(home, "AppData", "Roaming");
   const previous = {};
   const set = (k, v) => { previous[k] = process.env[k]; process.env[k] = v; };
   set("HOME", home);
@@ -112,8 +115,11 @@ test("a missing or corrupt settings file is not a crash", () => {
 test("only a cc-termux shim is replaced by the official launcher", () => {
   const box = sandbox();
   try {
-    const shim = path.join(box.bin, "claude");
-    const official = path.join(box.bin, "claude.official-backup");
+    // The shim name and directory are platform-dependent (claude.cmd on Windows), so use
+    // the same resolution the installer and uninstaller use rather than assuming POSIX.
+    const shim = uninstaller.shimPath();
+    fs.mkdirSync(path.dirname(shim), { recursive: true });
+    const official = shim + ".official-backup";
     fs.writeFileSync(official, "#!/bin/sh\nexec /usr/bin/claude \"$@\"\n", { mode: 0o755 });
 
     // A launcher the user installed themselves must not be touched.
@@ -152,6 +158,34 @@ test("the skill pack leaves a skill the user edited", async () => {
     assert.ok(fs.existsSync(path.join(mine, "SKILL.md")), "a foreign skill is never removed");
     assert.ok(fs.existsSync(edited), "the edited skill is still on disk");
   } finally { box.cleanup(); }
+});
+
+test("the shim name and location follow the platform, including Windows", () => {
+  // Assert the branch this platform actually takes, so the test passes on Linux, macOS and
+  // Windows alike. A wrong shim path is invisible on Linux and breaks every Windows install.
+  const dir = uninstaller.shimDir();
+  const shim = uninstaller.shimPath();
+  assert.ok(path.isAbsolute(shim), "the shim path is absolute");
+  assert.ok(!dir.startsWith("/usr"), "never a bare system path that may not exist");
+  if (process.platform === "win32") {
+    assert.match(shim, /AppData/, "windows resolves under LOCALAPPDATA");
+    assert.ok(shim.endsWith("claude.cmd"), "the windows shim is claude.cmd");
+  } else {
+    assert.equal(path.basename(shim), "claude", "posix uses a claude script in bin");
+  }
+  // The module must branch on win32 at all, or one of the two is wrong by construction.
+  const src = fs.readFileSync(path.join(root, "bin", "cc-uninstall.mjs"), "utf8");
+  assert.match(src, /process\.platform === "win32"/, "the windows branch exists");
+  assert.ok(src.includes("LOCALAPPDATA"), "windows uses LOCALAPPDATA");
+
+  // The backup pattern must accept every spelling the installer can produce on either OS.
+  const re = /^claude(\.cmd)?\.official-backup/;
+  for (const name of ["claude.official-backup", "claude.cmd.official-backup",
+    "claude.official-backup.1700000000", "claude.cmd.official-backup.1700000000"]) {
+    assert.ok(re.test(name), name + " must be recognised as a backup");
+  }
+  assert.ok(!re.test("claude"), "the live shim is not a backup");
+  assert.ok(!re.test("myclaude.official-backup"), "an unrelated file is not ours");
 });
 
 test("the CLI exposes uninstall and the plan is safe by default", () => {
