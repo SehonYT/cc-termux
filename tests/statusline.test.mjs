@@ -89,3 +89,28 @@ test("a model id is resolved against the provider it came from, not the active o
   assert.equal(right.type, "antigravity");
   assert.equal(right.name, "Gemini 3.8 Flash (High)");
 });
+
+test("status line install reports a read-only Claude dir instead of throwing", async () => {
+  const fs = await import("node:fs");
+  const os = await import("node:os");
+  const path = await import("node:path");
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cc-statusline-ro-"));
+  const rc = path.join(tmp, "claude");
+  fs.mkdirSync(rc, { recursive: true });
+  const old = { CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR, CC_TERMUX_CACHE: process.env.CC_TERMUX_CACHE };
+  process.env.CLAUDE_CONFIG_DIR = rc;
+  process.env.CC_TERMUX_CACHE = path.join(tmp, "cache");
+  try {
+    try { fs.chmodSync(rc, 0o500); } catch (e) { }
+    const mod = await import("../bin/cc-statusline.mjs?ro=" + Date.now());
+    let res;
+    assert.doesNotThrow(() => { res = mod.installStatusLine(); });
+    // Running as root (some CI containers) can still write; then the install legitimately works.
+    if (res.installed === false) assert.equal(fs.existsSync(path.join(rc, "settings.json")), false);
+  } finally {
+    try { fs.chmodSync(rc, 0o700); } catch (e) { }
+    if (old.CLAUDE_CONFIG_DIR === undefined) delete process.env.CLAUDE_CONFIG_DIR; else process.env.CLAUDE_CONFIG_DIR = old.CLAUDE_CONFIG_DIR;
+    if (old.CC_TERMUX_CACHE === undefined) delete process.env.CC_TERMUX_CACHE; else process.env.CC_TERMUX_CACHE = old.CC_TERMUX_CACHE;
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});

@@ -14,6 +14,10 @@ const ROOT = process.env.CC_TERMUX_ROOT || path.join(os.homedir(), ".local", "sh
 const BIN = path.join(ROOT, "bin", process.platform === "win32" ? "claude.exe" : "claude.bin");
 const BACKUP = BIN + ".orig";
 const BACKUP_META = BACKUP + ".json";
+// Marker written after a successful --apply and removed by --revert. The launcher uses it
+// to notice that the installed binary lost its patches (a reinstall, a manual copy or a
+// stray --revert) and re-apply them without re-reading the 300 MB binary on every start.
+const PATCH_STAMP = BIN + ".patched";
 const sha256 = (b) => crypto.createHash("sha256").update(b).digest("hex");
 const HINT_BUFFERS = [Buffer.from("Switch between AI providers"), Buffer.from("Provider rows switch provider"), Buffer.from('name:"provider"')];
 const isPatched = (buf) => HINT_BUFFERS.some((h) => buf.indexOf(h) >= 0);
@@ -109,6 +113,12 @@ function ensureBackup(buf) {
   writeBackup(buf);
 }
 
+function writeStamp(applied, skipped) {
+  try {
+    fs.writeFileSync(PATCH_STAMP, JSON.stringify({ at: new Date().toISOString(), applied, skipped }, null, 2) + "\n", { mode: 0o600 });
+  } catch (e) { }
+}
+
 function apply() {
   let buf;
   try { buf = fs.readFileSync(BIN); } catch (e) { console.error("cc-patch: binary not found: " + BIN); process.exit(1); }
@@ -119,6 +129,9 @@ function apply() {
   changed += applyText(buf, defs.text || [], applied, skipped);
   if (!changed) {
     ensureBackup(original);
+    // Already patched (re-run, or a newer build): refresh the stamp so the launcher stops
+    // treating the install as unpatched.
+    if (isPatched(buf)) writeStamp([], skipped);
     console.log("cc-patch: nothing to do" + (skipped.length ? " [" + skipped.join(", ") + "]" : ""));
     return 0;
   }
@@ -126,6 +139,7 @@ function apply() {
   try { atomicWrite(BIN, buf, 0o755); }
   catch (e) { console.error("cc-patch: cannot write binary (" + e.code + "). Quit Claude sessions and retry."); process.exit(1); }
   console.log("cc-patch: applied " + applied.join(", ") + (skipped.length ? "  (skipped: " + skipped.join(", ") + ")" : ""));
+  writeStamp(applied, skipped);
   return 0;
 }
 
@@ -162,6 +176,7 @@ function revert() {
     const tmp = BIN + ".revert." + process.pid;
     fs.writeFileSync(tmp, backup, { mode: 0o755 });
     fs.renameSync(tmp, BIN);
+    try { fs.unlinkSync(PATCH_STAMP); } catch (e2) { }
     console.log(wasPatchedBackup ? "cc-patch: reverted to the previous patched build (backup was created from a patched binary)" : "cc-patch: reverted to the unpatched binary");
   } catch (e) { console.error("cc-patch: revert failed: " + e.message); process.exit(1); }
 }

@@ -388,6 +388,15 @@ async function envForChild() {
     // Claude Code rewrites its bash snapshots per session and shadows find with a bundled
     // bfs that dies with SIGSYS on Android; keep patching them back to the real find.
     try { spawn(process.execPath, [path.join(ROOT, "bin", "cc-shimsnap.mjs")], { stdio: "ignore", detached: true, env, windowsHide: true }).unref(); } catch (e) { }
+    // A reinstall or a stray revert drops the UI patches; the stamp tells us cheaply.
+    try {
+      const binPath = path.join(ROOT, "bin", process.platform === "win32" ? "claude.exe" : "claude.bin");
+      if (fs.existsSync(binPath)) {
+        const stamp = binPath + ".patched";
+        const needs = !fs.existsSync(stamp) || fs.statSync(stamp).mtimeMs < fs.statSync(binPath).mtimeMs;
+        if (needs) spawn(process.execPath, [path.join(ROOT, "bin", "cc-patch.mjs"), "--apply"], { stdio: "ignore", detached: true, env, windowsHide: true }).unref();
+      }
+    } catch (e) { }
   }
   const isWin = process.platform === "win32";
   const bin = path.join(ROOT, "bin", isWin ? "claude.exe" : "claude.bin");

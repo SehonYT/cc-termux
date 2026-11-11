@@ -91,9 +91,25 @@ function atomicWrite(file, text, mode = 0o600) {
   fs.renameSync(tmp, file);
   try { fs.chmodSync(file, mode); } catch (e) { }
 }
+// Always return a usable shape: a hand-written or half-broken config.json must not make
+// the CLI throw a TypeError deep inside a command.
+const normalizeConfig = (c) => {
+  if (!c || typeof c !== "object" || Array.isArray(c)) c = {};
+  c.providers = c.providers && typeof c.providers === "object" && !Array.isArray(c.providers) ? c.providers : {};
+  // A hand-edited entry like "broken": null must not crash every command that iterates
+  // providers; drop it the same way a bad providers object is dropped above.
+  for (const [name, p] of Object.entries(c.providers)) {
+    if (!p || typeof p !== "object" || Array.isArray(p)) delete c.providers[name];
+  }
+  c.routing = c.routing && typeof c.routing === "object" && !Array.isArray(c.routing) ? c.routing : {};
+  if (typeof c.active !== "string") c.active = "";
+  return c;
+};
+// Same idea for Claude's settings.json: a parsed JSON null/array is not an object.
+const normalizeSettings = (s) => (s && typeof s === "object" && !Array.isArray(s) ? s : {});
 const load = () => {
-  try { return JSON.parse(fs.readFileSync(CFG, "utf8")); }
-  catch (e) { return { version: 1, providers: {}, active: "", routing: {} }; }
+  try { return normalizeConfig(JSON.parse(fs.readFileSync(CFG, "utf8"))); }
+  catch (e) { return normalizeConfig({ version: 1 }); }
 };
 const save = (c) => { atomicWrite(CFG, JSON.stringify(c, null, 2) + "\n", 0o600); };
 const port = (c) => (c.listen && c.listen.port) || 8788;
@@ -119,6 +135,7 @@ function rebuild(c) {
 function writePicker(c) {
   let settings = {};
   try { settings = JSON.parse(fs.readFileSync(SETTINGS_PATH, "utf8")); } catch (e) { settings = {}; }
+  settings = normalizeSettings(settings);
   const switchRows = visibleProviders(c).map(([name, p]) => ({
     model: "provswitch/" + name,
     label: "\u21c4  Switch to " + name,
@@ -196,7 +213,8 @@ async function doctor(fix) {
 
   let settings = {};
   try { settings = JSON.parse(fs.readFileSync(settingsPath, "utf8")); } catch (e) {}
-  const active = c.providers[c.active] || {};
+  settings = normalizeSettings(settings);
+  const active = (c.providers || {})[c.active] || {};
   const wantModel = composite(c.active, active.model || active.defaultModel);
   const sm = settings.model || "";
   const smProv = (sm.match(/^prov\/([^/]+)\//) || [])[1];
@@ -283,8 +301,18 @@ async function doctor(fix) {
   let patchOut = "";
   try {
     patchOut = execFileSync(process.execPath, [path.join(ROOT, "bin", "cc-patch.mjs"), "--status"], { encoding: "utf8" });
-    const applied = (patchOut.match(/applied/g) || []).length;
-    const pending = (patchOut.match(/pending/g) || []).length;
+    let applied = (patchOut.match(/applied/g) || []).length;
+    let pending = (patchOut.match(/pending/g) || []).length;
+    if (pending && fix) {
+      // doctor --fix repairs this too, like the other fixable findings.
+      try {
+        execFileSync(process.execPath, [path.join(ROOT, "bin", "cc-patch.mjs"), "--apply"], { encoding: "utf8" });
+        patchOut = execFileSync(process.execPath, [path.join(ROOT, "bin", "cc-patch.mjs"), "--status"], { encoding: "utf8" });
+        applied = (patchOut.match(/applied/g) || []).length;
+        pending = (patchOut.match(/pending/g) || []).length;
+        if (!pending) fixed++;
+      } catch (e) { }
+    }
     if (pending) warn(pending + " TUI patches pending (cc-termux patch)"); else pass("TUI patches applied (" + applied + ")");
   } catch (e) { warn("could not read patch status"); }
 

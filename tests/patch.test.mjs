@@ -75,3 +75,17 @@ test("patcher refreshes a stale backup from an already-patched binary", () => {
     assert.equal(run(root, "--revert").status, 0);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
+test("a successful apply leaves a stamp the launcher can check, revert removes it", () => {
+  const root = setup("Switch between Claude models");
+  const bin = path.join(root, "bin", process.platform === "win32" ? "claude.exe" : "claude.bin");
+  try {
+    assert.equal(run(root, "--apply").status, 0);
+    const stamp = bin + ".patched";
+    assert.ok(fs.existsSync(stamp), "apply must write the patch stamp");
+    const meta = JSON.parse(fs.readFileSync(stamp, "utf8"));
+    assert.ok(Array.isArray(meta.applied) && meta.applied.length > 0);
+    assert.ok(Date.parse(meta.at));
+    assert.equal(run(root, "--revert").status, 0);
+    assert.equal(fs.existsSync(stamp), false, "revert must remove the patch stamp");
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});

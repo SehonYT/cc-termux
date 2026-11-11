@@ -8,11 +8,19 @@ import { configFile, claudeDir, cacheDir } from "./cc-paths.mjs";
 function configPath() { return configFile(); }
 function statusFile() { return path.join(cacheDir(), "antigravity-status.txt"); }
 function readJson(file) { try { return JSON.parse(fs.readFileSync(file, "utf8")); } catch (e) { return {}; } }
+// Returns false instead of throwing: settings.json may be read-only (foreign Claude install,
+// locked-down home), and nothing here is worth crashing the CLI over.
 function writeJson(file, data) {
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  const tmp = file + "." + process.pid + ".tmp";
-  fs.writeFileSync(tmp, JSON.stringify(data, null, 2) + "\n", { mode: 0o600 });
-  fs.renameSync(tmp, file);
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const tmp = file + "." + process.pid + ".tmp";
+    fs.writeFileSync(tmp, JSON.stringify(data, null, 2) + "\n", { mode: 0o600 });
+    fs.renameSync(tmp, file);
+    return true;
+  } catch (e) {
+    try { fs.unlinkSync(file + "." + process.pid + ".tmp"); } catch (e2) { }
+    return false;
+  }
 }
 function rel(iso) {
   const t = Date.parse(iso || "");
@@ -114,13 +122,14 @@ export function installStatusLine() {
   const settings = readJson(settingsFile);
   const current = settings.statusLine;
   const ours = current && typeof current.command === "string" && /cc-termux\s+statusline|antigravity-status\.txt/.test(current.command);
+  let installed = true;
   if (!current || ours) {
     // POSIX shells can cat the pre-rendered line in ~1ms; Windows falls back to the shim.
     const command = process.platform === "win32"
       ? "cc-termux statusline --print"
       : "sh -c 'f=\"${CC_TERMUX_CACHE:-$HOME/.cache/cc-termux}/antigravity-status.txt\"; cat \"$f\" 2>/dev/null || printf cc-termux'";
     settings.statusLine = { type: "command", command };
-    writeJson(settingsFile, settings);
+    installed = writeJson(settingsFile, settings);
   }
   const cmdFile = path.join(claudeDir(), "commands", "antigravity-usage.md");
   try {
@@ -134,15 +143,21 @@ export function installStatusLine() {
       "",
     ].join("\n"), { mode: 0o644 });
   } catch (e) { }
-  return { settingsFile, cmdFile, installed: !current || ours };
+  return { settingsFile, cmdFile, installed: installed && (!current || ours) };
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   if (process.argv.includes("--install")) {
-    installStatusLine();
+    const res = installStatusLine();
+    const writable = !(res && res.installed === false);
     refreshStatusLine({ force: true }).then(() => {
+      if (!writable) return;
       console.log("status line installed in " + path.join(claudeDir(), "settings.json"));
       console.log("restart Claude Code to see it  \u00b7  full usage: /antigravity-usage");
-    }).catch((e) => { console.log("status line installed (usage refresh pending)"); });
+    }).catch((e) => { if (writable) console.log("status line installed (usage refresh pending)"); });
+    if (!writable) {
+      console.error("status line: cannot write " + res.settingsFile + " (read-only?) - set statusLine manually, see README");
+      process.exitCode = 1;
+    }
   } else if (process.argv.includes("--refresh")) {
     refreshStatusLine({ force: true }).then((l) => console.log(l)).catch(() => { });
   } else {

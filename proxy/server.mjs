@@ -89,42 +89,76 @@ function saveConfig() {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const RETRYABLE = new Set([408, 409, 425, 429, 500, 502, 503, 504]);
 
+// The caller always passes an abort signal (client disconnect), so the old
+// "opts.signal || AbortSignal.timeout(900000)" fallback never applied: a provider that
+// accepted the connection and then went silent held the request open forever. Compose
+// the caller signal with a per-attempt timeout instead. Per-provider overrides:
+//   "retries": 5, "retryBaseMs": 800, "timeoutMs": 900000
+function attemptSignal(signal, ms) {
+  const ac = new AbortController();
+  const onAbort = () => { try { ac.abort(signal.reason); } catch (e) { ac.abort(); } };
+  if (signal) {
+    if (signal.aborted) onAbort();
+    else signal.addEventListener('abort', onAbort, { once: true });
+  }
+  const timer = setTimeout(() => {
+    const err = new Error('upstream request timed out after ' + ms + 'ms');
+    err.name = 'TimeoutError';
+    ac.abort(err);
+  }, ms);
+  if (timer.unref) timer.unref();
+  return {
+    signal: ac.signal,
+    // Headers arrived: the response may legitimately stream for a long time, so stop
+    // the header timer but keep forwarding the caller's abort signal (a client that
+    // disconnects must still stop the upstream body read).
+    settle: () => clearTimeout(timer),
+    cleanup: () => { clearTimeout(timer); if (signal) signal.removeEventListener('abort', onAbort); },
+  };
+}
+
 // Retries transient upstream failures (429 quota/rate limit, 5xx, network) with
-// exponential backoff + jitter, honoring Retry-After. Per-provider overrides:
-//   "retries": 5, "retryBaseMs": 800
+// exponential backoff + jitter, honoring Retry-After.
 async function fetchWithRetry(url, opts, provider, label) {
-  opts = { ...opts, signal: opts.signal || AbortSignal.timeout(900000) };
+  const configuredTimeout = Number(provider.timeoutMs);
+  const timeoutMs = Number.isFinite(configuredTimeout) && configuredTimeout > 0 ? configuredTimeout : 900000;
   const attempts = Math.max(1, Number(provider.retries || 5));
   const baseMs = Math.max(100, Number(provider.retryBaseMs || 800));
   const maxMs = Math.max(baseMs, Number(provider.retryMaxMs || 20000));
   let lastErr;
   for (let i = 0; i < attempts; i++) {
+    const timed = attemptSignal(opts.signal, timeoutMs);
+    let res;
     try {
-      const res = await fetch(url, opts);
-      if (!RETRYABLE.has(res.status) || i === attempts - 1) return res;
-      if (res.status === 429) {
-        try { recordQuota(provider.name, label, res.status, await res.clone().text()); } catch (e) { }
-        // Google free-tier daily quota: retrying cannot help, fail fast with the real message.
-        let bodyText = '';
-        try { bodyText = await res.clone().text(); } catch (e) { }
-        if (/free_tier|quota exceeded|billing|rate-limits/i.test(bodyText)) {
-          LOG('quota exhausted, not retrying', label);
-          return res;
-        }
-      }
-      const ra = parseFloat(res.headers.get('retry-after') || '0');
-      const wait = ra > 0 ? Math.min(ra * 1000, maxMs) : Math.min(maxMs, baseMs * 2 ** i) * (0.7 + Math.random() * 0.6);
-      LOG('retry', label, res.status, 'attempt', i + 1 + '/' + attempts, 'in', Math.round(wait) + 'ms');
-      try { await res.body?.cancel(); } catch (e) { }
-      await sleep(wait);
+      res = await fetch(url, { ...opts, signal: timed.signal });
     } catch (e) {
+      timed.cleanup();
       lastErr = e;
-      if (i === attempts - 1) throw e;
+      if (i === attempts - 1 || e.name === 'TimeoutError') throw e;
       const wait = Math.min(maxMs, baseMs * 2 ** i) * (0.7 + Math.random() * 0.6);
       LOG('retry', label, (e.name || e.code || 'error'), 'attempt', i + 1 + '/' + attempts, 'in', Math.round(wait) + 'ms');
       if (lastErr && lastErr.name === 'AbortError') throw lastErr;
       await sleep(wait);
+      continue;
     }
+    timed.settle();
+    if (!RETRYABLE.has(res.status) || i === attempts - 1) return res;
+    if (res.status === 429) {
+      try { recordQuota(provider.name, label, res.status, await res.clone().text()); } catch (e) { }
+      // Google free-tier daily quota: retrying cannot help, fail fast with the real message.
+      let bodyText = '';
+      try { bodyText = await res.clone().text(); } catch (e) { }
+      if (/free_tier|quota exceeded|billing|rate-limits/i.test(bodyText)) {
+        LOG('quota exhausted, not retrying', label);
+        return res;
+      }
+    }
+    const ra = parseFloat(res.headers.get('retry-after') || '0');
+    const wait = ra > 0 ? Math.min(ra * 1000, maxMs) : Math.min(maxMs, baseMs * 2 ** i) * (0.7 + Math.random() * 0.6);
+    LOG('retry', label, res.status, 'attempt', i + 1 + '/' + attempts, 'in', Math.round(wait) + 'ms');
+    try { await res.body?.cancel(); } catch (e) { }
+    timed.cleanup();
+    await sleep(wait);
   }
   throw lastErr;
 }
@@ -258,6 +292,31 @@ function sanitizeBody(body) {
   const out = {};
   for (const [k, v] of Object.entries(body || {})) { if (KEEP.has(k)) out[k] = stripCache(v); }
   return out;
+}
+// Client mistakes must be answered with 400, not surfaced as a 500 with an internal
+// TypeError from deep inside a translator. Only the request shape is checked here:
+// model/provider semantics stay pass-through, and the adapters still sanitise.
+function requestShapeError(body) {
+  if (body === null || typeof body !== 'object' || Array.isArray(body)) return 'request body must be a JSON object';
+  if (body.model != null && typeof body.model !== 'string') return 'model must be a string';
+  if (body.messages != null) {
+    if (!Array.isArray(body.messages)) return 'messages must be an array';
+    for (const m of body.messages) {
+      if (!m || typeof m !== 'object' || Array.isArray(m)) return 'each message must be an object';
+      if (m.content == null || typeof m.content === 'string') continue;
+      if (!Array.isArray(m.content)) return 'message content must be a string or an array of content blocks';
+      for (const b of m.content) {
+        if (!b || typeof b !== 'object' || Array.isArray(b)) return 'each content block must be an object';
+      }
+    }
+  }
+  if (body.system != null && typeof body.system !== 'string') {
+    if (!Array.isArray(body.system)) return 'system must be a string or an array of content blocks';
+    for (const b of body.system) {
+      if (!b || typeof b !== 'object' || Array.isArray(b)) return 'each system block must be an object';
+    }
+  }
+  return null;
 }
 
 function toOpenAI(body, upstreamModel) {
@@ -762,10 +821,14 @@ const server = http.createServer(async (req, res) => {
     try { body = JSON.parse(raw || '{}'); }
     catch (e) { return anthropicError(res, 400, 'invalid_request_error', 'invalid JSON body'); }
     if (u.pathname === '/v1/messages/count_tokens') {
+      const shapeError = requestShapeError(body);
+      if (shapeError) return anthropicError(res, 400, 'invalid_request_error', shapeError);
       res.writeHead(200, { 'content-type': 'application/json' });
       return res.end(JSON.stringify({ input_tokens: estimate(body.messages) + estimate(body.system) + estimate(body.tools) }));
     }
     if (u.pathname === '/v1/messages') {
+      const shapeError = requestShapeError(body);
+      if (shapeError) return anthropicError(res, 400, 'invalid_request_error', shapeError);
       const hasProviders = Object.keys(CONFIG.providers || {}).some((n) => !CONFIG.providers[n].hidden);
       if (!CONFIG.active || !hasProviders) return anthropicError(res, 400, 'invalid_request_error', 'no provider configured on this machine - run: cc-termux setup');
       let model = body.model || '';
