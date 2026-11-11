@@ -541,7 +541,8 @@ const HELP = [
   "  antigravity usage     live 5h/weekly quota",
   "  nararouter usage      NaraRouter plans, rate limits and model tiers",
   "  web [status|key|test] web search providers (Tavily, Brave, Jina) + built-in scraper",
-  "  skills [install|status] agent skills (ponytail, agent-browser, design, web quality)",
+  "  skills [install|status] agent skills (ponytail, agent-browser, security, design)",
+  "  uninstall [--yes]  remove cc-termux and restore Claude Code to normal",
   "  antigravity models --update   refresh models from Google",
   "  statusline [--install]        Claude Code status line (model + quota)",
   "",
@@ -890,6 +891,11 @@ switch (cmd) {
     }
     console.log("usage: cc-termux nararouter [usage|plans] [plan] [--json]");
     break;
+  }
+  case "uninstall": {
+    const { spawnSync } = await import("node:child_process");
+    const r = spawnSync(process.execPath, [path.join(ROOT, "bin", "cc-uninstall.mjs"), ...args], { stdio: "inherit" });
+    process.exit(r.status || 0);
   }
   case "skills": {
     const sub = (args[0] || "status").toLowerCase();

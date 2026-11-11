@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "note": "Shipped skill pack. Installed into ~/.claude/skills by install/launcher; each entry keeps its upstream licence and source.",
   "skills": [
     {
@@ -55,6 +55,33 @@
       "license": "MIT",
       "default": true,
       "description": "Audit a UI for hierarchy, spacing, contrast, focus and copy, then fix the top findings in priority order."
+    },
+    {
+      "id": "security-audit",
+      "name": "security-audit",
+      "dir": "security-audit",
+      "source": "https://github.com/cloudflare/security-audit-skill",
+      "license": "MIT",
+      "default": true,
+      "description": "Multi-phase security audit with independently verified, machine-readable findings. Use for security reviews, vulnerability research, audits and pen tests."
+    },
+    {
+      "id": "secrets-and-keys",
+      "name": "secrets-and-keys",
+      "dir": "secrets-and-keys",
+      "source": "cc-termux",
+      "license": "MIT",
+      "default": true,
+      "description": "Keep credentials out of code, logs and commits: safe reading, 0600 files, pre-commit checks and what to do when a key has already leaked."
+    },
+    {
+      "id": "dep-audit",
+      "name": "dep-audit",
+      "dir": "dep-audit",
+      "source": "cc-termux",
+      "license": "MIT",
+      "default": true,
+      "description": "Review a dependency before adding it: real package, install scripts, version range, lockfile and licence, plus the smallest safe alternative."
     }
   ]
 }

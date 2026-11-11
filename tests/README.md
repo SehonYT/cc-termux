@@ -20,6 +20,7 @@ Pure or in-process: no network, no installed Claude Code, fast enough to run on 
 
 | File | Covers |
 |---|---|
+| `uninstall.test.mjs` | removal: the plan separates what cc-termux owns from what it shares with Claude Code, restoring `settings.json` and `~/.claude.json` removes only our keys and leaves every other setting byte for byte, a corrupt or missing settings file is left alone rather than destroyed, only a cc-termux shim is replaced by the original launcher, and the skill pack is removed without deleting a skill the user wrote |
 | `skills.test.mjs` | the shipped skill pack: every catalog entry has a valid SKILL.md whose `name` matches its directory, our own skills carry trigger words in their description, vendored skills keep upstream source and licence, install/status/remove are isolated per Claude config dir and never touch a skill the user wrote, and the installer and launcher both ship and restore the pack |
 | `search.test.mjs` | engine parsers against saved pages (DuckDuckGo HTML + Lite, Bing, Brave, Google, Startpage), redirect unwrapping, canonical URLs, relevance gate and engine quarantine, reciprocal-rank merge, SearXNG JSON and Google Custom Search backends, per-engine status |
 | `fetch.test.mjs` | HTML extraction (headings, tables, code blocks, boilerplate removal, entity decoding, dedupe), JSON pretty-printing, challenge detection, meta-refresh following, walled pages reported as blocked |

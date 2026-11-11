@@ -59,7 +59,7 @@ test("vendored skills keep their upstream source and licence", () => {
 
 test("the pack covers coding, browser, design and cc-termux's own tools", () => {
   const ids = catalog.skills.map((s) => s.id);
-  for (const needed of ["ponytail", "agent-browser", "frontend-design", "webapp-quality", "cc-termux-web", "ux-review"]) {
+  for (const needed of ["ponytail", "agent-browser", "frontend-design", "webapp-quality", "cc-termux-web", "ux-review", "security-audit", "secrets-and-keys", "dep-audit"]) {
     assert.ok(ids.includes(needed), "pack is missing " + needed);
   }
   const browser = fs.readFileSync(path.join(packDir, "agent-browser", "SKILL.md"), "utf8");
@@ -183,6 +183,26 @@ test("status distinguishes installed, outdated and locally modified", async () =
     assert.equal(one.state, "modified");
     assert.match(skills.formatSkills(skills.skillStatus()), /! ux-review/, "the marker must show in the listing");
   });
+});
+
+test("the security skills carry real guidance", () => {
+  const audit = fs.readFileSync(path.join(packDir, "security-audit", "SKILL.md"), "utf8");
+  assert.ok(audit.length > 5000, "the audit skill is substantial");
+  // Cloudflare's skill ships reference docs and runnable validators beside SKILL.md.
+  for (const extra of ["HUNTING.md", "RECONNAISSANCE.md", "report-schema.json", "validate-findings.cjs"]) {
+    assert.ok(fs.existsSync(path.join(packDir, "security-audit", extra)), "missing " + extra);
+  }
+  assert.ok(fs.existsSync(path.join(packDir, "security-audit", "LICENSE.txt")), "vendored code keeps its licence");
+
+  const secrets = fs.readFileSync(path.join(packDir, "secrets-and-keys", "SKILL.md"), "utf8");
+  assert.match(secrets, /0o600/, "config files must be created private");
+  assert.match(secrets, /[Rr]otate/, "a leaked key needs rotation, not just deletion");
+  assert.match(secrets, /git diff --cached/, "a pre-commit check belongs in the skill");
+
+  const deps = fs.readFileSync(path.join(packDir, "dep-audit", "SKILL.md"), "utf8");
+  assert.match(deps, /typosquat|real package/i, "package identity is the first check");
+  assert.match(deps, /lockfile/i);
+  assert.match(deps, /install script/i);
 });
 
 test("the generated provider line is built from the live provider table", async () => {

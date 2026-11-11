@@ -287,6 +287,20 @@ test("the local scraper runs only when the chain reaches it", () => {
   assert.match(mcp, /results: ran\.rows,/);
 });
 
+test("the installer asks once, then offers one list and one key prompt", () => {
+  const inst = fs.readFileSync(path.join(root, "install.mjs"), "utf8");
+  // One gate question before anything else.
+  assert.match(inst, /Add a web search API\? \(y\/N\)/);
+  // Then a single numbered list, not one prompt per provider.
+  assert.match(inst, /Which one\?/);
+  assert.match(inst, /Choose 1-3 or q/);
+  assert.match(inst, /Paste your/);
+  assert.ok(!/for \(const \[id, label, url, hint\] of \[/.test(inst), "the three-prompt loop is gone");
+  // Declining is a complete answer, and the choice is remembered.
+  assert.match(inst, /cfg\.asked = true/);
+  assert.match(inst, /built-in scraper handles search/);
+});
+
 test("the installer and setup both offer the web providers", () => {
   const installer = fs.readFileSync(path.join(root, "install.mjs"), "utf8");
   const setup = fs.readFileSync(path.join(root, "bin", "cc-setup.mjs"), "utf8");

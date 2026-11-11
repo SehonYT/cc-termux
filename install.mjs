@@ -190,29 +190,61 @@ async function askWebProviders() {
   try { cfg = JSON.parse(fs.readFileSync(file, "utf8")); } catch (e) { }
   if (cfg.asked) return;
   const rl = createInterface({ input: process.stdin, output: process.stdout });
-  try {
-    console.log();
-    banner(["Web search providers (optional)"], { stream: process.stdout, tty: true });
-    console.log("  Search runs through the first provider that answers, then falls back to the");
-    console.log("  next one on quota, rate limit or failure. The built-in scraper is always last.");
-    console.log("  Press Enter to skip any of these - skipping keeps everything working.");
-    console.log();
-    const added = [];
-    for (const [id, label, url, hint] of [
-      ["tavily", "Tavily", "https://app.tavily.com/home", "free key, 1000 credits/month (works without a key at a lower cap)"],
-      ["brave", "Brave Search", "https://api-dashboard.search.brave.com/app/keys", "free plan, 2000 queries/month"],
-      ["jina", "Jina Reader", "https://jina.ai/reader", "search and page reading, free tier without a key"],
-    ]) {
-      console.log("  " + label + "  " + hint);
-      console.log("  get a key: " + url);
-      const a = (await rl.question("  " + label + " API key (Enter = skip) > ")).trim();
-      if (a) { cfg.keys = { ...(cfg.keys || {}), [id]: a }; added.push(id); }
-    }
+  const write = () => {
     cfg.asked = true;
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, JSON.stringify(cfg, null, 2) + "\n", { mode: 0o600 });
-    if (added.length) step("Web providers configured: " + added.join(", ") + " (built-in scraper stays as fallback)", { stream: process.stdout, tty: true });
-    else step("No web keys added - using the built-in scraper (change later: cc-termux web)", { stream: process.stdout, tty: true });
+  };
+  try {
+    console.log();
+    banner(["Web search (optional)"], { stream: process.stdout, tty: true });
+    console.log("  cc-termux can search through a hosted API. Search tries the provider you add");
+    console.log("  first and falls back to the next one on quota or failure, with the built-in");
+    console.log("  scraper always last, so search works whether or not you add a key.");
+    console.log();
+    const a = (await rl.question("  Add a web search API? (y/N) > ")).trim().toLowerCase();
+    if (!a.startsWith("y")) {
+      write();
+      step("No web key added - the built-in scraper handles search (change later: cc-termux web)", { stream: process.stdout, tty: true });
+      return;
+    }
+
+    // One list, one choice, one key. Anything else can be added later from the same place.
+    const options = [
+      { id: "tavily", label: "Tavily", url: "https://app.tavily.com/home", hint: "free key, 1000 credits/month" },
+      { id: "brave", label: "Brave Search", url: "https://api-dashboard.search.brave.com/app/keys", hint: "free plan, 2000 queries/month" },
+      { id: "jina", label: "Jina Reader", url: "https://jina.ai/reader", hint: "search and page reading, free tier" },
+    ];
+    for (;;) {
+      console.log();
+      console.log("  Which one?");
+      options.forEach((o, i) => {
+        const already = cfg.keys && cfg.keys[o.id] ? " (key saved)" : "";
+        console.log("    " + (i + 1) + ". " + o.label.padEnd(14) + o.hint + already);
+      });
+      console.log("    q. skip");
+      console.log();
+      const pick = (await rl.question("  Choose 1-3 or q > ")).trim().toLowerCase();
+      if (pick === "q" || pick === "") break;
+      const index = Number(pick);
+      const chosen = Number.isInteger(index) && index >= 1 && index <= options.length
+        ? options[index - 1]
+        : options.find((o) => o.id === pick || o.label.toLowerCase().startsWith(pick));
+      if (!chosen) { console.log("  enter 1, 2, 3 or q"); continue; }
+      console.log();
+      console.log("  " + chosen.label + "  " + chosen.hint);
+      console.log("  get a key: " + chosen.url);
+      const key = (await rl.question("  Paste your " + chosen.label + " API key > ")).trim();
+      if (!key) { console.log("  no key entered - try again or press q to skip"); continue; }
+      cfg.keys = { ...(cfg.keys || {}), [chosen.id]: key };
+      write();
+      step(chosen.label + " saved - it is now tried first, with the scraper as fallback", { stream: process.stdout, tty: true });
+      break;
+    }
+    write();
+    if (!cfg.keys || !Object.keys(cfg.keys).length) {
+      step("No web key added - the built-in scraper handles search (change later: cc-termux web)", { stream: process.stdout, tty: true });
+    }
   } finally {
     rl.close();
   }
