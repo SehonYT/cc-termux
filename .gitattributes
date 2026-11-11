@@ -1,0 +1,9 @@
+# Shell scripts must keep LF or they fail to run on Linux and Termux.
+*.sh text eol=lf
+get.sh text eol=lf
+bin/cc-termux text eol=lf
+
+# Everything else is text; git normalises on commit.
+*.mjs text
+*.json text
+*.md text

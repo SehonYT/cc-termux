@@ -18,11 +18,11 @@ test("every catalog entry ships a valid SKILL.md", () => {
     const file = path.join(packDir, skill.dir, "SKILL.md");
     assert.ok(fs.existsSync(file), skill.id + " is missing skills/" + skill.dir + "/SKILL.md");
     const text = fs.readFileSync(file, "utf8");
-    assert.match(text, /^---\n/, skill.id + " needs YAML frontmatter");
-    const fm = /^---\n([\s\S]*?)\n---\n/.exec(text);
+    assert.match(text, /^---\r?\n/, skill.id + " needs YAML frontmatter");
+    const fm = /^---\r?\n([\s\S]*?)\r?\n---\r?\n/.exec(text);
     assert.ok(fm, skill.id + " frontmatter is not closed");
     // Claude Code resolves a skill by its directory name, so name must match.
-    assert.match(fm[1], new RegExp("^name:\\s*" + skill.name + "\\s*$", "m"),
+    assert.match(fm[1], new RegExp("^name:\\s*" + skill.name + "\\s*\\r?$", "m"),
       skill.id + " frontmatter name must equal the directory name");
     assert.match(fm[1], /^description:/m, skill.id + " needs a description, it is what triggers the skill");
     assert.ok(text.length > 400, skill.id + " looks empty");
@@ -36,7 +36,7 @@ test("our own skill descriptions say when to use them, not just what they are", 
   assert.ok(ours.length >= 3, "cc-termux writes several of these");
   for (const skill of ours) {
     const text = fs.readFileSync(path.join(packDir, skill.dir, "SKILL.md"), "utf8");
-    const fm = /^---\n([\s\S]*?)\n---\n/.exec(text)[1];
+    const fm = /^---\r?\n([\s\S]*?)\r?\n---\r?\n/.exec(text)[1];
     const desc = fm.slice(fm.indexOf("description:"));
     // The description is the only thing the model sees before loading the skill, so it
     // has to carry trigger words, not a summary.
