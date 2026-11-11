@@ -210,6 +210,21 @@ export function parseGroundingSse(text) {
   return { answer, sources, queries };
 }
 
+// Grounding only works on Gemini, so pick one from the configured Antigravity models and
+// fall back to a known-good default when the catalog is unavailable.
+export async function pickGeminiModel() {
+  const preferred = ["gemini-3.8-flash-high", "gemini-3.8-flash-medium", "gemini-3.8-flash-low"];
+  try {
+    const { configFile } = await import("./cc-paths.mjs");
+    const cfg = JSON.parse(fs.readFileSync(configFile(), "utf8"));
+    const models = Object.keys(((cfg.providers || {}).antigravity || {}).modelsById || {});
+    const gemini = models.filter((id) => /^gemini-/.test(id));
+    for (const p of preferred) if (gemini.includes(p)) return p;
+    if (gemini.length) return gemini[0];
+  } catch (e) { }
+  return preferred[0];
+}
+
 // Google grounding via Antigravity: tool-free, because Cloud Code rejects googleSearch
 // together with functionDeclarations. No external key, only an Antigravity login.
 export async function antigravityGrounding(query, { fetchImpl = fetch, timeoutMs = 45000, model = null } = {}) {
@@ -223,7 +238,10 @@ export async function antigravityGrounding(query, { fetchImpl = fetch, timeoutMs
   try { token = await antigravity.ensureAccessToken(creds); }
   catch (err) { const e = new Error("Antigravity: " + err.message); e.quota = true; throw e; }
 
-  const chosen = model || process.env.CC_TERMUX_ANTIGRAVITY_GROUNDING_MODEL || "gemini-3.8-flash-high";
+  // Only Gemini models honour googleSearch; Claude and GPT-OSS on Antigravity accept the
+  // request but silently drop it, so grounding always runs on a Gemini model.
+  const requested = model || process.env.CC_TERMUX_ANTIGRAVITY_GROUNDING_MODEL || "";
+  const chosen = /^gemini-/.test(requested) ? requested : await pickGeminiModel();
   const prompt = "Use Google Search to answer this query, then reply with a short factual summary "
     + "and the source titles you used.\n\nQuery: " + query;
   const envelope = anthropicToGemini({ messages: [{ role: "user", content: prompt }], max_tokens: 1024 }, chosen, creds);

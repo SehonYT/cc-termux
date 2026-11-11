@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // cc-termux web tools (stdio MCP server): Web Fetch and Web Search for Claude Code.
 // Every hop is SSRF-checked and pinned; fetched text is fenced as untrusted data.
+import fs from "node:fs";
 import http from "node:http";
 import https from "node:https";
 import dns from "node:dns";
@@ -557,14 +558,17 @@ async function localScrapers(query, maxResults) {
   return { outcome, rows: outcome.results };
 }
 
-// Google grounding is only usable when Antigravity is the provider the agent is talking to,
-// so the chain is built per request from the live config.
+// Google grounding only works when Antigravity is the active provider, so the chain is
+// rebuilt per request. A failure here must be visible, never a silent degraded chain.
 function antigravityActive() {
   try {
     const cfg = JSON.parse(fs.readFileSync(configFile(), "utf8"));
     const active = (cfg.providers || {})[cfg.active] || {};
     return active.type === "antigravity";
-  } catch (e) { return false; }
+  } catch (e) {
+    try { process.stderr.write("[web] could not read config to pick the chain: " + e.message + "\n"); } catch (e2) { }
+    return false;
+  }
 }
 
 export async function webSearch(query, { maxResults = 8, engines } = {}) {
@@ -579,22 +583,27 @@ export async function webSearch(query, { maxResults = 8, engines } = {}) {
 
   // When an explicit engine list is passed, the caller wants the local scrapers directly.
   const chainToUse = engineList.length ? ["local"] : chain;
+  let localOutcome = { results: [], report: [] };
   const ran = await searchChain(q, {
     chain: chainToUse, maxResults, cfg,
-    localSearch: async (qq) => (await localScrapers(qq, maxResults)).rows,
+    // The locals run only when the chain reaches them, never speculatively: a remote
+    // answer must not be overwritten by a slower scrape.
+    localSearch: async (qq) => { localOutcome = (await localScrapers(qq, maxResults)).outcome; return localOutcome.results; },
     // stderr only: stdout is the MCP wire, and a fallback note must not corrupt it.
     log: (m) => { try { process.stderr.write("[web] " + m + "\n"); } catch (e) { } },
   });
-  const localOutcome = (await localScrapers(q, maxResults)).outcome;
+  const failed = ran.attempts.filter((a) => a.status !== "ok");
   const summary = ran.provider === "local" || !ran.provider
     ? formatSearchReport(localOutcome.report)
-    : "answered by " + ran.provider + (ran.attempts.some((a) => a.status !== "ok") ? " (fell back from " + ran.attempts.filter((a) => a.status !== "ok").map((a) => a.provider + ":" + a.status).join(", ") + ")" : "");
+    : "answered by " + ran.provider + (failed.length ? " (fell back from " + failed.map((a) => a.provider + ":" + a.status).join(", ") + ")" : "");
   const result = {
-    ...localOutcome,
-    results: ran.rows.length ? ran.rows : localOutcome.results,
+    query: q,
+    results: ran.rows,
+    report: localOutcome.report,
     provider: ran.provider || "local",
     attempts: ran.attempts,
     summary,
+    tookMs: 0,
   };
   cacheSet(key, result);
   return result;

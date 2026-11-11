@@ -259,6 +259,34 @@ test("grounding reports a clean quota error so the chain can move on", async () 
 });
 
 
+test("the MCP can read the live config where the chain is decided", () => {
+  // antigravityActive() reads the config file, and a missing fs import once made it throw,
+  // silently dropping Google from the chain so every search fell back to the scrapers.
+  const mcp = fs.readFileSync(path.join(root, "bin", "cc-mcp.mjs"), "utf8");
+  assert.match(mcp, /^import fs from "node:fs";$/m, "cc-mcp must import node:fs for the chain check");
+  assert.match(mcp, /import \{ configFile \} from "\.\/cc-paths\.mjs";/);
+  assert.match(mcp, /resolveChain\("search", cfg, \{ antigravity: antigravityActive\(\) \}\)/);
+  // A failure must be reported, never silently swallowed into a degraded chain.
+  assert.match(mcp, /could not read config to pick the chain/);
+  assert.ok(!/function antigravityActive\(\) \{\s*try \{[^}]*catch \(e\) \{ return false; \}/.test(mcp), "the catch must not be silent");
+});
+
+test("only Gemini models can ground, so the request is retargeted", () => {
+  const wp = fs.readFileSync(path.join(root, "bin", "cc-webproviders.mjs"), "utf8");
+  assert.match(wp, /export async function pickGeminiModel\(\)/);
+  // Non-Gemini Antigravity models accept googleSearch but drop it silently.
+  assert.match(wp, /const chosen = .*test\(requested\) \? requested : await pickGeminiModel\(\);/);
+  assert.match(wp, /"gemini-3\.8-flash-high", "gemini-3\.8-flash-medium", "gemini-3\.8-flash-low"/);
+});
+
+test("the local scraper runs only when the chain reaches it", () => {
+  const mcp = fs.readFileSync(path.join(root, "bin", "cc-mcp.mjs"), "utf8");
+  // A speculative local scrape used to overwrite a successful remote answer.
+  assert.match(mcp, /localSearch: async \(qq\) => \{ localOutcome = \(await localScrapers\(qq, maxResults\)\)\.outcome; return localOutcome\.results; \}/);
+  assert.ok(!/const localOutcome = \(await localScrapers\(q, maxResults\)\)\.outcome;/.test(mcp), "the scrapers must not run speculatively");
+  assert.match(mcp, /results: ran\.rows,/);
+});
+
 test("the installer and setup both offer the web providers", () => {
   const installer = fs.readFileSync(path.join(root, "install.mjs"), "utf8");
   const setup = fs.readFileSync(path.join(root, "bin", "cc-setup.mjs"), "utf8");
