@@ -85,49 +85,135 @@ test("the cc-termux-web skill documents the real chain order", () => {
   assert.match(text, /mcp__web__search/);
   assert.match(text, /mcp__web__fetch/);
   assert.match(text, /Antigravity/, "Google grounding is first when Antigravity is active");
-  assert.match(text, /Built-in scrapers/, "and the scrapers are always last");
+  assert.match(text, /chain:generated/, "the order is generated, never hardcoded");
   assert.match(text, /untrusted data/i, "must repeat the injection rule");
 });
 
-test("the skills module installs, reports and removes without touching other skills", () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cc-skills-"));
-  // claudeDir() uses os.homedir(), which ignores HOME on this platform, so the target is
-  // redirected with CLAUDE_CONFIG_DIR instead. Never touch the real ~/.claude.
-  const prevClaudeDir = process.env.CLAUDE_CONFIG_DIR;
-  const prevRoot = process.env.CC_TERMUX_ROOT;
-  try {
-    process.env.CLAUDE_CONFIG_DIR = path.join(tmp, ".claude");
-    process.env.CC_TERMUX_ROOT = path.join(root);
+test("the skills module installs, reports and removes without touching other skills", async () => {
+  await withTarget(async (tmp) => {
     // A skill the user wrote must survive install and remove.
     const mine = path.join(tmp, ".claude", "skills", "my-own");
     fs.mkdirSync(mine, { recursive: true });
     fs.writeFileSync(path.join(mine, "SKILL.md"), "---\nname: my-own\ndescription: mine\n---\n\nbody\n");
 
-    {
-      const mod = skills;
-      const before = mod.skillStatus();
-      assert.ok(before.length >= 5);
-      assert.ok(before.every((s) => !s.installed), "nothing is installed in a fresh home");
+    const before = skills.skillStatus();
+    assert.ok(before.length >= 5);
+    assert.ok(before.every((s) => !s.installed), "nothing is installed in a fresh home");
 
-      const installed = mod.installSkills();
-      assert.equal(installed.installed.length, before.length);
-      for (const s of mod.skillStatus()) assert.ok(s.installed, s.id + " should be installed");
-      assert.ok(fs.existsSync(path.join(mine, "SKILL.md")), "the user's own skill is untouched");
+    const installed = await skills.installSkills();
+    assert.equal(installed.installed.length, before.length);
+    for (const s of skills.skillStatus()) assert.ok(s.installed, s.id + " should be installed");
+    assert.ok(fs.existsSync(path.join(mine, "SKILL.md")), "the user's own skill is untouched");
 
-      // Installing twice must be safe.
-      const again = mod.installSkills();
-      assert.equal(again.installed.length, before.length);
+    // Installing twice must be safe: the second run refreshes, it never re-installs.
+    const again = await skills.installSkills();
+    assert.equal(again.installed.length, 0, "nothing is installed twice");
+    assert.equal(again.kept.length + again.updated.length, before.length, "every skill is accounted for");
+    assert.ok(fs.existsSync(path.join(mine, "SKILL.md")), "the user's own skill survives a second run");
 
-      const removed = mod.removeSkills();
-      assert.equal(removed.removed.length, before.length);
-      assert.ok(fs.existsSync(path.join(mine, "SKILL.md")), "remove must not delete a foreign skill");
-      assert.ok(mod.skillStatus().every((s) => !s.installed));
-    }
-  } finally {
-    if (prevClaudeDir === undefined) delete process.env.CLAUDE_CONFIG_DIR; else process.env.CLAUDE_CONFIG_DIR = prevClaudeDir;
-    if (prevRoot === undefined) delete process.env.CC_TERMUX_ROOT; else process.env.CC_TERMUX_ROOT = prevRoot;
-    fs.rmSync(tmp, { recursive: true, force: true });
+    const removed = skills.removeSkills();
+    assert.equal(removed.removed.length, before.length);
+    assert.ok(fs.existsSync(path.join(mine, "SKILL.md")), "remove must not delete a foreign skill");
+    assert.ok(skills.skillStatus().every((s) => !s.installed));
+  });
+});
+
+// Every test below that writes skills redirects the target and awaits the now-async API.
+function withTarget(fn) {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cc-skillup-"));
+  const prevDir = process.env.CLAUDE_CONFIG_DIR;
+  const prevRoot = process.env.CC_TERMUX_ROOT;
+  process.env.CLAUDE_CONFIG_DIR = path.join(tmp, ".claude");
+  process.env.CC_TERMUX_ROOT = root;
+  return Promise.resolve()
+    .then(() => fn(tmp))
+    .finally(() => {
+      if (prevDir === undefined) delete process.env.CLAUDE_CONFIG_DIR; else process.env.CLAUDE_CONFIG_DIR = prevDir;
+      if (prevRoot === undefined) delete process.env.CC_TERMUX_ROOT; else process.env.CC_TERMUX_ROOT = prevRoot;
+      fs.rmSync(tmp, { recursive: true, force: true });
+    });
+}
+
+test("an update never overwrites a skill the user edited", async () => {
+  await withTarget(async () => {
+    await skills.installSkills();
+    const file = path.join(skills.skillsTarget(), "ponytail", "SKILL.md");
+    const original = fs.readFileSync(file, "utf8");
+    fs.writeFileSync(file, original + "\n## my own note\n");
+    const cmp = skills.compareSkill({ id: "ponytail", name: "ponytail", dir: "ponytail" });
+    assert.equal(cmp.state, "modified");
+    assert.deepEqual(cmp.edited, ["SKILL.md"]);
+
+    const r = await skills.installSkills();
+    assert.ok(r.kept.some((k) => k.id === "ponytail"), "the edited skill must be reported as kept");
+    assert.match(fs.readFileSync(file, "utf8"), /my own note/, "the edit must survive the update");
+  });
+});
+
+test("--force is the only way to overwrite an edited skill", async () => {
+  await withTarget(async () => {
+    await skills.installSkills();
+    const file = path.join(skills.skillsTarget(), "ponytail", "SKILL.md");
+    fs.writeFileSync(file, fs.readFileSync(file, "utf8") + "\n## note to be replaced\n");
+    await skills.installSkills({ force: true });
+    assert.doesNotMatch(fs.readFileSync(file, "utf8"), /note to be replaced/);
+  });
+});
+
+test("a deleted file is restored even when another file was edited", async () => {
+  await withTarget(async () => {
+    await skills.installSkills();
+    const dir = path.join(skills.skillsTarget(), "frontend-design");
+    fs.writeFileSync(path.join(dir, "SKILL.md"), fs.readFileSync(path.join(dir, "SKILL.md"), "utf8") + "\n## keep me\n");
+    fs.rmSync(path.join(dir, "LICENSE.txt"));
+    await skills.installSkills();
+    assert.ok(fs.existsSync(path.join(dir, "LICENSE.txt")), "the missing file must come back");
+    assert.match(fs.readFileSync(path.join(dir, "SKILL.md"), "utf8"), /keep me/, "the edit is still kept");
+  });
+});
+
+test("status distinguishes installed, outdated and locally modified", async () => {
+  await withTarget(async () => {
+    assert.ok(skills.skillStatus().every((s) => !s.installed), "nothing installed yet");
+    await skills.installSkills();
+    assert.ok(skills.skillStatus().every((s) => s.installed && s.state === "unchanged"));
+    const file = path.join(skills.skillsTarget(), "ux-review", "SKILL.md");
+    fs.writeFileSync(file, fs.readFileSync(file, "utf8") + "\nlocal\n");
+    const one = skills.skillStatus().find((s) => s.id === "ux-review");
+    assert.equal(one.state, "modified");
+    assert.match(skills.formatSkills(skills.skillStatus()), /! ux-review/, "the marker must show in the listing");
+  });
+});
+
+test("the generated provider line is built from the live provider table", async () => {
+  const line = await skills.providerChainSummary();
+  assert.ok(line.length > 0, "a summary is produced");
+  const wp = await import("../bin/cc-webproviders.mjs");
+  const google = wp.PROVIDER_INFO.google.label;
+  assert.ok(line.includes(google), "Antigravity grounding leads the summary");
+  for (const id of ["tavily", "brave", "jina", "local"]) {
+    const label = wp.PROVIDER_INFO[id].label.replace(/ \(.*\)$/, "");
+    assert.ok(line.includes(label), "the summary must name " + id);
   }
+  // The skill carries the sentence, not a hardcoded copy of the order.
+  const text = fs.readFileSync(path.join(packDir, "cc-termux-web", "SKILL.md"), "utf8");
+  assert.match(text, /chain:generated/, "the generated line needs its marker");
+  assert.match(text, /cc-termux web status/, "the skill must point at the live order");
+});
+
+test("install refreshes the generated line in place", async () => {
+  await withTarget(async () => {
+    await skills.installSkills();
+    const file = path.join(skills.skillsTarget(), "cc-termux-web", "SKILL.md");
+    // Simulate a stale order written by an older install.
+    fs.writeFileSync(file, fs.readFileSync(file, "utf8").replace(/^1\. .*$/m, "1. DuckDuckGo, then Bing."));
+    await skills.installSkills({ force: true });
+    const line = await skills.providerChainSummary();
+    const updated = fs.readFileSync(file, "utf8");
+    // Compare on plain strings: the sentence is data, not a pattern.
+    assert.ok(updated.includes("1. " + line + "."), "the stale order is replaced with the generated one");
+    assert.ok(!updated.includes("DuckDuckGo, then Bing."), "the old text is gone");
+  });
 });
 
 test("the installer ships the pack and the launcher restores it", () => {

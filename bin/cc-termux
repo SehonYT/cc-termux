@@ -306,6 +306,19 @@ async function doctor(fix) {
     else warn(stale.length + " non-chat gemini models in picker (cc-termux doctor --fix)");
   }
 
+  // The skill pack is content the user may have edited; report it like the picker.
+  try {
+    const sk = skillStatus();
+    const missing = sk.filter((s) => !s.installed);
+    const stale = sk.filter((s) => s.state === "outdated" || s.state === "partial");
+    const edited = sk.filter((s) => s.state === "modified");
+    if (missing.length && fix) { await installSkills(); fixed++; pass("installed " + missing.length + " missing skill(s)"); }
+    else if (missing.length) warn(missing.length + " skill(s) not installed (cc-termux skills install)");
+    else if (stale.length && fix) { await installSkills(); fixed++; pass("updated " + stale.length + " skill(s)"); }
+    else if (stale.length) warn(stale.length + " skill(s) have an update (cc-termux skills install)");
+    else pass("agent skills installed (" + sk.length + ")" + (edited.length ? ", " + edited.length + " locally modified and kept" : ""));
+  } catch (e) { }
+
   let patchOut = "";
   try {
     patchOut = execFileSync(process.execPath, [path.join(ROOT, "bin", "cc-patch.mjs"), "--status"], { encoding: "utf8" });
@@ -891,7 +904,7 @@ switch (cmd) {
     }
     if (sub === "install") {
       const only = args.slice(1).filter((a) => !a.startsWith("-"));
-      const r = installSkills({ only: only.length ? only : null });
+      const r = await installSkills({ only: only.length ? only : null });
       console.log("installed " + r.installed.length + " skill(s)" + (r.installed.length ? ": " + r.installed.join(", ") : ""));
       for (const s of r.skipped) console.log("  skipped " + s.id + ": " + s.reason);
       break;

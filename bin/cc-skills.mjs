@@ -1,13 +1,15 @@
 #!/usr/bin/env node
 // Installs the cc-termux skill pack into Claude Code's skills directory.
-// A skill is a folder with a SKILL.md; the catalog lives in skills/catalog.json.
+// Skills become the user's files, so an update records hashes and never overwrites an edit.
 import fs from "node:fs";
 import path from "node:path";
+import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { installRoot, claudeDir } from "./cc-paths.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PACK_DIR = path.join(installRoot(), "skills");
+const MANIFEST = ".cc-termux-pack.json";
 
 function catalogDir() {
   // Installed layout first, then the repo layout (tests and local runs).
@@ -28,42 +30,143 @@ export function loadCatalog() {
 export function skillsTarget() {
   return path.join(claudeDir(), "skills");
 }
+function manifestPath() {
+  return path.join(skillsTarget(), MANIFEST);
+}
 
 // A skill is a directory holding SKILL.md, which is all Claude Code needs.
 export function isValidSkill(dir) {
   try { return fs.statSync(path.join(dir, "SKILL.md")).isFile(); } catch (e) { return false; }
 }
 
-function copyDir(from, to) {
+const sha = (buf) => crypto.createHash("sha256").update(buf).digest("hex");
+
+// Every .md (and licence) file in a skill, with its content hash.
+export function hashSkill(dir) {
+  const out = {};
+  const walk = (base, rel) => {
+    for (const entry of fs.readdirSync(base, { withFileTypes: true })) {
+      const full = path.join(base, entry.name);
+      const key = rel ? rel + "/" + entry.name : entry.name;
+      if (entry.isDirectory()) walk(full, key);
+      else if (entry.isFile()) out[key] = sha(fs.readFileSync(full));
+    }
+  };
+  if (fs.existsSync(dir)) walk(dir, "");
+  return out;
+}
+
+function readManifest() {
+  try { return JSON.parse(fs.readFileSync(manifestPath(), "utf8")); } catch (e) { return { version: 0, skills: {} }; }
+}
+function writeManifest(m) {
+  try {
+    fs.mkdirSync(skillsTarget(), { recursive: true });
+    fs.writeFileSync(manifestPath(), JSON.stringify(m, null, 2) + "\n", { mode: 0o600 });
+  } catch (e) { }
+}
+
+function copyDir(from, to, into = "") {
   fs.mkdirSync(to, { recursive: true });
   for (const entry of fs.readdirSync(from, { withFileTypes: true })) {
     const src = path.join(from, entry.name);
     const dst = path.join(to, entry.name);
-    if (entry.isDirectory()) copyDir(src, dst);
+    if (entry.isDirectory()) copyDir(src, dst, into);
     else if (entry.isFile()) fs.copyFileSync(src, dst);
   }
 }
 
-export function installSkills({ only = null, force = true } = {}) {
+// What an update would do to one skill, without touching anything: unchanged, modified
+// (the user edited it), partial (files are missing) or outdated (upstream added files).
+export function compareSkill(skill) {
+  const catalog = loadCatalog();
+  const from = path.join(catalogDir(), skill.dir);
+  const to = path.join(skillsTarget(), skill.name);
+  const manifest = readManifest();
+  const recorded = (manifest.skills || {})[skill.name];
+  if (!isValidSkill(to)) return { state: "missing", changed: Object.keys(hashSkill(from)) };
+  const current = hashSkill(to);
+  if (!recorded) {
+    // Installed before this pack recorded hashes: assume the user may have edited it.
+    return { state: "unknown", changed: [] };
+  }
+  const files = Object.keys(current);
+  const deleted = Object.keys(recorded.files || {}).filter((f) => !(f in current));
+  const edited = files.filter((f) => recorded.files[f] && recorded.files[f] !== current[f]);
+  // Files upstream has that the install lacks (new files in a newer pack version).
+  const upstream = hashSkill(from);
+  const added = Object.keys(upstream).filter((f) => !(f in current));
+  if (edited.length) return { state: "modified", edited, deleted, added, changed: [] };
+  if (deleted.length) return { state: "partial", edited, deleted, added, changed: [] };
+  if (added.length) return { state: "outdated", edited, deleted, added, changed: added };
+  return { state: "unchanged", edited: [], deleted: [], added: [], changed: [] };
+}
+
+// Install or update: writes what is missing, refreshes what is untouched, and keeps an
+// edited skill unless force is set.
+export async function installSkills({ only = null, force = false, record = true } = {}) {
   const catalog = loadCatalog();
   const src = catalogDir();
   const target = skillsTarget();
   const installed = [];
+  const updated = [];
+  const kept = [];
   const skipped = [];
   for (const skill of catalog.skills) {
     if (only && !only.includes(skill.id)) continue;
     const from = path.join(src, skill.dir);
     if (!isValidSkill(from)) { skipped.push({ id: skill.id, reason: "SKILL.md missing" }); continue; }
     const to = path.join(target, skill.name);
+    const state = compareSkill(skill).state;
     try {
-      if (fs.existsSync(to) && !force) { skipped.push({ id: skill.id, reason: "already installed" }); continue; }
-      copyDir(from, to);
-      installed.push(skill.id);
+      if (state === "missing" || force || state === "unchanged" || state === "outdated" || state === "unknown") {
+        if (state === "unknown" && !force) { kept.push({ id: skill.id, reason: "installed by an older version; kept as is" }); continue; }
+        const existed = isValidSkill(to);
+        copyDir(from, to);
+        (existed ? updated : installed).push(skill.id);
+      } else if (state === "modified" || state === "partial") {
+        // Never rewrite an edited file, but restore what went missing: an edit is not a
+        // reason to leave a skill broken.
+        const cmp = compareSkill(skill);
+        fs.mkdirSync(to, { recursive: true });
+        const restored = [];
+        for (const rel of [...(cmp.deleted || []), ...(cmp.added || [])]) {
+          const s = path.join(from, rel);
+          if (!fs.existsSync(s)) continue;
+          fs.mkdirSync(path.dirname(path.join(to, rel)), { recursive: true });
+          fs.copyFileSync(s, path.join(to, rel));
+          restored.push(rel);
+        }
+        const edited = cmp.edited || [];
+        if (restored.length) updated.push(skill.id + " (restored " + restored.join(", ") + ")" + (edited.length ? ", kept your edits" : ""));
+        kept.push({ id: skill.id, reason: (edited.length ? "you edited " + edited.join(", ") : "local changes") + (restored.length ? ", missing files restored" : "; left alone") });
+      }
     } catch (e) {
       skipped.push({ id: skill.id, reason: e.message });
     }
   }
-  return { installed, skipped, target };
+  if (record) {
+    // Keep the generated provider line in step with the code that implements the chain.
+    try {
+      const line = await providerChainSummary();
+      if (line) await refreshGenerated("cc-termux-web", "SKILL.md", "chain:generated", line);
+    } catch (e) { }
+    recordManifest();
+  }
+  return { installed, updated, kept, skipped, target };
+}
+
+// Records what this pack wrote, so a later update can tell an edit from an upgrade.
+export function recordManifest() {
+  const catalog = loadCatalog();
+  const manifest = { version: catalog.version || 1, pack: "cc-termux", at: new Date().toISOString(), skills: {} };
+  for (const skill of catalog.skills) {
+    const dir = path.join(skillsTarget(), skill.name);
+    if (!isValidSkill(dir)) continue;
+    manifest.skills[skill.name] = { id: skill.id, files: hashSkill(dir), source: skill.source };
+  }
+  writeManifest(manifest);
+  return manifest;
 }
 
 export function removeSkills({ only = null } = {}) {
@@ -77,26 +180,86 @@ export function removeSkills({ only = null } = {}) {
     if (!isValidSkill(dir)) continue;
     try { fs.rmSync(dir, { recursive: true, force: true }); removed.push(skill.id); } catch (e) { }
   }
+  if (removed.length) recordManifest();
   return { removed, target };
 }
 
 export function skillStatus() {
   const catalog = loadCatalog();
   const target = skillsTarget();
-  return catalog.skills.map((skill) => ({
-    id: skill.id,
-    name: skill.name,
-    description: skill.description,
-    source: skill.source,
-    license: skill.license,
-    installed: isValidSkill(path.join(target, skill.name)),
-  }));
+  const manifest = readManifest();
+  return catalog.skills.map((skill) => {
+    const installed = isValidSkill(path.join(target, skill.name));
+    const cmp = installed ? compareSkill(skill) : { state: "not installed" };
+    return {
+      id: skill.id,
+      name: skill.name,
+      description: skill.description,
+      source: skill.source,
+      license: skill.license,
+      installed,
+      state: cmp.state,
+      packVersion: manifest.version || 0,
+      catalogVersion: catalog.version || 1,
+    };
+  });
+}
+
+// Skills whose shipped text describes a provider chain that has since changed.
+export function staleContent() {
+  const out = [];
+  const chainFile = path.join(skillsTarget(), "cc-termux-web", "SKILL.md");
+  try {
+    const text = fs.readFileSync(chainFile, "utf8");
+    const expected = providerChainSummary();
+    if (!text.includes(expected)) out.push({ id: "cc-termux-web", reason: "provider chain changed since it was installed" });
+  } catch (e) { }
+  return out;
+}
+
+// One line naming the live chain, generated so the skill can never drift from the code.
+// Generated at install time so the skill can never drift from the code that implements it.
+export async function providerChainSummary() {
+  try {
+    const { WEB_PROVIDERS, PROVIDER_INFO } = await import("./cc-webproviders.mjs");
+    const labels = WEB_PROVIDERS.filter((id) => !PROVIDER_INFO[id].antigravityOnly)
+      .map((id) => PROVIDER_INFO[id].label.replace(/ \(.*\)$/, ""));
+    const ag = WEB_PROVIDERS.find((id) => PROVIDER_INFO[id].antigravityOnly);
+    const agLabel = ag ? PROVIDER_INFO[ag].label : "";
+    return agLabel + ", then " + labels.join(", ");
+  } catch (e) {
+    return "";
+  }
+}
+
+// Rewrites the one generated line inside a skill, leaving every hand-written word alone.
+export async function refreshGenerated(skillName, file, marker, line) {
+  const target = path.join(skillsTarget(), skillName, file);
+  try {
+    const text = fs.readFileSync(target, "utf8");
+    if (!text.includes(marker) || !line) return false;
+    const lines = text.split("\n");
+    const at = lines.findIndex((l) => l.includes(marker));
+    // The generated sentence sits on the line above the marker.
+    if (at < 1) return false;
+    const next = lines.slice();
+    next[at - 1] = next[at - 1].replace(/^1\..*/, "1. " + line + ".");
+    if (next[at - 1] === lines[at - 1]) return false;
+    fs.writeFileSync(target, next.join("\n"));
+    return true;
+  } catch (e) { return false; }
 }
 
 export function formatSkills(status) {
   if (!status.length) return "no skills in the pack";
   const width = Math.max(...status.map((s) => s.name.length));
-  return status.map((s) => (s.installed ? "  + " : "  - ") + s.name.padEnd(width) + "  " + s.description).join("\n");
+  const label = (s) => {
+    if (!s.installed) return "-";
+    if (s.state === "modified") return "!";
+    if (s.state === "outdated" || s.state === "partial") return "^";
+    return "+";
+  };
+  return status.map((s) => "  " + label(s) + " " + s.name.padEnd(width) + "  " + s.description).join("\n");
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
@@ -108,17 +271,22 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     console.log("skills in " + skillsTarget() + ":");
     console.log(formatSkills(status));
     console.log();
-    console.log("  + installed   - not installed");
-  } else if (cmd === "install") {
+    console.log("  + installed   ^ update available   ! locally modified (kept)   - not installed");
+  } else if (cmd === "install" || cmd === "update") {
     const only = args.filter((a) => !a.startsWith("-"));
-    const r = installSkills({ only: only.length ? only : null });
-    console.log("installed " + r.installed.length + " skill(s) into " + r.target + (r.installed.length ? ": " + r.installed.join(", ") : ""));
-    for (const s of r.skipped) console.log("  skipped " + s.id + ": " + s.reason);
+    const force = args.includes("--force");
+    const r = await installSkills({ only: only.length ? only : null, force });
+    if (r.installed.length) console.log("installed: " + r.installed.join(", "));
+    if (r.updated.length) console.log("updated:   " + r.updated.join(", "));
+    for (const k of r.kept) console.log("kept:      " + k.id + " (" + k.reason + ")");
+    for (const s of r.skipped) console.log("skipped:   " + s.id + " (" + s.reason + ")");
+    if (!r.installed.length && !r.updated.length && !r.kept.length) console.log("nothing to do");
+    if (r.kept.length) console.log("\nuse --force to overwrite a modified skill");
   } else if (cmd === "remove" || cmd === "uninstall") {
     const only = args.filter((a) => !a.startsWith("-"));
     const r = removeSkills({ only: only.length ? only : null });
     console.log("removed " + r.removed.length + " skill(s)" + (r.removed.length ? ": " + r.removed.join(", ") : ""));
   } else {
-    console.log("usage: cc-skills [status|install [id...]|remove [id...]]");
+    console.log("usage: cc-skills [status|install [id...] [--force]|remove [id...]]");
   }
 }

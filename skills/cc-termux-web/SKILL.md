@@ -26,9 +26,10 @@ Prefer search first, then fetch the two or three most promising URLs rather than
 
 Search runs a chain and stops at the first provider that answers:
 
-1. **Google Search (Antigravity)** — only while Antigravity is the active provider.
-2. **Tavily**, **Brave** or **Jina** — when a key is set.
-3. **Built-in scrapers** — Bing, DuckDuckGo, Google, Brave, Startpage; always available.
+1. Google Search (Antigravity), then Tavily, Brave or Jina, then the built-in scrapers.
+   <!-- chain:generated -->
+   The exact order is decided at request time: run `cc-termux web status` to see the chain
+   this device is using right now. Do not assume an order that the tool contradicts.
 
 Do not try to work around a provider: if the status line says an engine was blocked or
 quota-limited, the chain already fell through to the next one.

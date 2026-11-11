@@ -374,7 +374,7 @@ async function envForChild() {
   const env = await envForChild();
   try { ensureMcpServer(); } catch (e) { }
   // The skill pack is content: restore anything missing without touching what the user edited.
-  try { installSkills({ force: false }); } catch (e) { }
+  try { await installSkills({ force: false }); } catch (e) { }
   if (!trivial) {
     // Replace a stale status line left by a previous session/provider.
     try { spawn(process.execPath, [path.join(ROOT, "bin", "cc-statusline.mjs"), "--refresh"], { stdio: "ignore", detached: true, env, windowsHide: true }).unref(); } catch (e) { }

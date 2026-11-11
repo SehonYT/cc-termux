@@ -220,9 +220,9 @@ async function askWebProviders() {
 
 // The skill pack is content, not code: it is always installed so the agent has the
 // conventions available, and never overwrites a skill the user already has.
-function installSkillsQuietly() {
+async function installSkillsQuietly() {
   try {
-    const r = installSkills({ force: false });
+    const r = await installSkills({ force: false });
     if (r.installed.length) info("skills installed: " + r.installed.join(", "));
   } catch (e) { }
 }
@@ -514,7 +514,7 @@ function installShims(t) {
   stopManagedGateway();
   await askPerformance();
   await askWebProviders();
-  installSkillsQuietly();
+  await installSkillsQuietly();
   if (!NO_SHIMS) installShims(t);
   try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
   log((CODE_ONLY ? "updated " : "installed into ") + ROOT);
