@@ -225,6 +225,29 @@ which exposes two tools to the model:
 | `mcp__web__search` | Web Search | results from several engines, merged and ranked, with a per-engine status line |
 | `mcp__web__fetch` | Web Fetch | readable page text: title, description, headings, lists, tables, code and links |
 
+### Provider chain
+
+Search tries a chain of providers and stops at the first one that answers. A quota error, a
+rate limit, an auth failure or a network error moves to the next one; the built-in scraper
+is always last, so search never depends on a key existing.
+
+| Order | Provider | Needs a key | Notes |
+|---|---|---|---|
+| 1 | Tavily | no | `X-Tavily-Access-Mode: keyless` works with a daily cap; a free key raises it |
+| 2 | Brave Search API | yes | `X-Subscription-Token`; free plan is 2000 queries/month |
+| 3 | Jina Reader | no | `s.jina.ai/<query>` for search, `r.jina.ai/<url>` for page reading |
+| 4 | Built-in scraper | no | Bing, DuckDuckGo, Google, Brave and Startpage, merged and ranked |
+
+`bin/cc-webproviders.mjs` holds the providers, the config and the runner. Keys live in
+`~/.config/cc-termux/web.json` (mode 0600) or in `TAVILY_API_KEY`, `BRAVE_API_KEY` and
+`JINA_API_KEY`; the file wins. A provider that requires a key is skipped when it has none,
+and an empty result set falls through rather than winning.
+
+The installer asks for the three keys once and every one can be skipped, and
+`cc-termux setup` has a **web fetch providers** entry (`w`). `cc-termux web status` shows the
+active chain, `web key`/`web clear` manage keys and `web test` reports which provider
+answered and why the others did not.
+
 ### Search engines
 
 `bin/cc-search.mjs` holds one parser per engine plus the merge/rank logic. The HTML of each

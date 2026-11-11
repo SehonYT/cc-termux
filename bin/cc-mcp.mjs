@@ -542,20 +542,49 @@ export {
   unwrapGoogleUrl,
   unwrapStartpageUrl,
 };
+import { readWebConfig, resolveChain, searchChain, providerKey, PROVIDER_INFO } from "./cc-webproviders.mjs";
+
+// The local scrapers are the final link of the provider chain: remote APIs are tried
+// first when keys are configured, and this always exists as a fallback.
+async function localScrapers(query, maxResults) {
+  const searxUrl = process.env.CC_TERMUX_SEARX_URL || "";
+  const googleApi = process.env.CC_TERMUX_GOOGLE_KEY && process.env.CC_TERMUX_GOOGLE_CX
+    ? { key: process.env.CC_TERMUX_GOOGLE_KEY, cx: process.env.CC_TERMUX_GOOGLE_CX }
+    : null;
+  const outcome = await runSearchWeb(query, { maxResults, fetchPage, decodeBody, searxUrl, googleApi });
+  if (outcome.results.length) outcome.results.forEach((r) => { r.provider = "local"; });
+  return { outcome, rows: outcome.results };
+}
 
 export async function webSearch(query, { maxResults = 8, engines } = {}) {
   const q = String(query || "").trim();
   if (!q) throw new Error("query is required");
   const engineList = Array.isArray(engines) ? engines : String(engines || "").split(/[,\s]+/).filter(Boolean);
-  const searxUrl = process.env.CC_TERMUX_SEARX_URL || "";
-  const googleApi = process.env.CC_TERMUX_GOOGLE_KEY && process.env.CC_TERMUX_GOOGLE_CX
-    ? { key: process.env.CC_TERMUX_GOOGLE_KEY, cx: process.env.CC_TERMUX_GOOGLE_CX }
-    : null;
-  const key = "s:" + q + ":" + maxResults + ":" + (engineList.join(",") || "auto") + (searxUrl ? ":sx" : "") + (googleApi ? ":gapi" : "");
+  const cfg = readWebConfig();
+  const chain = resolveChain("search", cfg);
+  const key = "s:" + q + ":" + maxResults + ":" + (engineList.join(",") || "auto") + ":" + chain.join(">");
   const cached = cacheGet(key);
   if (cached) return cached;
-  const outcome = await runSearchWeb(q, { maxResults, engines: engineList, fetchPage, decodeBody, searxUrl, googleApi });
-  const result = { ...outcome, summary: formatSearchReport(outcome.report) };
+
+  // When an explicit engine list is passed, the caller wants the local scrapers directly.
+  const chainToUse = engineList.length ? ["local"] : chain;
+  const ran = await searchChain(q, {
+    chain: chainToUse, maxResults, cfg,
+    localSearch: async (qq) => (await localScrapers(qq, maxResults)).rows,
+    // stderr only: stdout is the MCP wire, and a fallback note must not corrupt it.
+    log: (m) => { try { process.stderr.write("[web] " + m + "\n"); } catch (e) { } },
+  });
+  const localOutcome = (await localScrapers(q, maxResults)).outcome;
+  const summary = ran.provider === "local" || !ran.provider
+    ? formatSearchReport(localOutcome.report)
+    : "answered by " + ran.provider + (ran.attempts.some((a) => a.status !== "ok") ? " (fell back from " + ran.attempts.filter((a) => a.status !== "ok").map((a) => a.provider + ":" + a.status).join(", ") + ")" : "");
+  const result = {
+    ...localOutcome,
+    results: ran.rows.length ? ran.rows : localOutcome.results,
+    provider: ran.provider || "local",
+    attempts: ran.attempts,
+    summary,
+  };
   cacheSet(key, result);
   return result;
 }

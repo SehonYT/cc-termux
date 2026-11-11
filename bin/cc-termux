@@ -7,6 +7,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { installRoot, configFile, claudeDir, cacheDir } from "./cc-paths.mjs";
 import { fetchPlans as naraFetchPlans, formatUsage as naraFormatUsage, readNaraCache, writeNaraCache } from "./cc-nara.mjs";
+import { WEB_PROVIDERS, PROVIDER_INFO, readWebConfig, writeWebConfig, providerKey as webProviderKey, resolveChain, searchChain } from "./cc-webproviders.mjs";
 
 const ROOT = installRoot();
 const CFG = configFile();
@@ -525,6 +526,7 @@ const HELP = [
   "  antigravity login     Google OAuth login",
   "  antigravity usage     live 5h/weekly quota",
   "  nararouter usage      NaraRouter plans, rate limits and model tiers",
+  "  web [status|key|test] web search providers (Tavily, Brave, Jina) + built-in scraper",
   "  antigravity models --update   refresh models from Google",
   "  statusline [--install]        Claude Code status line (model + quota)",
   "",
@@ -872,6 +874,57 @@ switch (cmd) {
       break;
     }
     console.log("usage: cc-termux nararouter [usage|plans] [plan] [--json]");
+    break;
+  }
+  case "web": {
+    const sub = (args[0] || "status").toLowerCase();
+    const cfg = readWebConfig();
+    cfg.keys = cfg.keys || {};
+    if (sub === "status" || sub === "list") {
+      const chain = resolveChain("search", cfg);
+      console.log("web search providers (tried in order, then the built-in scraper):");
+      chain.forEach((id, i) => {
+        const info = PROVIDER_INFO[id];
+        const has = webProviderKey(id, cfg);
+        const state = id === "local" ? "always available" : has ? "key saved" : info.needsKey ? "no key (skipped)" : "no key (keyless mode)";
+        console.log("  " + String(i + 1).padStart(2) + ". " + info.label.padEnd(24) + state);
+      });
+      console.log();
+      console.log("set a key:  cc-termux web key <tavily|brave|jina> <key>");
+      console.log("clear one:  cc-termux web clear <tavily|brave|jina>");
+      console.log("test:       cc-termux web test [query]");
+      console.log("also in env: " + WEB_PROVIDERS.filter((id) => PROVIDER_INFO[id].env).map((id) => PROVIDER_INFO[id].env).join(", "));
+      break;
+    }
+    if (sub === "key") {
+      const id = String(args[1] || "").toLowerCase();
+      const value = args.slice(2).join(" ").trim();
+      if (!PROVIDER_INFO[id] || id === "local") { console.error("unknown provider: " + (args[1] || "(none)") + "  (use tavily, brave or jina)"); process.exit(1); }
+      if (!value) { console.error("usage: cc-termux web key " + id + " <key>"); process.exit(1); }
+      cfg.keys[id] = value;
+      writeWebConfig(cfg);
+      console.log("saved " + PROVIDER_INFO[id].label + " key");
+      break;
+    }
+    if (sub === "clear") {
+      const id = String(args[1] || "").toLowerCase();
+      if (!cfg.keys[id]) { console.log("no " + (id || "key") + " key stored"); break; }
+      delete cfg.keys[id];
+      writeWebConfig(cfg);
+      console.log("cleared " + id);
+      break;
+    }
+    if (sub === "test") {
+      const q = args.slice(1).join(" ").trim() || "termux package management";
+      const chain = resolveChain("search", cfg).filter((id) => id !== "local");
+      console.log("query: " + q);
+      console.log("chain: " + (chain.join(" -> ") || "(none - built-in scraper only)"));
+      const out = await searchChain(q, { chain, maxResults: 3, cfg, localSearch: null }).catch((e) => ({ rows: [], attempts: [{ provider: "?", status: "error", message: e.message }] }));
+      for (const a of out.attempts) console.log("  " + a.provider + ": " + a.status + (a.count ? " (" + a.count + ")" : "") + (a.message ? " - " + a.message : ""));
+      if (out.rows.length) { console.log(); out.rows.slice(0, 3).forEach((r, i) => console.log("  " + (i + 1) + ". " + r.title + "\n     " + r.url)); }
+      break;
+    }
+    console.log("usage: cc-termux web [status|key <name> <key>|clear <name>|test [query]]");
     break;
   }
   case "presets": {

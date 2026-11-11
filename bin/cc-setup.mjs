@@ -11,6 +11,7 @@ import { login as antigravityLogin, ensureProject as antigravityEnsureProject, l
 import { installStatusLine, refreshStatusLine } from "./cc-statusline.mjs";
 import { installRoot, configFile, claudeDir, cacheDir } from "./cc-paths.mjs";
 import { fetchPlans as naraPlans, fetchNaraModels as naraModels, splitByTier as naraSplit, readNaraCache, writeNaraCache } from "./cc-nara.mjs";
+import { WEB_PROVIDERS, PROVIDER_INFO, readWebConfig, writeWebConfig, providerKey as webProviderKey, resolveChain } from "./cc-webproviders.mjs";
 
 const ROOT = installRoot();
 const CFG = configFile();
@@ -765,6 +766,54 @@ async function envMode() {
   await ensureStatusLine();
 }
 
+// Web search/fetch providers are separate from model providers: they are optional, any
+// number can be set, and the built-in scraper always remains as the last fallback.
+async function webProvidersFlow() {
+  const cfg = readWebConfig();
+  cfg.keys = cfg.keys || {};
+  for (;;) {
+    console.log();
+    console.log("  " + bold("Web fetch providers"));
+    console.log("  " + dim("Search tries these in order, then falls back to the built-in scraper."));
+    console.log();
+    const chain = resolveChain("search", cfg);
+    console.log("  " + dim("order") + "  " + dim("provider".padEnd(22)) + dim("key"));
+    chain.forEach((id, i) => {
+      const info = PROVIDER_INFO[id];
+      const has = webProviderKey(id, cfg);
+      const state = id === "local" ? "always available" : has ? "key saved" : info.needsKey ? "no key (skipped)" : "no key (keyless mode)";
+      console.log("  " + String(i + 1).padStart(2) + ".   " + bold(info.label.padEnd(22)) + dim(state));
+    });
+    console.log();
+    console.log("  " + dim("keys can also come from env:") + " " + dim(WEB_PROVIDERS.filter((id) => PROVIDER_INFO[id].env).map((id) => PROVIDER_INFO[id].env).join(", ")));
+    console.log("  " + dim("t = set Tavily   b = set Brave   j = set Jina   x = clear a key   q = back"));
+    console.log();
+    const a = (await ask("Web providers > ")).trim().toLowerCase();
+    if (!a || a === "q") return;
+    const setKey = async (id) => {
+      const info = PROVIDER_INFO[id];
+      console.log("  " + info.label + "  " + dim(info.note));
+      if (info.keyUrl) console.log("  " + dim("get a key: " + info.keyUrl));
+      const k = await askHidden(info.label + " API key (empty = skip) > ");
+      if (!k) { console.log(dim("  skipped")); return; }
+      cfg.keys[id] = k;
+      writeWebConfig(cfg);
+      console.log(cyan("  \u2714 " + info.label + " key saved"));
+    };
+    if (a === "t") { await setKey("tavily"); continue; }
+    if (a === "b") { await setKey("brave"); continue; }
+    if (a === "j") { await setKey("jina"); continue; }
+    if (a === "x") {
+      const pick = (await ask("Clear which provider key? (tavily/brave/jina) > ")).trim().toLowerCase();
+      const id = pick === "t" || pick === "tavily" ? "tavily" : pick === "b" || pick === "brave" ? "brave" : pick === "j" || pick === "jina" ? "jina" : "";
+      if (id && cfg.keys[id]) { delete cfg.keys[id]; writeWebConfig(cfg); console.log(cyan("  \u2714 cleared " + id)); }
+      else console.log(cyan("  nothing to clear"));
+      continue;
+    }
+    console.log(cyan("  enter t, b, j, x or q"));
+  }
+}
+
 async function addFlow(c) {
   console.log();
   console.log("  1. OpenRouter          " + dim("recommended - many free models"));
@@ -865,11 +914,12 @@ async function ttyMode() {
       console.log(dim("  No providers configured yet - let's add one."));
     }
     console.log();
-    console.log("  " + (list.length ? "number = switch provider   " : "") + "a = add provider   " + (list.length ? "r = remove   " : "") + "t = test   q = quit");
+    console.log("  " + (list.length ? "number = switch provider   " : "") + "a = add provider   " + (list.length ? "r = remove   " : "") + "t = test   w = web fetch providers   q = quit");
     console.log();
     const a = (await ask("Choice > ")).toLowerCase();
     if (a === "q") return;
     if (a === "t") { await runSmokeTest(); continue; }
+    if (a === "w") { await webProvidersFlow(); continue; }
     if (a === "a" || !list.length) {
       const added = await addFlow(c);
       if (!added) continue;

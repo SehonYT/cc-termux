@@ -179,6 +179,44 @@ async function askPerformance() {
   }
 }
 
+// Optional web-search keys. Everything is skippable: with no keys the built-in scrapers
+// handle search, and any provider added here becomes a faster first choice.
+async function askWebProviders() {
+  if (process.env.CC_TERMUX_NO_PROMPT === "1" || process.env.CC_TERMUX_NO_WEB_PROMPT === "1") return;
+  if (!process.stdin.isTTY || !process.stdout.isTTY) return;
+  const file = path.join(path.dirname(CFG), "web.json");
+  let cfg = {};
+  try { cfg = JSON.parse(fs.readFileSync(file, "utf8")); } catch (e) { }
+  if (cfg.asked) return;
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    console.log();
+    banner(["Web search providers (optional)"], { stream: process.stdout, tty: true });
+    console.log("  Search runs through the first provider that answers, then falls back to the");
+    console.log("  next one on quota, rate limit or failure. The built-in scraper is always last.");
+    console.log("  Press Enter to skip any of these - skipping keeps everything working.");
+    console.log();
+    const added = [];
+    for (const [id, label, url, hint] of [
+      ["tavily", "Tavily", "https://app.tavily.com/home", "free key, 1000 credits/month (works without a key at a lower cap)"],
+      ["brave", "Brave Search", "https://api-dashboard.search.brave.com/app/keys", "free plan, 2000 queries/month"],
+      ["jina", "Jina Reader", "https://jina.ai/reader", "search and page reading, free tier without a key"],
+    ]) {
+      console.log("  " + label + "  " + hint);
+      console.log("  get a key: " + url);
+      const a = (await rl.question("  " + label + " API key (Enter = skip) > ")).trim();
+      if (a) { cfg.keys = { ...(cfg.keys || {}), [id]: a }; added.push(id); }
+    }
+    cfg.asked = true;
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify(cfg, null, 2) + "\n", { mode: 0o600 });
+    if (added.length) step("Web providers configured: " + added.join(", ") + " (built-in scraper stays as fallback)", { stream: process.stdout, tty: true });
+    else step("No web keys added - using the built-in scraper (change later: cc-termux web)", { stream: process.stdout, tty: true });
+  } finally {
+    rl.close();
+  }
+}
+
 function looksLikeShim(file) {
   try {
     const fd = fs.openSync(file, "r");
@@ -465,6 +503,7 @@ function installShims(t) {
   } catch (e) { }
   stopManagedGateway();
   await askPerformance();
+  await askWebProviders();
   if (!NO_SHIMS) installShims(t);
   try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
   log((CODE_ONLY ? "updated " : "installed into ") + ROOT);

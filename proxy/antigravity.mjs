@@ -152,6 +152,14 @@ export function scrubIdentity(text) {
   for (const re of COMPETING_AGENT_PATTERNS) out = out.replace(re, "");
   return out.replace(/\n{3,}/g, "\n\n").trim();
 }
+// Antigravity accounts include Google Search grounding, so the provider can answer web
+// questions itself. The caller sets CC_TERMUX_ANTIGRAVITY_SEARCH=0 to turn it off.
+export function antigravitySearchEnabled() {
+  const flag = process.env.CC_TERMUX_ANTIGRAVITY_SEARCH;
+  if (flag != null) return flag !== "0" && flag !== "false";
+  return true;
+}
+
 export function anthropicToGemini(body, model, creds) {
   const contents = [];
   const toolNameById = new Map();
@@ -202,12 +210,17 @@ export function anthropicToGemini(body, model, creds) {
   }
   while (contents.length && contents[contents.length - 1].role === "model") contents.pop();
   if (!contents.length) contents.push({ role: "user", parts: [{ text: "continue" }] });
-  const tools = Array.isArray(body.tools) && body.tools.length
-    ? [{ functionDeclarations: body.tools.filter((t) => t && t.name).map((t) => ({
+  // Google Search grounding rides along with the function declarations, so an Antigravity
+  // session can search the web without any of the external providers.
+  const declarations = Array.isArray(body.tools) && body.tools.length
+    ? body.tools.filter((t) => t && t.name).map((t) => ({
         name: t.name,
         description: t.description || "",
         parameters: cleanSchema(t.input_schema || { type: "object", properties: {} }),
-      })) }]
+      }))
+    : [];
+  const tools = (declarations.length || antigravitySearchEnabled())
+    ? [{ ...(declarations.length ? { functionDeclarations: declarations } : {}), ...(antigravitySearchEnabled() ? { googleSearch: {} } : {}) }]
     : undefined;
   // Keep only Antigravity's own system prompt upstream and move the client prompt into the
   // first user turn: an oversized systemInstruction is answered with a misleading 429.
