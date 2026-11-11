@@ -543,6 +543,7 @@ export {
   unwrapStartpageUrl,
 };
 import { readWebConfig, resolveChain, searchChain, providerKey, PROVIDER_INFO } from "./cc-webproviders.mjs";
+import { configFile } from "./cc-paths.mjs";
 
 // The local scrapers are the final link of the provider chain: remote APIs are tried
 // first when keys are configured, and this always exists as a fallback.
@@ -556,12 +557,22 @@ async function localScrapers(query, maxResults) {
   return { outcome, rows: outcome.results };
 }
 
+// Google grounding is only usable when Antigravity is the provider the agent is talking to,
+// so the chain is built per request from the live config.
+function antigravityActive() {
+  try {
+    const cfg = JSON.parse(fs.readFileSync(configFile(), "utf8"));
+    const active = (cfg.providers || {})[cfg.active] || {};
+    return active.type === "antigravity";
+  } catch (e) { return false; }
+}
+
 export async function webSearch(query, { maxResults = 8, engines } = {}) {
   const q = String(query || "").trim();
   if (!q) throw new Error("query is required");
   const engineList = Array.isArray(engines) ? engines : String(engines || "").split(/[,\s]+/).filter(Boolean);
   const cfg = readWebConfig();
-  const chain = resolveChain("search", cfg);
+  const chain = resolveChain("search", cfg, { antigravity: antigravityActive() });
   const key = "s:" + q + ":" + maxResults + ":" + (engineList.join(",") || "auto") + ":" + chain.join(">");
   const cached = cacheGet(key);
   if (cached) return cached;

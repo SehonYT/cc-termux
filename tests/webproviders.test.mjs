@@ -208,6 +208,57 @@ test("an Antigravity request never sends both built-in and declared tools", () =
   assert.ok(!/include_server_side_tool_invocations/i.test(JSON.stringify(r)), "the flag Google names is not needed");
 });
 
+test("Google grounding joins the chain only when Antigravity is the active provider", () => {
+  const cfg = {};
+  assert.ok(!wp.resolveChain("search", cfg).includes("google"), "hidden for other providers");
+  const ag = wp.resolveChain("search", cfg, { antigravity: true });
+  assert.equal(ag[0], "google", "Google leads an Antigravity session");
+  assert.deepEqual(ag, ["google", "tavily", "local"]);
+  assert.equal(wp.PROVIDER_INFO.google.antigravityOnly, true);
+  assert.equal(wp.PROVIDER_INFO.google.needsKey, false, "Google grounding needs no API key");
+});
+
+test("a custom chain keeps Google out unless Antigravity asked for it", () => {
+  const cfg = { chains: { search: ["google", "jina"] }, keys: { jina: "j" } };
+  assert.deepEqual(wp.resolveChain("search", cfg), ["jina", "local"]);
+  assert.deepEqual(wp.resolveChain("search", cfg, { antigravity: true }), ["google", "jina", "local"]);
+});
+
+test("grounding parses the SSE frames Cloud Code returns", async () => {
+  // Shape captured from a live response: text and metadata live under response.candidates.
+  const frames = [
+    { response: { candidates: [{ content: { role: "model", parts: [{ text: "Mount Fuji is 3,776 m. " }] } }] } },
+    { response: { candidates: [{ content: { role: "model", parts: [{ text: "It is Japan's tallest." }] }, groundingMetadata: { webSearchQueries: ["tallest mountain japan"], groundingChunks: [{ web: { title: "britannica.com", uri: "https://vertexaisearch.cloud.google.com/x" } }] } }] } },
+  ];
+  const sse = frames.map((f) => "data: " + JSON.stringify(f)).join("\n") + "\n";
+  const parsed = wp.parseGroundingSse(sse);
+  assert.match(parsed.answer, /Mount Fuji is 3,776 m\./);
+  assert.match(parsed.answer, /Japan's tallest/);
+  assert.deepEqual(parsed.queries, ["tallest mountain japan"]);
+  assert.equal(parsed.sources.length, 1);
+  assert.equal(parsed.sources[0].title, "britannica.com");
+});
+
+test("grounding SSE parsing survives junk frames", () => {
+  const sse = ["not a data line", "data: {oops", "data: " + JSON.stringify({ noCandidates: true }), "data: " + JSON.stringify({ response: { candidates: [] } })].join("\n");
+  const parsed = wp.parseGroundingSse(sse);
+  assert.equal(parsed.answer, "");
+  assert.deepEqual(parsed.sources, []);
+  assert.deepEqual(parsed.queries, []);
+});
+
+test("grounding reports a clean quota error so the chain can move on", async () => {
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({ ok: false, status: 429, text: async () => JSON.stringify({ error: { message: "Resource has been exhausted" } }) });
+  try {
+    await assert.rejects(() => wp.antigravityGrounding("test", { model: "gemini-3.8-flash-high" }), (e) => {
+      assert.equal(e.quota, true);
+      return true;
+    });
+  } finally { globalThis.fetch = realFetch; }
+});
+
+
 test("the installer and setup both offer the web providers", () => {
   const installer = fs.readFileSync(path.join(root, "install.mjs"), "utf8");
   const setup = fs.readFileSync(path.join(root, "bin", "cc-setup.mjs"), "utf8");

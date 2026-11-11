@@ -229,17 +229,26 @@ which exposes two tools to the model:
 
 An Antigravity account includes Google Search grounding, and Cloud Code accepts it for a
 **tool-free** request: `{"tools":[{"googleSearch":{}}]}` returns real `groundingMetadata`.
+It cannot be combined with function calling — every arrangement is rejected with `400 Please
+enable tool_config.include_server_side_tool_invocations`, and that field does not exist in
+this API. Claude Code always sends tools, so the gateway can never use grounding directly.
 
-It cannot be combined with function calling. Every arrangement of `googleSearch` and
-`functionDeclarations` in one request is rejected with `400 Please enable
-tool_config.include_server_side_tool_invocations`, and that field does not exist at any level
-of this API — `toolConfig`, request, tool entry and envelope were all tried and all fail with
-`Unknown name` or the same 400. **Claude Code always sends tools**, so in practice an
-Antigravity session gets its web results from the same provider chain as everything else,
-not from Google.
+The MCP web server can, because it controls its own request. When the active provider is
+Antigravity, the search chain starts with **Google Search (Antigravity)**: the MCP sends a
+tool-free grounded request, then returns the grounded summary plus Google's source list as
+ordinary search results. The agent sees a normal `web:search` result, so Claude Code's tool
+loop is untouched.
 
-`CC_TERMUX_ANTIGRAVITY_SEARCH=0` turns grounding off. Tool-free calls still use it, so the
-capability is kept for anything that calls the gateway without declaring tools.
+| Chain position | Provider | When |
+|---|---|---|
+| 1 | Google Search (Antigravity) | only while Antigravity is the active provider |
+| 2 | Tavily | keyless or keyed |
+| 3 | Brave / Jina | when a key is set |
+| last | Built-in scraper | always |
+
+If grounding fails (expired login, quota, 404) the chain continues to the next provider.
+`CC_TERMUX_ANTIGRAVITY_SEARCH=0` disables grounding, and the gateway-side flag only affects
+tool-free calls that do not come from Claude Code.
 
 ### Provider chain
 

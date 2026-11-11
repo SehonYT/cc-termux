@@ -5,9 +5,17 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-export const WEB_PROVIDERS = ["tavily", "brave", "jina", "local"];
+export const WEB_PROVIDERS = ["google", "tavily", "brave", "jina", "local"];
 
 export const PROVIDER_INFO = {
+  google: {
+    label: "Google Search (Antigravity)",
+    keyUrl: "",
+    env: "",
+    needsKey: false,
+    antigravityOnly: true,
+    note: "Google's own index through your Antigravity account; no key needed",
+  },
   tavily: {
     label: "Tavily",
     keyUrl: "https://app.tavily.com/home",
@@ -67,13 +75,15 @@ export function providerKey(name, cfg = readWebConfig()) {
 
 // The chain the user configured, minus providers that need a key and have none.
 // "local" is always appended as the final fallback.
-export function resolveChain(name, cfg = readWebConfig()) {
+export function resolveChain(name, cfg = readWebConfig(), { antigravity = false } = {}) {
   const stored = (cfg.chains || {})[name];
   const list = Array.isArray(stored) && stored.length ? stored.slice() : WEB_PROVIDERS.slice(0, -1);
   const out = [];
   for (const id of list) {
-    if (!PROVIDER_INFO[id]) continue;
-    if (PROVIDER_INFO[id].needsKey && !providerKey(id, cfg)) continue;
+    const info = PROVIDER_INFO[id];
+    if (!info) continue;
+    if (info.antigravityOnly && !antigravity) continue;
+    if (info.needsKey && !providerKey(id, cfg)) continue;
     out.push(id);
   }
   if (!out.includes("local")) out.push("local");
@@ -176,6 +186,70 @@ export async function jinaSearch(query, { maxResults = 8, key = "", fetchImpl = 
   return { rows: rows.slice(0, maxResults), answer: "", provider: "jina" };
 }
 
+// Cloud Code streams `response.candidates[*].content.parts[*].text` plus groundingMetadata.
+export function parseGroundingSse(text) {
+  let answer = "";
+  const sources = [];
+  const queries = [];
+  for (const line of String(text || "").split("\n")) {
+    if (!line.startsWith("data:")) continue;
+    let frame = null;
+    try { frame = JSON.parse(line.slice(5)); } catch (e) { continue; }
+    const candidate = (((frame.response || {}).candidates) || [])[0];
+    if (!candidate) continue;
+    for (const part of (candidate.content || {}).parts || []) if (part.text) answer += part.text;
+    const meta = candidate.groundingMetadata;
+    if (meta) {
+      for (const q of meta.webSearchQueries || []) queries.push(String(q));
+      for (const chunk of meta.groundingChunks || []) {
+        const web = chunk.web || {};
+        if (web.uri) sources.push({ title: String(web.title || web.uri), url: String(web.uri) });
+      }
+    }
+  }
+  return { answer, sources, queries };
+}
+
+// Google grounding via Antigravity: tool-free, because Cloud Code rejects googleSearch
+// together with functionDeclarations. No external key, only an Antigravity login.
+export async function antigravityGrounding(query, { fetchImpl = fetch, timeoutMs = 45000, model = null } = {}) {
+  const [{ anthropicToGemini }, antigravity] = await Promise.all([
+    import("../proxy/antigravity.mjs"),
+    import("./cc-antigravity.mjs"),
+  ]);
+  const creds = antigravity.loadCredentials();
+  if (!creds) { const e = new Error("Antigravity: not logged in"); e.quota = true; throw e; }
+  let token;
+  try { token = await antigravity.ensureAccessToken(creds); }
+  catch (err) { const e = new Error("Antigravity: " + err.message); e.quota = true; throw e; }
+
+  const chosen = model || process.env.CC_TERMUX_ANTIGRAVITY_GROUNDING_MODEL || "gemini-3.8-flash-high";
+  const prompt = "Use Google Search to answer this query, then reply with a short factual summary "
+    + "and the source titles you used.\n\nQuery: " + query;
+  const envelope = anthropicToGemini({ messages: [{ role: "user", content: prompt }], max_tokens: 1024 }, chosen, creds);
+  const res = await fetchImpl(antigravity.GENERATE_URLS[0], {
+    method: "POST",
+    headers: { "content-type": "application/json", ...antigravity.antigravityContentHeaders(token) },
+    body: JSON.stringify(envelope),
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  const text = await res.text();
+  if (!res.ok) {
+    let msg = text.slice(0, 200);
+    try { msg = (JSON.parse(text).error || {}).message || msg; } catch (e) { }
+    const err = new Error("Antigravity grounding: " + msg);
+    err.status = res.status;
+    err.quota = isQuotaError(res.status, msg) || res.status === 404;
+    throw err;
+  }
+  const { answer, sources, queries } = parseGroundingSse(text);
+  const rows = sources.map((s) => ({ title: s.title, url: s.url, snippet: "" }));
+  // Keep the answer itself as a result too, so the agent gets the grounded summary directly.
+  if (answer.trim()) rows.unshift({ title: "Google Search summary: " + query, url: "https://www.google.com/search?q=" + encodeURIComponent(query), snippet: answer.trim().slice(0, 1200) });
+  if (!rows.length) { const e = new Error("Antigravity grounding returned nothing"); e.quota = false; throw e; }
+  return { rows, answer: answer.trim(), queries, provider: "google" };
+}
+
 export async function jinaRead(url, { key = "", fetchImpl = fetch, timeoutMs = 30000 } = {}) {
   const headers = { accept: "application/json", "x-respond-with": "markdown" };
   if (key) headers.authorization = "Bearer " + key;
@@ -193,7 +267,7 @@ export async function jinaRead(url, { key = "", fetchImpl = fetch, timeoutMs = 3
   return { text: String(text), title: "", provider: "jina" };
 }
 
-export const SEARCH_FNS = { tavily: tavilySearch, brave: braveSearch, jina: jinaSearch };
+export const SEARCH_FNS = { google: antigravityGrounding, tavily: tavilySearch, brave: braveSearch, jina: jinaSearch };
 
 // Runs the chain in order and reports what was tried, so the caller can say why it fell back.
 export async function searchChain(query, { chain, maxResults = 8, cfg = readWebConfig(), localSearch = null, log = () => {} } = {}) {

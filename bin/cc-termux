@@ -877,17 +877,25 @@ switch (cmd) {
     break;
   }
   case "web": {
+    const activeIsAntigravity = () => {
+      try {
+        const c = load();
+        return ((c.providers || {})[c.active] || {}).type === "antigravity";
+      } catch (e) { return false; }
+    };
     const sub = (args[0] || "status").toLowerCase();
     const cfg = readWebConfig();
     cfg.keys = cfg.keys || {};
     if (sub === "status" || sub === "list") {
-      const chain = resolveChain("search", cfg);
+      const chain = resolveChain("search", cfg, { antigravity: activeIsAntigravity() });
       console.log("web search providers (tried in order, then the built-in scraper):");
       chain.forEach((id, i) => {
         const info = PROVIDER_INFO[id];
         const has = webProviderKey(id, cfg);
-        const state = id === "local" ? "always available" : has ? "key saved" : info.needsKey ? "no key (skipped)" : "no key (keyless mode)";
-        console.log("  " + String(i + 1).padStart(2) + ". " + info.label.padEnd(24) + state);
+        const state = id === "local" ? "always available"
+          : id === "google" ? "Google index via Antigravity"
+          : has ? "key saved" : info.needsKey ? "no key (skipped)" : "no key (keyless mode)";
+        console.log("  " + String(i + 1).padStart(2) + ". " + info.label.padEnd(28) + state);
       });
       console.log();
       console.log("set a key:  cc-termux web key <tavily|brave|jina> <key>");
@@ -916,7 +924,7 @@ switch (cmd) {
     }
     if (sub === "test") {
       const q = args.slice(1).join(" ").trim() || "termux package management";
-      const chain = resolveChain("search", cfg).filter((id) => id !== "local");
+      const chain = resolveChain("search", cfg, { antigravity: activeIsAntigravity() }).filter((id) => id !== "local");
       console.log("query: " + q);
       console.log("chain: " + (chain.join(" -> ") || "(none - built-in scraper only)"));
       const out = await searchChain(q, { chain, maxResults: 3, cfg, localSearch: null }).catch((e) => ({ rows: [], attempts: [{ provider: "?", status: "error", message: e.message }] }));
