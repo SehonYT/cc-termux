@@ -15,8 +15,3 @@ Users are responsible for complying with the terms of the services they connect.
 
 Claude Code binaries are downloaded at install time from Anthropic's official npm registry
 (registry.npmjs.org). cc-termux does not host or redistribute Claude Code.
-
-The Antigravity OAuth/provider implementation is adapted from OmniRoute
-(https://github.com/cheaper-inference/OmniRoute), MIT License,
-Copyright (c) 2026 diegosouzapw. The public Google OAuth client credentials and
-Cloud Code endpoints are public client identifiers from that project.

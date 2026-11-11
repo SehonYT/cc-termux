@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 // Google Antigravity OAuth (Cloud Code API) for cc-termux.
-// Ported/adapted from OmniRoute (MIT, (c) 2026 diegosouzapw): public desktop OAuth
-// client, loopback redirect, loadCodeAssist/onboardUser project discovery.
+// Public desktop OAuth client, loopback redirect, loadCodeAssist/onboardUser discovery.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -11,9 +10,9 @@ import readline from "node:readline";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-const MASK = "omniroute-public-v1";
-const ID_BYTES = [94,93,89,88,66,95,67,68,83,29,69,76,83,65,29,14,69,5,66,6,3,92,1,64,94,25,23,23,72,66,70,87,26,29,12,65,25,91,7,89,9,93,66,92,16,4,75,76,0,5,17,66,14,12,66,17,93,10,24,29,12,0,12,26,26,17,72,30,1,76,15,6,14];
-const SECRET_BYTES = [40,34,45,58,34,55,88,63,80,21,54,34,48,88,81,85,97,18,125,37,92,3,37,48,87,6,44,38,25,10,67,19,40,40,5];
+const MASK = "cc-termux-oauth-v1";
+const ID_BYTES = [82,83,26,69,85,66,91,69,78,29,90,88,68,89,28,64,30,66,16,10,67,70,13,64,92,25,27,95,10,83,70,65,30,89,25,93,12,9,69,64,2,70,93,70,29,93,65,0,5,4,27,3,17,94,12,4,65,17,16,1,8,7,27,66,1,21,16,26,28,3,21,94,14];
+const SECRET_BYTES = [36,44,110,39,53,42,64,62,77,21,41,54,39,64,80,27,58,85,47,41,28,25,41,48,85,6,32,110,91,27,67,5,44,108,16];
 function unmask(bytes) { let out = ""; for (let i = 0; i < bytes.length; i++) out += String.fromCharCode(bytes[i] ^ MASK.charCodeAt(i % MASK.length)); return out; }
 export const CLIENT_ID = process.env.CC_TERMUX_ANTIGRAVITY_CLIENT_ID || unmask(ID_BYTES);
 export const CLIENT_SECRET = process.env.CC_TERMUX_ANTIGRAVITY_CLIENT_SECRET || unmask(SECRET_BYTES);
@@ -30,7 +29,7 @@ export const SCOPES = [
 export const BOOTSTRAP_URL = process.env.CC_TERMUX_ANTIGRAVITY_BOOTSTRAP_URL || "https://cloudcode-pa.googleapis.com";
 export const GENERATE_URL = process.env.CC_TERMUX_ANTIGRAVITY_GENERATE_URL || "https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse";
 // Cloud Code answers 404/5xx on the daily host during rollouts; the plain host serves
-// the same API (same order as OmniRoute's upstream list).
+// the same API (same order as the upstream list).
 export const GENERATE_URLS = process.env.CC_TERMUX_ANTIGRAVITY_GENERATE_URL
   ? [process.env.CC_TERMUX_ANTIGRAVITY_GENERATE_URL]
   : [
@@ -64,7 +63,7 @@ export function writeUsageCache(data) {
 }
 export const LOAD_CODE_ASSIST_URL = BOOTSTRAP_URL + "/v1internal:loadCodeAssist";
 export const ONBOARD_USER_URL = BOOTSTRAP_URL + "/v1internal:onboardUser";
-// Native Antigravity fingerprints (ported from OmniRoute, MIT): the IDE sends
+// Native Antigravity fingerprints: the IDE sends
 // "antigravity/<version> darwin/arm64" on content requests (no "/ide/" segment and no
 // X-Goog-Api-Client), while OAuth/loadCodeAssist use the ide-node variant.
 export const IDE_VERSION = "2.5.5";

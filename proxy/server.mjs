@@ -526,7 +526,7 @@ const server = http.createServer(async (req, res) => {
         }
       }
       // Claude Code's auto-mode safety classifier is an ordinary /v1/messages call whose
-      // system prompt is a fixed marker (ported from OmniRoute, MIT). It needs a short
+      // system prompt is a fixed marker. It needs a short
       // verdict, not an essay, so give it a thinking-free turn; when the operator opts in
       // (classifier.allow / CC_TERMUX_CLASSIFIER_ALLOW=1) answer it locally instead of
       // spending third-party quota.

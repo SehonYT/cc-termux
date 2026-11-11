@@ -26,7 +26,7 @@ const upstreamModel = (m) => MODEL_ALIASES[m] || m;
 const MAX_OUTPUT = 65536;
 // Antigravity's own IDE always sends this lightweight system prompt; the client system
 // prompt is relocated to the first user turn because an oversized systemInstruction is
-// rejected with a misleading 429 (port of OmniRoute's ANTIGRAVITY_DEFAULT_SYSTEM).
+// rejected with a misleading 429.
 const DEFAULT_SYSTEM =
   "You are Antigravity, a powerful agentic AI coding assistant designed by the Google Deepmind team working on Advanced Agentic Coding.\n" +
   "You are pair programming with a USER to solve their coding task. The task may require creating a new codebase, modifying or debugging an existing codebase, or simply answering a question.\n" +
@@ -61,7 +61,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // Claude Code retries a 429 up to 11 times. When Cloud Code has just refused a
 // specific request, resending the identical body only burns quota, so remember the
-// refusal for a while and answer locally (same approach as OmniRoute's guard).
+// refusal for a while and answer locally.
 const REFUSALS = new Map();
 const REFUSAL_BASE_MS = 2 * 60 * 1000;
 const REFUSAL_MAX_MS = 30 * 60 * 1000;
@@ -142,7 +142,7 @@ function imagePart(block) {
 
 // Antigravity's server-side filter flags competing-agent identity sentences and
 // answers with a bare 429 RESOURCE_EXHAUSTED even when quota is untouched; the same
-// request without the sentence returns 200 (ported from OmniRoute, MIT).
+// request without the sentence returns 200.
 const COMPETING_AGENT_PATTERNS = [
   /\byou are a claude agent\b[^\n]*/gi,
   /\bbuilt on anthropic's claude agent sdk\b[^\n]*/gi,
@@ -216,7 +216,7 @@ export function anthropicToGemini(body, model, creds) {
     : undefined;
   // Keep only Antigravity's own system prompt upstream and relocate the client system
   // prompt into the first user turn: an oversized systemInstruction is answered with a
-  // misleading 429 (port of OmniRoute #9030).
+  // misleading 429.
   if (sys && contents.length) {
     const first = contents[0];
     first.parts = [{ text: sys }, ...first.parts];

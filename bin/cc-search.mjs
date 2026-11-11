@@ -9,8 +9,7 @@
 // Everything here is pure apart from the engine runners, which use an injected
 // `fetchPage`/`decodeBody` pair so they can be unit-tested against saved HTML.
 //
-// Engine markup decoded from live responses (2026-01) and cross-checked against
-// open-webSearch (MIT) and SearXNG engine selectors:
+// Engine markup decoded from live responses (2026-01):
 //   DuckDuckGo HTML  .result__a / .result__snippet          (redirect: /l/?uddg=)
 //   DuckDuckGo Lite  a.result-link / td.result-snippet      (single-quoted class attrs)
 //   Bing             li.b_algo > h2 > a / .b_caption p      (redirect: /ck/a?u=a1<base64url>)
