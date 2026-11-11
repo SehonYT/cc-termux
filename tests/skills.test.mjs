@@ -63,10 +63,20 @@ test("the pack covers coding, browser, design and cc-termux's own tools", () => 
     assert.ok(ids.includes(needed), "pack is missing " + needed);
   }
   const browser = fs.readFileSync(path.join(packDir, "agent-browser", "SKILL.md"), "utf8");
+  // Verified on a real Termux device: the package installs chromium-browser and x11-repo
+  // is Termux's own repository, while Playwright refuses to run on Android at all.
+  assert.match(browser, /chromium-browser/, "the binary is chromium-browser, not chromium");
+  assert.match(browser, /pkg install x11-repo && pkg update && pkg install chromium/);
+  assert.match(browser, /official repository/, "x11-repo is Termux's own repo");
+  assert.match(browser, /headless with no display/, "no X server is needed");
+  assert.match(browser, /remote-debugging-port/, "CDP is how tools drive it");
+  assert.match(browser, /Unsupported platform: android/, "Playwright and Puppeteer do not run here");
+  assert.match(browser, /Never install a browser yourself/, "installing is the user's call, not the agent's");
+  assert.match(browser, /never build a browser from source/, "a source build is not a task");
   // The Rust CLI does not run on Termux, so the skill must offer a working fallback.
   assert.match(browser, /Fallback without a browser/);
   assert.match(browser, /mcp__web__fetch/);
-  assert.match(browser, /never pretend you opened a page/i);
+  assert.match(browser, /never\s+pretend you opened a page/i, "the honesty rule must survive rewording");
   assert.match(browser, /Never bypass a captcha or bot challenge/);
 });
 
