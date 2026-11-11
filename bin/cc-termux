@@ -122,6 +122,9 @@ const SETTINGS_PATH = path.join(claudeDir(), "settings.json");
 const visibleProviders = (c) => Object.entries(c.providers || {}).filter(([, p]) => !p.hidden);
 const composite = (p, id) => (id ? "prov/" + p + "/" + id : id);
 const fmtCtx = (n) => (!n ? "?" : n >= 1e6 ? (n / 1e6).toFixed(n % 1e6 ? 1 : 0) + "M" : n >= 1e3 ? Math.round(n / 1e3) + "K" : String(n));
+// Gemini's model list also contains image, audio, video, embedding and agent models that
+// cannot answer a chat completion. Same predicate as bin/cc-setup.mjs uses on selection.
+const isGeminiChatModel = (id) => !/(-tts|-image|image-preview|nano-banana|embedding|imagen|veo|lyria|live|transcribe|robotics|computer-use|deep-research|antigravity-|-aqa|native-audio|gemma-)/i.test(String(id));
 
 function rebuild(c) {
   c.routing = {};
@@ -148,7 +151,9 @@ function writePicker(c) {
       options.push({
         model: composite(name, id),
         label: (info.name && info.name !== id ? info.name : id) + "  [" + name + "]",
-        description: (info.contextTokens ? fmtCtx(info.contextTokens) + " ctx" : "ctx unknown") +
+        description: (info.tier === "free" ? "free tier" : info.tier === "paid" ? "paid only" : "") +
+          (info.tier ? " - " : "") +
+          (info.contextTokens ? fmtCtx(info.contextTokens) + " ctx" : "ctx unknown") +
           (info.inUsd == null ? "" : " - $" + info.inUsd + " in / $" + info.outUsd + " out per Mtok") +
           (isActive ? " - current" : ""),
       });
@@ -292,10 +297,10 @@ async function doctor(fix) {
 
   const gem = vis.find(([n, p]) => n === "gemini" || /generativelanguage/.test(p.baseUrl || ""));
   if (gem) {
-    const badIds = Object.keys(gem[1].modelsById || {}).filter((id) => /tts|embedding|imagen|veo|live|aqa|native-audio/i.test(id));
-    if (!badIds.length) pass("gemini catalog has no non-chat models");
-    else if (fix) { for (const id of badIds) delete gem[1].modelsById[id]; rebuild(c); save(c); writePicker(c); fixed++; pass("pruned " + badIds.length + " non-chat gemini models"); }
-    else warn(badIds.length + " non-chat gemini models in picker (cc-termux doctor --fix)");
+    const stale = Object.keys(gem[1].modelsById || {}).filter((id) => !isGeminiChatModel(id));
+    if (!stale.length) pass("gemini catalog has only chat models (" + Object.keys(gem[1].modelsById || {}).length + ")");
+    else if (fix) { for (const id of stale) delete gem[1].modelsById[id]; rebuild(c); save(c); writePicker(c); fixed++; pass("pruned " + stale.length + " non-chat gemini models"); }
+    else warn(stale.length + " non-chat gemini models in picker (cc-termux doctor --fix)");
   }
 
   let patchOut = "";

@@ -25,6 +25,7 @@ Pure or in-process: no network, no installed Claude Code, fast enough to run on 
 | `translate.test.mjs` | every protocol translator: `toOpenAI` / `fromOpenAI`, `toResponses` / `fromResponses`, `sanitizeBody`, `stripCache`, `flatten`, `mapStop`, `requestShapeError`, `estimate`, and both streaming factories (chunk splitting, parallel tool calls, upstream errors) |
 | `antigravity.test.mjs` | Antigravity request translation, identity scrubbing, SSE proxying, live model/quota parsing against a local fake Google endpoint |
 | `presets.test.mjs` | preset schema, endpoints, ordering, static model lists |
+| `gemini-models.test.mjs` | Gemini AI Studio model filtering: the wizard and CLI must reject the same non-chat families (image/TTS/Live/embedding/agents), retired 2.5 ids stay out, free vs paid tier lists match the published table, and prices exist per family |
 | `platform.test.mjs` | CPU/OS target matrix and Node/glibc guards |
 | `tar.test.mjs` | gzip+tar extractor: symlinks and traversal safety |
 | `ui.test.mjs` | progress bars, spinner, banner, non-TTY fallback |

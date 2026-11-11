@@ -68,6 +68,28 @@ Upstream calls share four properties: per-attempt timeout (`provider.timeoutMs`,
 15 minutes, headers only), exponential backoff with jitter for 408/409/425/429/5xx,
 `Retry-After` support, and client-disconnect propagation.
 
+## Google AI Studio model list
+
+`GET /v1beta/models` returns every model the key can see, and only some of them can answer
+a chat completion. The wizard (`bin/cc-setup.mjs`) and `cc-termux doctor` therefore share
+one predicate and keep only ids that work through `/v1beta/openai/chat/completions`:
+
+- **Dropped**: image (`*-image`, `nano-banana*`), speech (`*-tts`), Live API (`*-live`),
+  transcription, `embedding`, `imagen`, `veo`, `lyria`, robotics, computer-use,
+  Deep Research, `antigravity-*` and the Gemma text-only checkpoints.
+- **Dropped as retired**: `gemini-2.5-*`. The API still lists them, but calls answer
+  `404 no longer available to new users`, so they are never offered.
+- **Kept**: the Gemini 3.x Flash/Lite/Pro families, the `*-latest` aliases, the Gemini 4
+  tier and Omni.
+
+Free and paid availability cannot be read from the API, so it comes from the published
+pricing table and is stored per model as `tier`: `gemini-3.8-flash`, `gemini-3.7-flash`,
+`gemini-3.6-flash`, `gemini-3.5-flash`, `gemini-3.5-flash-lite`, `gemini-3.1-flash-lite` and
+`gemini-3-flash-preview` are free tier; `gemini-4-carbon`, `gemini-4-argon` and
+`gemini-3.1-pro-preview` need billing enabled. The `/model` picker shows `free tier` or
+`paid only` next to the name. A 429 on a free key means the key itself is out of quota,
+not that the model is unavailable.
+
 ## Routing and provider switching
 
 `pickRoute()` resolves a requested model id in this order:

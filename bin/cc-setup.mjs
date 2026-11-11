@@ -127,13 +127,52 @@ async function fetchOpenRouterModels(key) {
   return arr;
 }
 
+// The /v1beta/models endpoint lists every model the key can see, including image, audio,
+// video, embedding and agents that cannot answer a chat completion. Keep only model ids
+// that work through the OpenAI-compatible chat endpoint:
+//   dropped: *-tts / *-image / imagen / veo / lyria / embedding / *-live / transcribe /
+//            robotics / computer-use / deep-research / antigravity-* / aqa / native-audio.
+function geminiChatModel(id) {
+  return !/(-tts|-image|image-preview|nano-banana|embedding|imagen|veo|lyria|live|transcribe|robotics|computer-use|deep-research|antigravity-|-aqa|native-audio|gemma-)/i.test(id);
+}
+
+// Google marks the family in the description; everything before the first period is stable.
+const GEMINI_PRICE = {
+  "gemini-4-carbon": [2, 10], "gemini-4-argon": [2, 10],
+  "gemini-3.8-flash": [0.75, 3.75], "gemini-3.7-flash": [0.75, 3.75], "gemini-3.6-flash": [0.75, 3.75],
+  "gemini-3.5-flash": [0.75, 3.75], "gemini-3.5-flash-lite": [0.3, 2.5], "gemini-3.1-flash-lite": [0.25, 1.5],
+  "gemini-3.1-pro-preview": [2, 12], "gemini-3-flash-preview": [0.5, 3],
+  "gemini-2.5-flash": [0.3, 2.5], "gemini-2.5-flash-lite": [0.1, 0.4], "gemini-2.5-pro": [1.25, 10],
+};
+
+// Free tier is per key and per model, so it cannot be read from the API. This is the
+// published availability (Standard tier): a 429 on a free key means the key is out of
+// quota or the model needs billing enabled.
+const GEMINI_FREE = /^(gemini-3\.8-flash|gemini-3\.7-flash|gemini-3\.6-flash|gemini-3\.5-flash|gemini-3\.5-flash-lite|gemini-3\.1-flash-lite|gemini-3-flash-preview)$/;
+const GEMINI_PAID = /^(gemini-4-carbon|gemini-4-argon|gemini-3\.1-pro-preview)$/;
+// Gemini 2.5 is retired for keys created after its shutdown: the API lists it but every
+// call answers 404 "no longer available to new users".
+const GEMINI_RETIRED = /^(gemini-2\.\d|gemini-1\.\d)/;
+
+function geminiTier(id) {
+  if (GEMINI_FREE.test(id)) return "free";
+  if (GEMINI_PAID.test(id)) return "paid";
+  return "unknown";
+}
+
 async function fetchGeminiModels(key) {
   const r = await fetchT("https://generativelanguage.googleapis.com/v1beta/models?key=" + encodeURIComponent(key) + "&pageSize=200");
   if (!r.ok) throw new Error("Gemini models HTTP " + r.status + " - check the API key");
   const j = await r.json();
-  const arr = (j.models || []).filter(m => (m.supportedGenerationMethods || []).includes("generateContent"))
-    .filter(m => !/tts|embedding|imagen|veo|live|aqa|native-audio/i.test(m.name || ""))
-    .map(m => ({ id: (m.name || "").replace(/^models\//, ""), name: m.displayName || m.name, contextTokens: m.inputTokenLimit || null, inUsd: null, outUsd: null }));
+  const arr = (j.models || [])
+    .filter(m => (m.supportedGenerationMethods || []).includes("generateContent"))
+    .map(m => ({ id: (m.name || "").replace(/^models\//, ""), name: m.displayName || m.name, contextTokens: m.inputTokenLimit || null, inUsd: null, outUsd: null }))
+    .filter(m => geminiChatModel(m.id) && !GEMINI_RETIRED.test(m.id))
+    .map(m => {
+      const price = GEMINI_PRICE[m.id] || null;
+      return { ...m, inUsd: price ? price[0] : null, outUsd: price ? price[1] : null, tier: geminiTier(m.id) };
+    })
+    .sort((a, b) => (a.tier === b.tier ? 0 : a.tier === "free" ? -1 : b.tier === "free" ? 1 : 0) || a.id.localeCompare(b.id));
   try { fs.mkdirSync(CACHE_DIR, { recursive: true }); fs.writeFileSync(CATALOG, JSON.stringify({ fetchedAt: new Date().toISOString(), models: arr }, null, 1)); } catch (e) { }
   return arr;
 }
