@@ -1,36 +1,62 @@
 # Tests
 
-Run everything (sequential runner; gateway suites start local servers):
+Everything uses Node's built-in `node:test` and the standard library only — no dependencies,
+no test framework.
 
 ```bash
-npm test
-npm run check
+npm test                 # every suite, sequentially (the runner avoids port starvation)
+npm test -- gateway      # only files whose name matches
+npm run check            # syntax, JSON and shell checks (no tests run)
+node --test tests/translate.test.mjs   # a single file directly
 ```
 
-Individual suite: `node --test tests/<name>.test.mjs`.
+Tests must never write to `$PREFIX/bin` or the real `~/.local/share/cc-termux`. Every suite
+that touches config sets an isolated `HOME`, `CC_TERMUX_ROOT`, `CC_TERMUX_CONFIG` and
+`CC_TERMUX_CACHE` (or a temp prefix on Windows) and removes it afterwards.
 
-## Suites
+## Unit suites
+
+Pure or in-process: no network, no installed Claude Code, fast enough to run on a phone.
 
 | File | Covers |
 |---|---|
-| `antigravity.test.mjs` | Antigravity OAuth/code paste, request translation, SSE proxy, live model/quota parsing |
-| `cli-ux.test.mjs` | first-run `status` is friendly without config/providers |
-| `statusline.test.mjs` | status line install, idempotency, custom-line preservation |
-| `assets.test.mjs` | installer ships every runtime file and every relative import |
-| `gateway.test.mjs` | empty-config error, auth, failure logging, image-aware count_tokens |
-| `get-bootstrap.test.mjs` | no-TTY piped bootstrap runs the installer |
-| `heal.test.mjs` | settings/env repair, foreign claude replacement, routing/picker rebuild, native layout, idempotency |
-| `installer.test.mjs` | `install.mjs --check` plan output |
-| `installer-codeonly.test.mjs` | `--code-only` keeps the binary and refreshes assets |
-| `patch.test.mjs` | patch apply/idempotency/revert, stale backups, byte correctness |
-| `perf.test.mjs` | opt-in performance mode, defaults, env flags |
-| `platform.test.mjs` | CPU/OS target matrix and Node/glibc guards |
+| `translate.test.mjs` | every protocol translator: `toOpenAI` / `fromOpenAI`, `toResponses` / `fromResponses`, `sanitizeBody`, `stripCache`, `flatten`, `mapStop`, `requestShapeError`, `estimate`, and both streaming factories (chunk splitting, parallel tool calls, upstream errors) |
+| `antigravity.test.mjs` | Antigravity request translation, identity scrubbing, SSE proxying, live model/quota parsing against a local fake Google endpoint |
 | `presets.test.mjs` | preset schema, endpoints, ordering, static model lists |
-| `setup.test.mjs` | setup flag/help handling |
-| `tar.test.mjs` | gzip+tar extractor, symlinks, traversal safety |
+| `platform.test.mjs` | CPU/OS target matrix and Node/glibc guards |
+| `tar.test.mjs` | gzip+tar extractor: symlinks and traversal safety |
 | `ui.test.mjs` | progress bars, spinner, banner, non-TTY fallback |
-| `update.test.mjs` | provenance, self-update archive lookup, version stamps, cache/offline behavior |
+| `paths.test.mjs` | POSIX/Windows path resolution, overrides, legacy fallback |
+| `statusline.test.mjs` | status line install, idempotency, custom-line preservation, read-only dirs |
+| `shimsnap.test.mjs` | bash snapshot `find` rewrite, idempotency, watcher behaviour |
+| `patch.test.mjs` | patch apply/idempotency/revert, stamps, stale backups, byte correctness |
 | `version.test.mjs` | build version and tag formatting |
 
-Tests must never write to `$PREFIX/bin` or the real `~/.local/share/cc-termux`; temp roots and
-isolated prefixes are used on purpose.
+## Integration suites
+
+Spawn a real gateway, fake upstream servers or the installer in a temp directory.
+
+| File | Covers |
+|---|---|
+| `gateway.test.mjs` | gateway contract: auth, no-provider error, tool-call translation, discovery, failure logging, count_tokens, classifier detection |
+| `gateway-edge.test.mjs` | malformed bodies, unknown providers, provider switch mid-flight, degenerate SSE, silent upstreams, timeouts, 413 and keep-alive, 20-way concurrency |
+| `cli-edge.test.mjs` | config matrix (missing/empty/corrupt/null), keys/settings variants, provider helpers, MCP protocol + SSRF + charsets + compression, status line |
+| `cli-ux.test.mjs` | first-run `status` is friendly without config or providers |
+| `launcher.test.mjs` | launcher wiring, env scrubbing, session files, gateway supervision |
+| `mcp.test.mjs` | web MCP server: tool protocol, fetch/search behaviour, output fencing |
+| `heal.test.mjs` | settings/env repair, foreign `claude` replacement, routing/picker rebuild, native layout, idempotency |
+| `installer.test.mjs` | `install.mjs --check` plan output |
+| `installer-codeonly.test.mjs` | `--code-only` keeps the binary and refreshes assets |
+| `get-bootstrap.test.mjs` | no-TTY piped bootstrap runs the installer |
+| `update.test.mjs` | provenance, self-update archive lookup, version stamps, cache/offline behaviour |
+| `setup.test.mjs` | setup flag/help handling |
+| `perf.test.mjs` | opt-in performance mode, defaults, env flags |
+| `assets.test.mjs` | the installer ships every runtime file and every relative import resolves |
+| `docs.test.mjs` | README/docs integrity: links resolve, sections and badge set exist, every suite is documented here |
+
+## Fixtures
+
+- Fake upstreams are plain `http.createServer` handlers in the suite that needs them; there
+  is no shared fixture server, so one suite's port cannot leak into another.
+- Gateway suites pick a random high port and wait on `/health` before asserting.
+- Installer suites build a throwaway root and never download Claude Code.

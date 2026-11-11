@@ -137,7 +137,7 @@ function runtimeAssets() {
       else if (entry.isFile() && !/\.(bak|orig|log|tmp)$/.test(entry.name)) out.add(child);
     }
   };
-  for (const dir of ["bin", "proxy", "commands", "scripts"]) walk(dir);
+  for (const dir of ["bin", "proxy", "commands", "scripts", "docs"]) walk(dir);
   return [...out].sort();
 }
 
