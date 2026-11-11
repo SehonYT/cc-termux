@@ -42,6 +42,7 @@ Spawn a real gateway, fake upstream servers or the installer in a temp directory
 | File | Covers |
 |---|---|
 | `gateway.test.mjs` | gateway contract: auth, no-provider error, tool-call translation, discovery, failure logging, count_tokens, classifier detection |
+| `gemini-429.test.mjs` | Gemini 429 classification: per-minute (RPM/TPM) metrics are transient and retried with short backoff, a per-day (RPD) metric is terminal and fails fast without retrying, mixed bodies stay terminal, Google's `retry in 21h15m47s` hint is parsed, and the verdict is persisted to `quota.json` |
 | `gateway-edge.test.mjs` | malformed bodies, unknown providers, provider switch mid-flight, degenerate SSE, silent upstreams, timeouts, 413 and keep-alive, 20-way concurrency |
 | `cli-edge.test.mjs` | config matrix (missing/empty/corrupt/null), keys/settings variants, provider helpers, MCP protocol + SSRF + charsets + compression, status line |
 | `cli-ux.test.mjs` | first-run `status` is friendly without config or providers |

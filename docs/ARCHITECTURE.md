@@ -68,6 +68,33 @@ Upstream calls share four properties: per-attempt timeout (`provider.timeoutMs`,
 15 minutes, headers only), exponential backoff with jitter for 408/409/425/429/5xx,
 `Retry-After` support, and client-disconnect propagation.
 
+### Rate limits: per-minute versus per-day
+
+Google answers **the same** `RESOURCE_EXHAUSTED` body for three different limits, and sends
+no `Retry-After` header, so the metric identifier inside the message is the only reliable
+signal:
+
+```
+* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests,
+  limit: 20, model: gemini-3.8-flash, description: Generate content requests per day limit exceeded on Free Tier.
+```
+
+`classifyGemini429()` reads those lines and decides:
+
+| Metric | Meaning | Gateway behaviour |
+|---|---|---|
+| `..._requests` + "per day" | RPD — daily budget spent | **terminal**: fail fast with the real message, no retry |
+| `..._requests` + "per minute" | RPM — short burst | **transient**: retry with 1s/2s/4s… backoff up to `retryMaxMs` |
+| `..._input_token_count` + "per minute" | TPM — token burst | **transient**: same as RPM |
+| anything else | undecided | fall through to the generic retry path |
+
+A body that lists both a per-minute and a per-day metric is terminal, because the day limit
+will not clear. Google's `Please retry in 21h15m47.838953365s.` hint is parsed, but a hint
+longer than a minute is discarded for bursts — sleeping for hours inside a request would
+hang the agent. Every observation is recorded in `~/.cache/cc-termux/quota.json` with its
+`kind` (`burst` or `daily`) and `classes`; `cc-termux doctor` only warns about a burst for
+ten minutes, while a daily limit stays visible for a day.
+
 ## Google AI Studio model list
 
 `GET /v1beta/models` returns every model the key can see, and only some of them can answer

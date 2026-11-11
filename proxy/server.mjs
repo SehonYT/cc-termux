@@ -72,11 +72,16 @@ function recordQuota(providerName, model, status, text) {
     let q = {}; try { q = JSON.parse(fs.readFileSync(QUOTA_PATH, 'utf8')); } catch (e) { q = {}; }
     const limitMatch = String(text).match(/limit:\s*(\d+)/i);
     const quotaId = (String(text).match(/quotaId["\s:]+([A-Za-z0-9_.-]+)/) || [])[1] || null;
-    const metric = (String(text).match(/metric:\s*([A-Za-z0-9_.-]+)/) || [])[1] || null;
+    const metric = (String(text).match(/metric:\s*([A-Za-z0-9_./-]+)/) || [])[1] || null;
+    const verdict = classifyGemini429(text);
     q[providerName || 'unknown'] = {
       at: new Date().toISOString(), status, model: model || null,
       limit: limitMatch ? Number(limitMatch[1]) : null,
       quotaId, metric,
+      // Gemini: "rpd" is a day limit (terminal), "rpm"/"tpm" are bursts (retryable).
+      kind: verdict ? (verdict.verdict === 'terminal' ? 'daily' : 'burst') : null,
+      classes: verdict ? verdict.classes : null,
+      retryAfterMs: verdict ? verdict.retryAfterMs : null,
       message: String(text).replace(/\s+/g, ' ').slice(0, 300),
     };
     fs.mkdirSync(path.dirname(QUOTA_PATH), { recursive: true });
@@ -93,6 +98,42 @@ function saveConfig() {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const RETRYABLE = new Set([408, 409, 425, 429, 500, 502, 503, 504]);
+
+// Google returns the same "You exceeded your current quota" body for three different
+// limits, so the metric id is the only reliable signal. Per-minute limits (RPM/TPM) are
+// transient and worth retrying; a per-day limit (RPD) is terminal for the day.
+// Reading: "metric: generativelanguage.googleapis.com/generate_content_free_tier_requests,
+// limit: 20, model: gemini-3.8-flash, description: ... requests per day limit exceeded".
+const GEMINI_METRIC_RE = /metric:\s*\S*?\/(\w+),\s*limit:\s*(\d+),[\s\S]*?description:\s*([^.]*)/gi;
+
+function classifyGemini429(text) {
+  const body = String(text || '');
+  if (!/generativelanguage\.googleapis\.com|RESOURCE_EXHAUSTED/i.test(body)) return null;
+  const classes = new Set();
+  for (const m of body.matchAll(GEMINI_METRIC_RE)) {
+    const blob = (m[1] + ' ' + m[3]).toLowerCase();
+    const perDay = /per day|_per_day|_daily|requests per day|tokens per day/.test(blob);
+    const perMinute = /per minute|_per_minute|per-minute/.test(blob);
+    const tokenCount = /token_count|tokens/.test(blob);
+    if (perDay) classes.add('rpd');
+    else if (perMinute) classes.add(tokenCount ? 'tpm' : 'rpm');
+  }
+  if (!classes.size) return null;
+  // A day limit anywhere makes the request terminal; otherwise it is a burst limit.
+  if (classes.has('rpd')) return { verdict: 'terminal', classes: [...classes], retryAfterMs: retryHintMs(body) };
+  return { verdict: 'transient', classes: [...classes], retryAfterMs: retryHintMs(body) };
+}
+
+// Google sometimes answers "Please retry in 21h15m47.838953365s." instead of Retry-After.
+function retryHintMs(text) {
+  const m = /retry in ([0-9hms.]+)/i.exec(String(text || ''));
+  if (!m || !/[0-9]/.test(m[1])) return null;
+  const h = /([0-9]+)h/.exec(m[1]);
+  const min = /([0-9]+)m/.exec(m[1]);
+  const sec = /([0-9.]+)s/.exec(m[1]);
+  const ms = (h ? Number(h[1]) * 3600000 : 0) + (min ? Number(min[1]) * 60000 : 0) + (sec ? Number(sec[1]) * 1000 : 0);
+  return ms > 0 ? Math.round(ms) : null;
+}
 
 // Compose the caller's abort signal with a per-attempt timeout, so a silent upstream
 // cannot hold the request open. Overrides: retries, retryBaseMs, timeoutMs.
@@ -144,18 +185,30 @@ async function fetchWithRetry(url, opts, provider, label) {
     }
     timed.settle();
     if (!RETRYABLE.has(res.status) || i === attempts - 1) return res;
+    let quotaWaitMs = null;
     if (res.status === 429) {
-      try { recordQuota(provider.name, label, res.status, await res.clone().text()); } catch (e) { }
-      // Google free-tier daily quota: retrying cannot help, fail fast with the real message.
       let bodyText = '';
       try { bodyText = await res.clone().text(); } catch (e) { }
-      if (/free_tier|quota exceeded|billing|rate-limits/i.test(bodyText)) {
+      try { recordQuota(provider.name, label, res.status, bodyText); } catch (e) { }
+      const gemini = classifyGemini429(bodyText);
+      if (gemini && gemini.verdict === 'terminal') {
+        LOG('quota exhausted for the day, not retrying', label, gemini.classes.join('+'));
+        return res;
+      }
+      if (gemini) {
+        // Per-minute burst: back off briefly, bounded, and ignore any long retry hint Google
+        // attaches to a per-day metric. 2s, 4s, 8s... up to retryMaxMs.
+        const burst = Math.min(Math.max(1000, baseMs) * 2 ** i, maxMs);
+        quotaWaitMs = Math.min(gemini.retryAfterMs && gemini.retryAfterMs < 60000 ? gemini.retryAfterMs : burst, maxMs);
+        LOG('rate limited (per-minute), retrying', label, gemini.classes.join('+'), 'in', quotaWaitMs + 'ms');
+      } else if (/billing hard limit|credits exhausted|insufficient_quota|quota_exhausted/i.test(bodyText)) {
         LOG('quota exhausted, not retrying', label);
         return res;
       }
     }
     const ra = parseFloat(res.headers.get('retry-after') || '0');
-    const wait = ra > 0 ? Math.min(ra * 1000, maxMs) : Math.min(maxMs, baseMs * 2 ** i) * (0.7 + Math.random() * 0.6);
+    const wait = quotaWaitMs != null ? quotaWaitMs
+      : ra > 0 ? Math.min(ra * 1000, maxMs) : Math.min(maxMs, baseMs * 2 ** i) * (0.7 + Math.random() * 0.6);
     LOG('retry', label, res.status, 'attempt', i + 1 + '/' + attempts, 'in', Math.round(wait) + 'ms');
     try { await res.body?.cancel(); } catch (e) { }
     timed.cleanup();

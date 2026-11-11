@@ -365,7 +365,11 @@ async function doctor(fix) {
     for (const [provider, q] of Object.entries(qc)) {
       if (!c.providers || !c.providers[provider]) continue;
       const age = Date.now() - new Date(q.at).getTime();
-      if (age < 7 * 24 * 3600 * 1000) warn("provider " + provider + ": recent " + q.status + (q.limit != null ? " (limit " + q.limit + ")" : "") + " at " + q.at);
+      // A burst limit clears in seconds; a daily limit only clears when the day rolls over.
+      const window = q.kind === "burst" ? 10 * 60 * 1000 : 24 * 3600 * 1000;
+      if (age > window) continue;
+      const what = q.kind === "daily" ? "daily quota exhausted" : q.kind === "burst" ? "rate limited (per-minute)" : q.status;
+      warn("provider " + provider + ": " + what + (q.model ? " on " + q.model : "") + (q.limit != null ? " (limit " + q.limit + ")" : "") + " at " + q.at);
     }
   } catch (e) { }
   const deny = (settings.permissions && settings.permissions.deny) || [];
@@ -840,6 +844,8 @@ switch (cmd) {
       if (q) {
         console.log("  observed upstream limit (" + q.at + "):");
         console.log("    status " + q.status + (q.model ? "  model " + q.model : "") + (q.limit != null ? "  limit " + q.limit : "") + (q.quotaId ? "  " + q.quotaId : ""));
+        if (q.kind) console.log("    kind " + q.kind + (q.classes ? " (" + q.classes.join(", ") + ")" : "") +
+          (q.kind === "burst" ? " - transient, the gateway retries these" : " - terminal for the day, the gateway fails fast"));
         console.log("    " + q.message.slice(0, 200));
       } else console.log("  no quota observations yet (limits are read from real 429/503 responses)");
     } catch (e) { }
