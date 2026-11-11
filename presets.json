@@ -335,6 +335,16 @@
       "notes": "Run llama-server --port 8080"
     },
     {
+      "id": "nararouter",
+      "name": "NaraRouter",
+      "kind": "openai",
+      "baseUrl": "https://router.bynara.id/v1",
+      "path": "/chat/completions",
+      "keyUrl": "https://router.bynara.id",
+      "tiered": true,
+      "notes": "Free tier: 2 models, 15 req/min, 7M tokens/day. Paid plans add models with higher rates."
+    },
+    {
       "id": "tokens",
       "name": "tokens.bd",
       "kind": "openai",

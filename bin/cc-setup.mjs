@@ -10,6 +10,7 @@ import { spawnSync } from "node:child_process";
 import { login as antigravityLogin, ensureProject as antigravityEnsureProject, loadCredentials as antigravityCreds, fetchAvailableModels, updateProviderModels } from "./cc-antigravity.mjs";
 import { installStatusLine, refreshStatusLine } from "./cc-statusline.mjs";
 import { installRoot, configFile, claudeDir, cacheDir } from "./cc-paths.mjs";
+import { fetchPlans as naraPlans, fetchNaraModels as naraModels, splitByTier as naraSplit, readNaraCache, writeNaraCache } from "./cc-nara.mjs";
 
 const ROOT = installRoot();
 const CFG = configFile();
@@ -155,6 +156,26 @@ async function fetchOpenRouterModels(key, { tier = "free" } = {}) {
   if (tier === "paid") console.log(dim("  " + freeCount + " free model(s) available on this provider (run: cc-termux setup, choose the free option)"));
   if (skipped) console.log(dim("  skipped " + skipped + " free model(s) that cannot call tools"));
   return usable;
+}
+
+// /api/plans gives the free/paid split without a key; /v1/models then reports what the
+// key itself is entitled to, which is the authoritative list.
+async function fetchNaraRouterModels(key, { tier = "free" } = {}) {
+  const cache = readNaraCache() || {};
+  let plans = cache.plans || null;
+  if (!plans) {
+    plans = await naraPlans();
+    writeNaraCache({ ...cache, plans, plansAt: new Date().toISOString() });
+  }
+  const models = await naraModels(key, { tier, plans });
+  const { free, paidOnly } = naraSplit(plans);
+  if (tier === "free" && models.length < free.length) {
+    console.log(dim("  your key reaches " + models.length + " of the " + free.length + " free-tier models"));
+  }
+  if (tier === "paid" && paidOnly.length) {
+    console.log(dim("  " + free.length + " free-tier model(s) exist on this provider too"));
+  }
+  return models;
 }
 
 // Drop image, TTS, Live, embedding, video and agent ids: they cannot answer a chat call.
@@ -428,10 +449,10 @@ function summary(c, name) {
 
 // "free" keeps only zero-cost models, "paid" keeps only billed ones, "all" keeps both.
 // Non-interactive runs pick it with CC_SETUP_TIER; the wizard asks.
-async function askTier() {
+async function askTier(kind = "openrouter") {
   if (!process.stdin.isTTY) return process.env.CC_SETUP_TIER || "free";
   console.log();
-  console.log("  " + bold("OpenRouter model tier"));
+  console.log("  " + bold((kind === "nararouter" ? "NaraRouter" : "OpenRouter") + " model tier"));
   console.log("  " + dim("1") + " free only    " + dim("zero-cost models, no credits needed"));
   console.log("  " + dim("2") + " paid only    " + dim("models billed against your credits"));
   console.log("  " + dim("3") + " everything   " + dim("both lists, labelled in the picker"));
@@ -441,6 +462,10 @@ async function askTier() {
 
 async function fetchFor(kind, key, base, tier) {
   if (kind === "tokens") return { models: await fetchTokensModels(key), type: "openai", baseUrl: "https://tokens.bd", path: "/v1/chat/completions", family: "tokens" };
+  if (kind === "nararouter") {
+    const t = tier || process.env.CC_SETUP_TIER || "free";
+    return { models: await fetchNaraRouterModels(key, { tier: t }), type: "openai", baseUrl: "https://router.bynara.id/v1", path: "/chat/completions", family: "nararouter", tier: t };
+  }
   if (kind === "openrouter") {
     const t = tier || process.env.CC_SETUP_TIER || (process.stdin.isTTY ? "free" : "free");
     return { models: await fetchOpenRouterModels(key, { tier: t }), type: "anthropic", baseUrl: "https://openrouter.ai/api", path: "/v1/messages", family: "openrouter", tier: t };
@@ -760,7 +785,7 @@ async function addFlow(c) {
   const key = await askHidden("API key (hidden, empty = no key / local gateway) > ");
   if (!key) console.log(dim("  no key - calling the endpoint without Authorization"));
   console.log(dim("  fetching models..."));
-  const tier = kind === "openrouter" ? await askTier() : undefined;
+  const tier = (kind === "openrouter" || kind === "nararouter") ? await askTier(kind) : undefined;
   let f;
   try { f = await fetchFor(kind, key, base, tier); }
   catch (e) { console.log(cyan("  " + errText(e))); return null; }

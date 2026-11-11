@@ -121,6 +121,21 @@ function classifyGemini429(text) {
   return { verdict: 'transient', classes: [...classes], retryAfterMs: retryHintMs(body) };
 }
 
+// NaraRouter answers one 429 type ("rate_limited") for both cases; the message says which.
+// A per-minute breach clears in a minute, a daily token quota only resets the next day.
+function classifyNara429(text) {
+  const body = String(text || '');
+  if (!/rate_limited|rate limit|daily token|token quota|quota is reached/i.test(body)) return null;
+  if (/daily|per day|token quota|quota is reached|quota exceeded for this model tier/i.test(body)) {
+    return { verdict: 'terminal', classes: ['daily'], retryAfterMs: null };
+  }
+  return { verdict: 'transient', classes: ['rpm'], retryAfterMs: null };
+}
+
+function classifyRateLimit(text) {
+  return classifyGemini429(text) || classifyNara429(text);
+}
+
 // Google sometimes answers "Please retry in 21h15m47.838953365s." instead of Retry-After.
 function retryHintMs(text) {
   const m = /retry in ([0-9hms.]+)/i.exec(String(text || ''));
@@ -187,7 +202,7 @@ async function fetchWithRetry(url, opts, provider, label) {
       let bodyText = '';
       try { bodyText = await res.clone().text(); } catch (e) { }
       try { recordQuota(provider.name, label, res.status, bodyText); } catch (e) { }
-      const gemini = classifyGemini429(bodyText);
+      const gemini = classifyRateLimit(bodyText);
       if (gemini && gemini.verdict === 'terminal') {
         LOG('quota exhausted for the day, not retrying', label, gemini.classes.join('+'));
         return res;

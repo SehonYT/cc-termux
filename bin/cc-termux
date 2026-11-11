@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { installRoot, configFile, claudeDir, cacheDir } from "./cc-paths.mjs";
+import { fetchPlans as naraFetchPlans, formatUsage as naraFormatUsage, readNaraCache, writeNaraCache } from "./cc-nara.mjs";
 
 const ROOT = installRoot();
 const CFG = configFile();
@@ -523,6 +524,7 @@ const HELP = [
   "Google Antigravity",
   "  antigravity login     Google OAuth login",
   "  antigravity usage     live 5h/weekly quota",
+  "  nararouter usage      NaraRouter plans, rate limits and model tiers",
   "  antigravity models --update   refresh models from Google",
   "  statusline [--install]        Claude Code status line (model + quota)",
   "",
@@ -837,6 +839,14 @@ switch (cmd) {
       if (j.key) console.log("  key: monthly cap $" + j.key.monthlySpendCapUsd);
       break;
     }
+    if (/router\.bynara\.id/.test(p.baseUrl || "")) {
+      const cache = readNaraCache() || {};
+      const plans = cache.plans || await naraFetchPlans();
+      writeNaraCache({ ...cache, plans, plansAt: new Date().toISOString() });
+      console.log("provider: " + name + "  (" + p.baseUrl + ")");
+      console.log(naraFormatUsage(plans, { active: p.plan || process.env.NARA_PLAN || "free", observed: cache.observed || null }));
+      break;
+    }
     console.log("provider: " + name + "  (" + p.baseUrl + ")");
     console.log("  no usage endpoint known for this provider");
     try {
@@ -849,6 +859,19 @@ switch (cmd) {
         console.log("    " + q.message.slice(0, 200));
       } else console.log("  no quota observations yet (limits are read from real 429/503 responses)");
     } catch (e) { }
+    break;
+  }
+  case "nararouter": {
+    const sub = args[0] || "usage";
+    if (sub === "plans" || sub === "usage") {
+      const cache = readNaraCache() || {};
+      const plans = cache.plans || await naraFetchPlans();
+      writeNaraCache({ ...cache, plans, plansAt: new Date().toISOString() });
+      if (args.includes("--json")) { console.log(JSON.stringify(plans, null, 2)); break; }
+      console.log(naraFormatUsage(plans, { active: args[1] || "free", observed: cache.observed || null }));
+      break;
+    }
+    console.log("usage: cc-termux nararouter [usage|plans] [plan] [--json]");
     break;
   }
   case "presets": {

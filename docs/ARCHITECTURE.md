@@ -95,6 +95,33 @@ hang the agent. Every observation is recorded in `~/.cache/cc-termux/quota.json`
 `kind` (`burst` or `daily`) and `classes`; `cc-termux doctor` only warns about a burst for
 ten minutes, while a daily limit stays visible for a day.
 
+## NaraRouter plans and tiers
+
+`https://router.bynara.id/v1` is OpenAI-compatible and publishes its plan table on the
+public `/api/plans` endpoint, so free/paid detection needs no key:
+
+| Plan | Price | Rate | Daily tokens | Models |
+|---|---|---|---|---|
+| `free` | free | 15 req/min | 7M | 2 |
+| `freemium` | Rp5000/day | 50 req/min | 25M | 5 |
+| `freemium-max` | Rp10000/day | 60 req/min | 60M | 5 |
+| `gpt-fams-promo` | Rp20000/day | 50 req/min | 25M | 3 |
+| `freemium-ultra` | Rp30000/day | 60 req/min | 200M | 5 |
+
+A plan is free when **both** its daily and weekly price are zero; a plan whose code says
+free but which charges is not. Free tier means the models reachable on that zero-cost plan
+(`agnes-2.5-flash`, `laguna-s-2.1`), paid tier means the aliases only paid plans add. Setup
+asks for the tier exactly as it does for OpenRouter, and `/v1/models` then narrows the
+result to the aliases the key itself is entitled to.
+
+`cc-termux nararouter usage` prints the plan table with its limits, the tier split and the
+free-tier model list; `cc-termux nararouter plans --json` emits the raw table.
+
+Rate limits are reported through one 429 type (`rate_limited`): a per-minute breach is
+transient and retried, while a daily token quota is per model tier and terminal for the day.
+The gateway classifies it from the message the same way it does for Gemini, and only that
+tier stops working — other tiers keep serving.
+
 ## OpenRouter model tiers
 
 OpenRouter publishes one catalog of ~470 models where free and paid entries are mixed.

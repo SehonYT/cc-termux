@@ -80,11 +80,11 @@ test("an OpenRouter refresh keeps the tier the provider was created with", () =>
 });
 
 test("the wizard asks for a tier and honours CC_SETUP_TIER", () => {
-  assert.match(setup, /async function askTier\(\)/);
+  assert.match(setup, /async function askTier\(kind = "openrouter"\)/);
   assert.match(setup, /free only/);
   assert.match(setup, /paid only/);
   assert.match(setup, /everything/);
-  assert.match(setup, /const tier = kind === "openrouter" \? await askTier\(\) : undefined;/);
+  assert.match(setup, /const tier = \(kind === "openrouter" \|\| kind === "nararouter"\) \? await askTier\(kind\) : undefined;/);
   assert.match(setup, /process\.env\.CC_SETUP_TIER/);
   assert.match(setup, /return a === "2" \|\| a === "paid" \? "paid" : a === "3" \|\| a === "all" \? "all" : "free";/);
 });
