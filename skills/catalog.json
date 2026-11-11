@@ -1,0 +1,60 @@
+{
+  "version": 1,
+  "note": "Shipped skill pack. Installed into ~/.claude/skills by install/launcher; each entry keeps its upstream licence and source.",
+  "skills": [
+    {
+      "id": "ponytail",
+      "name": "ponytail",
+      "dir": "ponytail",
+      "source": "https://github.com/DietrichGebert/ponytail",
+      "license": "MIT",
+      "default": true,
+      "description": "Lazy senior dev mode: the smallest change that fully solves the task, and a reply a busy human understands in one read."
+    },
+    {
+      "id": "agent-browser",
+      "name": "agent-browser",
+      "dir": "agent-browser",
+      "source": "https://github.com/vercel-labs/agent-browser",
+      "license": "Apache-2.0",
+      "default": true,
+      "description": "Drive a real browser from the agent: navigate, click, type, screenshot, extract and QA a page."
+    },
+    {
+      "id": "frontend-design",
+      "name": "frontend-design",
+      "dir": "frontend-design",
+      "source": "https://github.com/anthropics/skills",
+      "license": "see upstream",
+      "default": true,
+      "description": "Commit to an aesthetic direction before writing UI, instead of the default purple-gradient AI look."
+    },
+    {
+      "id": "webapp-quality",
+      "name": "webapp-quality",
+      "dir": "webapp-quality",
+      "source": "cc-termux",
+      "license": "MIT",
+      "default": true,
+      "description": "Build and review web apps that hold up: loading, empty, error and offline states, responsive layout, accessibility, performance budgets."
+    },
+    {
+      "id": "cc-termux-web",
+      "name": "cc-termux-web",
+      "dir": "cc-termux-web",
+      "source": "cc-termux",
+      "license": "MIT",
+      "default": true,
+      "description": "Use cc-termux's own web tools correctly: web:search, web:fetch, the provider chain and the fallback order."
+    },
+    {
+      "id": "ux-review",
+      "name": "ux-review",
+      "dir": "ux-review",
+      "source": "cc-termux",
+      "license": "MIT",
+      "default": true,
+      "description": "Audit a UI for hierarchy, spacing, contrast, focus and copy, then fix the top findings in priority order."
+    }
+  ]
+}

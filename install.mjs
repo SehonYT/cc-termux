@@ -14,6 +14,7 @@ import { fileURLToPath } from "node:url";
 import { detectTarget, nodeVersionOk, glibcTooOld } from "./bin/cc-platform.mjs";
 import { extractTgz } from "./bin/cc-tar.mjs";
 import { createProgress, banner, step, info } from "./bin/cc-ui.mjs";
+import { installSkills, formatSkills, skillStatus } from "./bin/cc-skills.mjs";
 import { PERF_PROMPT_LINES, perfDefaultAnswer, savePerfMode, shouldAskPerf } from "./bin/cc-perf.mjs";
 import { ensurePathInRcFiles, prefixBinDir } from "./bin/cc-heal.mjs";
 import { installRoot, configFile, cacheDir, claudeDir, isWindows } from "./bin/cc-paths.mjs";
@@ -135,7 +136,7 @@ function runtimeAssets() {
       else if (entry.isFile() && !/\.(bak|orig|log|tmp)$/.test(entry.name)) out.add(child);
     }
   };
-  for (const dir of ["bin", "proxy", "commands", "scripts", "docs"]) walk(dir);
+  for (const dir of ["bin", "proxy", "commands", "scripts", "docs", "skills"]) walk(dir);
   return [...out].sort();
 }
 
@@ -215,6 +216,15 @@ async function askWebProviders() {
   } finally {
     rl.close();
   }
+}
+
+// The skill pack is content, not code: it is always installed so the agent has the
+// conventions available, and never overwrites a skill the user already has.
+function installSkillsQuietly() {
+  try {
+    const r = installSkills({ force: false });
+    if (r.installed.length) info("skills installed: " + r.installed.join(", "));
+  } catch (e) { }
 }
 
 function looksLikeShim(file) {
@@ -504,6 +514,7 @@ function installShims(t) {
   stopManagedGateway();
   await askPerformance();
   await askWebProviders();
+  installSkillsQuietly();
   if (!NO_SHIMS) installShims(t);
   try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
   log((CODE_ONLY ? "updated " : "installed into ") + ROOT);

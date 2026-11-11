@@ -12,6 +12,7 @@ import { installStatusLine, refreshStatusLine } from "./cc-statusline.mjs";
 import { installRoot, configFile, claudeDir, cacheDir } from "./cc-paths.mjs";
 import { fetchPlans as naraPlans, fetchNaraModels as naraModels, splitByTier as naraSplit, readNaraCache, writeNaraCache } from "./cc-nara.mjs";
 import { WEB_PROVIDERS, PROVIDER_INFO, readWebConfig, writeWebConfig, providerKey as webProviderKey, resolveChain } from "./cc-webproviders.mjs";
+import { skillStatus, installSkills, removeSkills, formatSkills } from "./cc-skills.mjs";
 
 const ROOT = installRoot();
 const CFG = configFile();
@@ -814,6 +815,34 @@ async function webProvidersFlow() {
   }
 }
 
+// Agent skills shape how Claude writes code and builds UI; they are optional content.
+async function skillsFlow() {
+  for (;;) {
+    const status = skillStatus();
+    console.log();
+    console.log("  " + bold("Agent skills") + "  " + dim(status.filter((s) => s.installed).length + "/" + status.length + " installed"));
+    console.log("  " + dim("Instructions Claude loads when a task matches. Restore them any time."));
+    console.log();
+    console.log(formatSkills(status));
+    console.log();
+    console.log("  " + dim("a = install all   r = remove all   q = back"));
+    console.log();
+    const a = (await ask("Skills > ")).trim().toLowerCase();
+    if (!a || a === "q") return;
+    if (a === "a") {
+      const r = installSkills();
+      console.log(cyan("  \u2714 installed " + r.installed.length + " skill(s)"));
+      continue;
+    }
+    if (a === "r") {
+      const r = removeSkills();
+      console.log(cyan("  \u2714 removed " + r.removed.length + " skill(s)"));
+      continue;
+    }
+    console.log(cyan("  enter a, r or q"));
+  }
+}
+
 async function addFlow(c) {
   console.log();
   console.log("  1. OpenRouter          " + dim("recommended - many free models"));
@@ -914,12 +943,13 @@ async function ttyMode() {
       console.log(dim("  No providers configured yet - let's add one."));
     }
     console.log();
-    console.log("  " + (list.length ? "number = switch provider   " : "") + "a = add provider   " + (list.length ? "r = remove   " : "") + "t = test   w = web fetch providers   q = quit");
+    console.log("  " + (list.length ? "number = switch provider   " : "") + "a = add provider   " + (list.length ? "r = remove   " : "") + "t = test   w = web fetch providers   s = skills   q = quit");
     console.log();
     const a = (await ask("Choice > ")).toLowerCase();
     if (a === "q") return;
     if (a === "t") { await runSmokeTest(); continue; }
     if (a === "w") { await webProvidersFlow(); continue; }
+    if (a === "s") { await skillsFlow(); continue; }
     if (a === "a" || !list.length) {
       const added = await addFlow(c);
       if (!added) continue;

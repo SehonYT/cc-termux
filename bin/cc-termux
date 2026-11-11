@@ -7,6 +7,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { installRoot, configFile, claudeDir, cacheDir } from "./cc-paths.mjs";
 import { fetchPlans as naraFetchPlans, formatUsage as naraFormatUsage, readNaraCache, writeNaraCache } from "./cc-nara.mjs";
+import { installSkills, removeSkills, skillStatus, formatSkills, loadCatalog } from "./cc-skills.mjs";
 import { WEB_PROVIDERS, PROVIDER_INFO, readWebConfig, writeWebConfig, providerKey as webProviderKey, resolveChain, searchChain } from "./cc-webproviders.mjs";
 
 const ROOT = installRoot();
@@ -527,6 +528,7 @@ const HELP = [
   "  antigravity usage     live 5h/weekly quota",
   "  nararouter usage      NaraRouter plans, rate limits and model tiers",
   "  web [status|key|test] web search providers (Tavily, Brave, Jina) + built-in scraper",
+  "  skills [install|status] agent skills (ponytail, agent-browser, design, web quality)",
   "  antigravity models --update   refresh models from Google",
   "  statusline [--install]        Claude Code status line (model + quota)",
   "",
@@ -874,6 +876,33 @@ switch (cmd) {
       break;
     }
     console.log("usage: cc-termux nararouter [usage|plans] [plan] [--json]");
+    break;
+  }
+  case "skills": {
+    const sub = (args[0] || "status").toLowerCase();
+    if (sub === "status" || sub === "list") {
+      const status = skillStatus();
+      if (args.includes("--json")) { console.log(JSON.stringify(status, null, 2)); break; }
+      console.log("skill pack (" + status.filter((s) => s.installed).length + "/" + status.length + " installed):");
+      console.log(formatSkills(status));
+      console.log();
+      console.log("install: cc-termux skills install   ·   also in the setup wizard (s)");
+      break;
+    }
+    if (sub === "install") {
+      const only = args.slice(1).filter((a) => !a.startsWith("-"));
+      const r = installSkills({ only: only.length ? only : null });
+      console.log("installed " + r.installed.length + " skill(s)" + (r.installed.length ? ": " + r.installed.join(", ") : ""));
+      for (const s of r.skipped) console.log("  skipped " + s.id + ": " + s.reason);
+      break;
+    }
+    if (sub === "remove" || sub === "uninstall") {
+      const only = args.slice(1).filter((a) => !a.startsWith("-"));
+      const r = removeSkills({ only: only.length ? only : null });
+      console.log("removed " + r.removed.length + " skill(s)" + (r.removed.length ? ": " + r.removed.join(", ") : ""));
+      break;
+    }
+    console.log("usage: cc-termux skills [status|install [id...]|remove [id...]]");
     break;
   }
   case "web": {
