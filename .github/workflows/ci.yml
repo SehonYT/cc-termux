@@ -11,18 +11,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, macos-13, windows-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
         node: [18, 20, 22]
-        exclude:
-          # macos-13 is Intel; one run per Node is enough and keeps the matrix affordable.
-          - os: macos-13
-            node: 18
-          - os: macos-13
-            node: 20
-    # Intel runners are scarce and can sit queued for hours. One starved job must not hold
-    # the whole run open, so this leg is advisory while the others report normally.
-    continue-on-error: ${{ matrix.os == 'macos-13' }}
-    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
