@@ -72,6 +72,27 @@ test("a preset header cannot be overridden by an empty key", () => {
   assert.ok(keyIdx >= 0 && presetIdx > keyIdx, "preset headers are applied after the key");
 });
 
+test("the models fetch sends the preset headers too", () => {
+  // The setup path fetches /models separately from chat. Without the client headers a
+  // fingerprinting gateway answers 401 and the wizard reports a bad key, which is wrong.
+  const setup = fs.readFileSync(path.join(root, "bin", "cc-setup.mjs"), "utf8");
+  const idx = setup.indexOf("async function fetchPresetModels");
+  const block = setup.slice(idx, idx + 1200);
+  assert.match(block, /preset\.headers/, "/models must send the preset headers");
+  assert.match(block, /authorization: "Bearer " \+ key/, "and still send the key");
+  // A 401 with headers already sent means the key, not the client, so say so.
+  assert.match(block, /client headers are sent/, "the error must distinguish the two causes");
+});
+
+test("the AgentRouter preset uses the Responses API", () => {
+  const ar = presets.free.find((p) => p.id === "agentrouter");
+  // Verified live: gpt-5 is rejected on /chat/completions on this gateway.
+  assert.equal(ar.api, "responses");
+  assert.equal(ar.pathResponses, "/v1/responses");
+  // And the model ids must be ones the gateway actually serves.
+  assert.match(ar.notes, /Responses API/);
+});
+
 test("cc-patch resolves its root through cc-paths", () => {
   const patch = fs.readFileSync(path.join(root, "bin", "cc-patch.mjs"), "utf8");
   assert.match(patch, /import \{ installRoot \} from "\.\/cc-paths\.mjs"/);

@@ -302,12 +302,14 @@
       "baseUrl": "https://agentrouter.org/v1",
       "path": "/chat/completions",
       "keyUrl": "https://agentrouter.org",
-      "notes": "new-api gateway: sign in, create a key, then paste it. Sends the Codex client headers this gateway requires.",
+      "notes": "new-api gateway: sign in, create a key, then paste it. Speaks the OpenAI Responses API and requires the Codex client headers.",
       "headers": {
         "user-agent": "codex_cli_rs/0.20.0",
         "originator": "codex_cli_rs",
         "codex_cli_rs": "1"
-      }
+      },
+      "api": "responses",
+      "pathResponses": "/v1/responses"
     },
     {
       "id": "ollama",

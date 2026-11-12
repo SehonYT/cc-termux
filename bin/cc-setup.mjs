@@ -243,8 +243,11 @@ async function fetchPresetModels(preset, key, { tier } = {}) {
   if (preset.modelsPath === null && (preset.models || []).length) return presetStaticModels(preset);
   const url = String(preset.baseUrl).replace(/\/$/, "") + (preset.modelsPath || "/models");
   try {
-    const r = await fetchT(url, { headers: key ? { authorization: "Bearer " + key } : {} });
-    if (!r.ok) throw new Error(preset.name + " /models HTTP " + r.status + " - check the key");
+    // A gateway that fingerprints the client rejects /models too, so the preset's own
+    // headers have to go out with the key, not just on the chat request.
+    const headers = { ...(key ? { authorization: "Bearer " + key } : {}), ...(preset.headers || {}) };
+    const r = await fetchT(url, { headers });
+    if (!r.ok) throw new Error(preset.name + " /models HTTP " + r.status + " - check the key" + (r.status === 401 && preset.headers ? " (client headers are sent; the key may be wrong or need approval)" : ""));
     let j;
     try { j = await r.json(); } catch (e) { throw new Error(preset.name + " /models did not return JSON"); }
     const arr = j.data || j.models || j;
