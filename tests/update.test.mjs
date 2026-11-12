@@ -136,6 +136,13 @@ test("selfUpdate pins the download to the resolved commit and stamps it", async 
   const root = path.join(tmp, "root");
   fs.mkdirSync(root, { recursive: true });
   fs.writeFileSync(path.join(root, "update-check.json"), "{}");
+  // Keep the root resolution inside the temp dir: the updater migrates an old root to the
+  // canonical one, which would otherwise escape to the real home.
+  const prevHome = process.env.HOME;
+  const prevRoot = process.env.MODELMESH_ROOT;
+  process.env.HOME = tmp;
+  process.env.USERPROFILE = tmp;
+  process.env.MODELMESH_ROOT = root;
   try {
     await selfUpdate({ root, fetchImpl });
     assert.equal(fs.readFileSync(path.join(root, "marker"), "utf8"), sha, "installer got the pinned sha");
@@ -144,7 +151,11 @@ test("selfUpdate pins the download to the resolved commit and stamps it", async 
     assert.equal(stamp.version, "9.9.9+" + sha.slice(0, 7));
     assert.equal(stamp.updatedAt, "2026-01-02T00:00:00Z");
     assert.equal(fs.existsSync(path.join(root, "update-check.json")), false, "stale update cache cleared");
-  } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+  } finally {
+    if (prevHome === undefined) delete process.env.HOME; else process.env.HOME = prevHome;
+    if (prevRoot === undefined) delete process.env.MODELMESH_ROOT; else process.env.MODELMESH_ROOT = prevRoot;
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });
 test("selfUpdate refuses an older remote feed instead of downgrading", async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cc-upd-stale-"));

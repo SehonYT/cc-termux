@@ -287,6 +287,57 @@ test("the local scraper runs only when the chain reaches it", () => {
   assert.match(mcp, /results: ran\.rows,/);
 });
 
+test("a rejected Antigravity login is an auth error, not a quota error", () => {
+  // Marking it quota made the chain treat it as temporary and silently drop Google, so
+  // search appeared to work by falling back and then "just stopped".
+  const wp = fs.readFileSync(path.join(root, "bin", "cc-webproviders.mjs"), "utf8");
+  const fn = /export async function antigravityGrounding\([\s\S]*?\n\}/.exec(wp)[0];
+  assert.match(fn, /e\.authFailed = true/, "a credential failure is flagged as auth");
+  assert.match(fn, /e\.quota = false/, "and is not flagged as quota");
+  assert.match(fn, /not logged in; run: modelmesh antigravity login/, "a missing login says how to fix it");
+  // The chain must carry the status through, or the note never reaches the agent.
+  assert.match(wp, /status: e\.authFailed \? "auth"/, "the chain records an auth status");
+  assert.match(wp, /authFailed \? "auth" : e\.quota \? "quota" : "error"/, "the log names it auth");
+});
+
+test("a missing credential and a rejected one are both auth failures", () => {
+  const wp = fs.readFileSync(path.join(root, "bin", "cc-webproviders.mjs"), "utf8");
+  const fn = /export async function antigravityGrounding\([\s\S]*?\n\}/.exec(wp)[0];
+  // No credentials at all: the first branch.
+  assert.match(fn, /if \(!creds\)/, "the no-credential case is handled");
+  const noCreds = fn.slice(fn.indexOf("if (!creds)"), fn.indexOf("if (!creds)") + 260);
+  assert.match(noCreds, /authFailed = true/, "no credential is an auth failure");
+  assert.ok(!/quota = true/.test(noCreds), "and never a quota failure");
+  // A refresh that is rejected: the catch branch.
+  const cat = fn.slice(fn.indexOf("catch (err)"), fn.indexOf("catch (err)") + 460);
+  assert.match(cat, /invalidCredential|revoked/, "a rejected refresh is recognised");
+  assert.match(cat, /no refresh token/, "and so is a missing refresh token");
+});
+
+test("the agent is told when grounding is unavailable", () => {
+  const mcp = fs.readFileSync(path.join(root, "bin", "cc-mcp.mjs"), "utf8");
+  // A silent fallback reads as "search just stopped"; the summary must say why.
+  assert.match(mcp, /Google grounding is unavailable/, "the summary names the cause");
+  assert.match(mcp, /modelmesh antigravity login/, "and the command that fixes it");
+  assert.match(mcp, /const authFailed = ran\.attempts\.find/, "it looks for an auth attempt");
+});
+
+test("grounding retries a transient failure instead of dropping Google", () => {
+  const wp = fs.readFileSync(path.join(root, "bin", "cc-webproviders.mjs"), "utf8");
+  const fn = /export async function antigravityGrounding\([\s\S]*?\n\}/.exec(wp)[0];
+  assert.match(fn, /attempt < 2/, "there is a retry loop");
+  assert.match(fn, /res\.status >= 500/, "a server error is retried");
+  assert.ok(/continue;/.test(fn), "the loop actually retries");
+  // And the auth path must not retry: only a login fixes it. The credential catch runs
+  // before the retry loop, so it throws instead of looping.
+  const authCatch = fn.indexOf("catch (err)");
+  const retryLoop = fn.indexOf("attempt < 2");
+  assert.ok(authCatch >= 0 && retryLoop > authCatch, "the credential check runs before the retry loop");
+  const authBlock = fn.slice(authCatch, retryLoop);
+  assert.match(authBlock, /throw e;/, "an auth failure is thrown, not retried");
+  assert.ok(!/attempt < 2/.test(authBlock), "the auth block has no retry of its own");
+});
+
 test("the installer asks once, then offers one list and one key prompt", () => {
   const inst = fs.readFileSync(path.join(root, "install.mjs"), "utf8");
   // One gate question before anything else.

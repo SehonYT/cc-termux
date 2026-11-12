@@ -15,21 +15,27 @@ function env(environment) { return environment || process.env; }
 const OLD = { root: "CC_TERMUX_ROOT", config: "CC_TERMUX_CONFIG", cache: "CC_TERMUX_CACHE" };
 function legacyEnv(e, key) { return e[OLD[key]] || ""; }
 
-// Moves a directory from the old name to the new one, once. Returns the new path.
+// Moves a directory from the old name to the new one, once, and returns the new path.
+// An existing destination is merged into rather than skipped: a directory created moments
+// earlier by an unrelated path lookup is empty, and treating it as "already migrated"
+// leaves the real data behind.
 export function migrateDir(from, to) {
+  if (!exists(from)) return to;
+  if (path.resolve(from) === path.resolve(to)) return to;
   try {
-    if (exists(to) || !exists(from)) return to;
-    fs.mkdirSync(path.dirname(to), { recursive: true });
-    fs.renameSync(from, to);
+    fs.mkdirSync(to, { recursive: true });
+    // Move each entry, keeping anything already at the destination.
+    for (const entry of fs.readdirSync(from)) {
+      const src = path.join(from, entry);
+      const dst = path.join(to, entry);
+      if (exists(dst)) continue;
+      try { fs.renameSync(src, dst); }
+      catch (e) { try { fs.cpSync(src, dst, { recursive: true }); fs.rmSync(src, { recursive: true, force: true }); } catch (e2) { } }
+    }
+    // Remove the old directory only when it is empty; a partial move keeps the rest.
+    try { if (!fs.readdirSync(from).length) fs.rmdirSync(from); } catch (e) { }
     return to;
-  } catch (e) {
-    // A cross-device rename fails; copying then removing is the safe fallback.
-    try {
-      fs.cpSync(from, to, { recursive: true });
-      fs.rmSync(from, { recursive: true, force: true });
-      return to;
-    } catch (e2) { return from; }
-  }
+  } catch (e) { return from; }
 }
 function localAppData(e) { return e.LOCALAPPDATA || path.join(home(), "AppData", "Local"); }
 function appData(e) { return e.APPDATA || path.join(home(), "AppData", "Roaming"); }

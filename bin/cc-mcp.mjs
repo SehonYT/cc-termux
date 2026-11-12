@@ -593,9 +593,12 @@ export async function webSearch(query, { maxResults = 8, engines } = {}) {
     log: (m) => { try { process.stderr.write("[web] " + m + "\n"); } catch (e) { } },
   });
   const failed = ran.attempts.filter((a) => a.status !== "ok");
+  const authFailed = ran.attempts.find((a) => a.status === "auth");
   const summary = ran.provider === "local" || !ran.provider
     ? formatSearchReport(localOutcome.report)
-    : "answered by " + ran.provider + (failed.length ? " (fell back from " + failed.map((a) => a.provider + ":" + a.status).join(", ") + ")" : "");
+    : "answered by " + ran.provider + (failed.length ? " (fell back from " + failed.map((a) => a.provider + ":" + a.status).join(", ") + ")" : "")
+      // A rejected login that silently falls back looks like "search just stopped". Say it.
+      + (authFailed ? "  NOTE: Google grounding is unavailable - " + String(authFailed.message || "the Antigravity login was rejected").replace(/; run:.*$/, "") + " (run: modelmesh antigravity login)" : "");
   const result = {
     query: q,
     results: ran.rows,

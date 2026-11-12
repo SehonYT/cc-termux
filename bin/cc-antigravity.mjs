@@ -11,7 +11,9 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { cacheDir, configFile, configDir as pathsConfigDir } from "./cc-paths.mjs";
 
-const MASK = "modelmesh-oauth-v1";
+// The XOR key the byte arrays below were encoded with. It is NOT branding: changing it
+// makes every decoded credential garbage. Keep it exactly as encoded.
+const MASK = "cc-termux-oauth-v1";
 const ID_BYTES = [82,83,26,69,85,66,91,69,78,29,90,88,68,89,28,64,30,66,16,10,67,70,13,64,92,25,27,95,10,83,70,65,30,89,25,93,12,9,69,64,2,70,93,70,29,93,65,0,5,4,27,3,17,94,12,4,65,17,16,1,8,7,27,66,1,21,16,26,28,3,21,94,14];
 const SECRET_BYTES = [36,44,110,39,53,42,64,62,77,21,41,54,39,64,80,27,58,85,47,41,28,25,41,48,85,6,32,110,91,27,67,5,44,108,16];
 function unmask(bytes) { let out = ""; for (let i = 0; i < bytes.length; i++) out += String.fromCharCode(bytes[i] ^ MASK.charCodeAt(i % MASK.length)); return out; }
@@ -129,7 +131,16 @@ export async function refreshToken(refresh_token, fetchImpl = fetch) {
     headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json", "user-agent": USER_AGENT },
     body: new URLSearchParams({ grant_type: "refresh_token", refresh_token, client_id: CLIENT_ID, client_secret: CLIENT_SECRET }),
   });
-  if (!res.ok) throw new Error("token refresh failed: HTTP " + res.status + " " + (await res.text()).slice(0, 300));
+  if (!res.ok) {
+    const body = (await res.text()).slice(0, 300);
+    const err = new Error("token refresh failed: HTTP " + res.status + " " + body);
+    // invalid_client or invalid_grant means the stored credential is no longer accepted.
+    // Retrying cannot help: only a fresh login can. Everything else may be transient.
+    err.invalidCredential = /invalid_client|invalid_grant/i.test(body) || res.status === 400;
+    err.revoked = /invalid_grant/i.test(body);
+    err.status = res.status;
+    throw err;
+  }
   return await res.json();
 }
 

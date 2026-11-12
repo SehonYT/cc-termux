@@ -145,6 +145,34 @@ test("paths built for a child process survive Windows separators", () => {
   }
 });
 
+test("a pre-rename install root is migrated, not abandoned", () => {
+  // The reported upgrade failure: an install at ~/.local/share/cc-termux, updated by a
+  // binary that now resolves the new name, so the installer looked for the Claude Code
+  // binary in a directory the migration had already emptied.
+  const paths = fs.readFileSync(path.join(root, "bin", "cc-paths.mjs"), "utf8");
+  assert.match(paths, /export function migrateDir/, "there is a migration helper");
+  // Merging, not skipping: a destination created moments earlier is empty, and treating it
+  // as already-migrated is what left the real data behind.
+  const fn = /export function migrateDir\(from, to\) \{[\s\S]*?\n\}/.exec(paths)[0];
+  assert.ok(!/if \(exists\(to\) \|\| !exists\(from\)\) return to;/.test(fn), "an existing destination must not short-circuit");
+  assert.match(fn, /fs\.readdirSync\(from\)/, "it walks the old directory");
+  assert.match(fn, /if \(exists\(dst\)\) continue;/, "and keeps whatever is already there");
+  assert.match(fn, /rmdirSync\(from\)/, "removing the old directory only when it is empty");
+
+  const installer = fs.readFileSync(path.join(root, "install.mjs"), "utf8");
+  assert.match(installer, /function canonicalRoot\(requested\)/, "the installer resolves an old --root");
+  // installRoot() migrates as a side effect, so the requested path may already be gone.
+  assert.match(installer, /if \(!fs\.existsSync\(requested\)\) \{/, "a requested path that vanished is followed to the canonical one");
+  assert.match(installer, /install root moved to/, "and the move is reported");
+});
+
+test("the updater migrates the root before handing it to the installer", () => {
+  const updater = fs.readFileSync(path.join(root, "bin", "cc-update.mjs"), "utf8");
+  // The device's own updater is the old one and passes the old path on.
+  assert.match(updater, /paths\.migrateDir\(root, canonical\)/, "the updater migrates first");
+  assert.match(updater, /install root moved/, "and says what it did");
+});
+
 test("the config, cache and root paths are absolute on every platform", () => {
   // Exercised through the real resolvers, so a change to them is caught here.
   const prev = { ...process.env };

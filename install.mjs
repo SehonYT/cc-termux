@@ -17,13 +17,39 @@ import { createProgress, banner, step, info } from "./bin/cc-ui.mjs";
 import { installSkills, formatSkills, skillStatus } from "./bin/cc-skills.mjs";
 import { PERF_PROMPT_LINES, perfDefaultAnswer, savePerfMode, shouldAskPerf } from "./bin/cc-perf.mjs";
 import { ensurePathInRcFiles, prefixBinDir } from "./bin/cc-heal.mjs";
-import { installRoot, configFile, cacheDir, claudeDir, isWindows } from "./bin/cc-paths.mjs";
+import { installRoot, configFile, cacheDir, claudeDir, isWindows, migrateDir } from "./bin/cc-paths.mjs";
 
 const SRC = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
 const has = (f) => args.includes(f);
 const argVal = (f, d) => { const i = args.indexOf(f); return i >= 0 && args[i + 1] ? args[i + 1] : d; };
-const ROOT = argVal("--root", installRoot());
+// A pre-rename updater passes the old install root. Accept it and move the data to the
+// canonical name rather than looking for a Claude Code binary in a directory we abandoned.
+function canonicalRoot(requested) {
+  if (!requested) return requested;
+  try {
+    // installRoot() migrates the old directory as a side effect of being called, so do it
+    // first and then decide: the requested path may already have ceased to exist.
+    const canonical = installRoot({ ...process.env, MODELMESH_ROOT: "" });
+    if (path.resolve(requested) === path.resolve(canonical)) return requested;
+    // A requested path that is gone was migrated by the call above.
+    if (!fs.existsSync(requested)) {
+      if (fs.existsSync(canonical)) {
+        console.log("[ok] install root moved to " + canonical);
+        return canonical;
+      }
+      return requested;
+    }
+    // Only the pre-rename directory is migrated: an explicitly requested root under any
+    // other name is honoured as given, which is what tests and custom installs rely on.
+    const oldName = /[\\/]cc-termux$/.test(path.resolve(requested).replace(/[\\/]+$/, ""));
+    if (!oldName) return requested;
+    migrateDir(requested, canonical);
+    console.log("[ok] install root moved to " + canonical);
+    return canonical;
+  } catch (e) { return requested; }
+}
+const ROOT = canonicalRoot(argVal("--root", installRoot()));
 const CFG = configFile();
 // Platform default root, ignoring a MODELMESH_ROOT override: only a canonical install may
 // write user-wide shims, and temp/custom roots (tests, parallel checkouts) must stay isolated.

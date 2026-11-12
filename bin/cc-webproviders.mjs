@@ -234,10 +234,34 @@ export async function antigravityGrounding(query, { fetchImpl = fetch, timeoutMs
     import("./cc-antigravity.mjs"),
   ]);
   const creds = antigravity.loadCredentials();
-  if (!creds) { const e = new Error("Antigravity: not logged in"); e.quota = true; throw e; }
+  if (!creds) {
+    const e = new Error("not logged in; run: modelmesh antigravity login");
+    e.quota = false;
+    e.authFailed = true;
+    e.hint = "not logged in; run: modelmesh antigravity login";
+    throw e;
+  }
   let token;
-  try { token = await antigravity.ensureAccessToken(creds); }
-  catch (err) { const e = new Error("Antigravity: " + err.message); e.quota = true; throw e; }
+  try {
+    token = await antigravity.ensureAccessToken(creds);
+  } catch (err) {
+    const e = new Error("Antigravity: " + err.message);
+    // A rejected refresh token is not a quota problem. Marking it quota made the chain
+    // treat it as temporary and silently drop Google, so search appeared to "just stop".
+    if (err.invalidCredential || err.revoked || /not logged in|no refresh token/i.test(err.message)) {
+      e.quota = false;
+      e.authFailed = true;
+      e.hint = err.revoked
+        ? "the Antigravity login was revoked; run: modelmesh antigravity login"
+        : /not logged in/i.test(err.message)
+          ? "not logged in; run: modelmesh antigravity login"
+          : "the Antigravity login is not accepted; run: modelmesh antigravity login";
+      e.message = e.hint;
+    } else {
+      e.quota = true;
+    }
+    throw e;
+  }
 
   // Only Gemini models honour googleSearch; Claude and GPT-OSS on Antigravity accept the
   // request but silently drop it, so grounding always runs on a Gemini model.
@@ -246,13 +270,27 @@ export async function antigravityGrounding(query, { fetchImpl = fetch, timeoutMs
   const prompt = "Use Google Search to answer this query, then reply with a short factual summary "
     + "and the source titles you used.\n\nQuery: " + query;
   const envelope = anthropicToGemini({ messages: [{ role: "user", content: prompt }], max_tokens: 1024 }, chosen, creds);
-  const res = await fetchImpl(antigravity.GENERATE_URLS[0], {
-    method: "POST",
-    headers: { "content-type": "application/json", ...antigravity.antigravityContentHeaders(token) },
-    body: JSON.stringify(envelope),
-    signal: AbortSignal.timeout(timeoutMs),
-  });
-  const text = await res.text();
+  // One retry on a transient failure. The grounding path used to give up immediately,
+  // so a single 5xx or network blip dropped Google for every later search in the session.
+  let res = null, text = "";
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      res = await fetchImpl(antigravity.GENERATE_URLS[0], {
+        method: "POST",
+        headers: { "content-type": "application/json", ...antigravity.antigravityContentHeaders(token) },
+        body: JSON.stringify(envelope),
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      text = await res.text();
+    } catch (err) {
+      if (attempt === 1) { const e = new Error("Antigravity grounding: " + err.message); e.quota = true; throw e; }
+      await new Promise((r) => setTimeout(r, 400));
+      continue;
+    }
+    // Retry a server-side failure; a 4xx will not improve on a second try.
+    if (res.status >= 500 && attempt === 0) { await new Promise((r) => setTimeout(r, 400)); continue; }
+    break;
+  }
   if (!res.ok) {
     let msg = text.slice(0, 200);
     try { msg = (JSON.parse(text).error || {}).message || msg; } catch (e) { }
@@ -309,8 +347,9 @@ export async function searchChain(query, { chain, maxResults = 8, cfg = readWebC
       attempts.push({ provider: id, status: "ok", count: out.rows.length });
       return { rows: out.rows, provider: id, answer: out.answer, attempts };
     } catch (e) {
-      attempts.push({ provider: id, status: e.quota ? "quota" : "error", message: e.message });
-      log(id + " failed (" + (e.quota ? "quota" : "error") + "): " + e.message);
+      attempts.push({ provider: id, status: e.authFailed ? "auth" : e.quota ? "quota" : "error", message: e.hint || e.message });
+      // An auth failure is not something the next provider can paper over: say so loudly.
+      log(id + " failed (" + (e.authFailed ? "auth" : e.quota ? "quota" : "error") + "): " + (e.hint || e.message));
     }
   }
   return { rows: [], provider: null, attempts };

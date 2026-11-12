@@ -222,6 +222,21 @@ export async function selfUpdate({ root = DEFAULT_ROOT, repo = DEFAULT_REPO, arc
         else info("A newer Claude Code will be downloaded from registry.npmjs.org.");
       } catch (e) { }
     }
+    // This updater may be the pre-rename one, running from the old install root: its own
+    // directory is named cc-termux while the new code resolves modelmesh. Only that case is
+    // migrated, judged by the directory name, so an explicitly requested root is honoured.
+    try {
+      const paths = await import("./cc-paths.mjs");
+      const isOldName = /[\\/]cc-termux$/.test(path.resolve(root).replace(/[\\/]+$/, ""));
+      if (isOldName && fs.existsSync(root)) {
+        const canonical = paths.installRoot({ ...process.env, MODELMESH_ROOT: "" });
+        if (path.resolve(root) !== path.resolve(canonical)) {
+          paths.migrateDir(root, canonical);
+          info("install root moved: " + root + " -> " + canonical);
+          root = canonical;
+        }
+      }
+    } catch (e) { }
     const args = [installer, "--root", root, "--no-setup"];
     if (codeOnly) args.push("--code-only");
     const env = { ...process.env, MODELMESH_NO_BANNER: codeOnly ? "1" : "" };
