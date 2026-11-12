@@ -65,6 +65,17 @@ const upstreamModel = (m) => {
   console.error(new Date().toISOString(), "antigravity: unknown model", mapped, "- using gemini-3.8-flash-high");
   return "gemini-3.8-flash-high";
 };
+// Output ceilings per model family, taken from the live catalog (fetchAvailableModels) rather
+// than assumed. The Claude entry used to be 16384, so a request for 64000 was silently clamped
+// to a quarter of what the model allows - verified accepted upstream at 64000 and above.
+const OUTPUT_CAPS = {
+  "claude-sonnet-4-6": 64000,
+  "claude-opus-4-6-thinking": 64000,
+  "gpt-oss-120b-medium": 32768,
+  "gemini-3.8-flash-high": 65536,
+  "gemini-3.8-flash-medium": 65536,
+  "gemini-3.8-flash-low": 65536,
+};
 const MAX_OUTPUT = 65536;
 // Antigravity sends this lightweight system prompt itself; an oversized systemInstruction
 // is rejected with a misleading 429, so the client prompt moves to the first user turn.
@@ -73,10 +84,11 @@ const DEFAULT_SYSTEM =
   "You are pair programming with a USER to solve their coding task. The task may require creating a new codebase, modifying or debugging an existing codebase, or simply answering a question.\n" +
   "**Absolute paths only**\n" +
   "**Proactiveness**";
-// Output ceilings Antigravity publishes per model family.
+// Output ceiling for a model: the catalog value when known, else the family default.
 function outputCap(model) {
   const id = String(model || "");
-  if (/^claude|claude-/.test(id)) return 16384;
+  if (OUTPUT_CAPS[id]) return OUTPUT_CAPS[id];
+  if (/^claude|claude-/.test(id)) return 64000;
   if (/gpt-oss/.test(id)) return 32768;
   return MAX_OUTPUT;
 }
@@ -276,9 +288,16 @@ export function anthropicToGemini(body, model, creds) {
   const cap = outputCap(model);
   const thinkingBudget = thinkingBudgetFor(body);
   const isClaudeModel = /^claude-/.test(String(model || ""));
-  let maxOutputTokens = Math.min(Number(body.max_tokens) || 8192, cap);
-  if (!isClaudeModel && thinkingBudget > 0 && maxOutputTokens <= thinkingBudget) {
-    maxOutputTokens = Math.min(cap, thinkingBudget + 1);
+  // With no max_tokens the request used to go out at 8192, so a long generation was cut off
+  // well below what the model allows. An absent limit now means the model's own ceiling.
+  const askedMax = Number(body.max_tokens);
+  let maxOutputTokens = Number.isFinite(askedMax) && askedMax > 0 ? Math.min(askedMax, cap) : cap;
+  // A thinking budget larger than the requested output used to RAISE maxOutputTokens, so a
+  // caller asking for 100 tokens got 32769 and their limit was silently ignored. The budget
+  // has to fit inside the answer the caller asked for, never the other way round.
+  let effectiveBudget = thinkingBudget;
+  if (!isClaudeModel && effectiveBudget > 0 && maxOutputTokens <= effectiveBudget) {
+    effectiveBudget = Math.max(0, maxOutputTokens - 1);
   }
   const generationConfig = {
     maxOutputTokens,
@@ -286,8 +305,8 @@ export function anthropicToGemini(body, model, creds) {
     topP: body.top_p != null ? body.top_p : 1.0,
     ...(body.temperature != null ? { temperature: body.temperature } : {}),
     // Claude-branded models go through Vertex and reject a thinkingConfig.
-    ...(!isClaudeModel && thinkingBudget > 0
-      ? { thinkingConfig: { includeThoughts: true, thinkingBudget } }
+    ...(!isClaudeModel && effectiveBudget > 0
+      ? { thinkingConfig: { includeThoughts: true, thinkingBudget: effectiveBudget } }
       : {}),
   };
   const request = {
@@ -604,8 +623,17 @@ export async function proxyAntigravity(req, res, route, body, { anthropicError, 
   // OmniRoute relies on (bin/antigravity-bridge.mjs:34 timeout: 120000). Verified locally: a
   // 4.3s stream survives a 1.5s agent timeout while data keeps flowing, so it measures silence
   // rather than total elapsed time - which is exactly what a long thinking turn needs.
+  // Arm the socket's inactivity timer exactly once. Calling res.setTimeout per chunk ADDS a
+  // listener each time instead of resetting one, which leaked thousands on a long stream
+  // (MaxListenersExceededWarning) and would eventually exhaust memory.
   let stalledOut = false;
-  const markActivity = () => { try { upstream.setTimeout(IDLE_MS, () => { stalledOut = true; try { upstream.destroy(); } catch (e) { } }); } catch (e) { } };
+  const onIdle = () => { stalledOut = true; try { upstream.destroy(); } catch (e) { } };
+  try {
+    upstream.setTimeout(IDLE_MS, onIdle);
+    if (upstream.socket) upstream.socket.setTimeout(IDLE_MS, onIdle);
+  } catch (e) { }
+  // A socket resets its own idle timer on every byte, so the loop does not have to re-arm it.
+  const markActivity = () => { };
   try {
     for (;;) {
       const { done, value } = await reader.next();

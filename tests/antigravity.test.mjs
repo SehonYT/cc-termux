@@ -99,6 +99,30 @@ test("OAuth URL, token exchange, project discovery", async () => {
   assert.equal(ant.loadCredentials().project_id, "project-123");
 });
 
+// The output ceiling and the thinking budget both used to override what the caller asked for.
+test("the requested max_tokens is never exceeded, and an absent one uses the model ceiling", async () => {
+  const adapter = await import("../proxy/antigravity.mjs?t=" + Date.now());
+  const creds = { project_id: "p" };
+  const cfg = (body, model) => adapter.anthropicToGemini(body, model, creds).request.generationConfig;
+  const msg = [{ role: "user", content: "hi" }];
+  // A small limit must be honoured even when high effort asks for a huge thinking budget:
+  // this used to come out as 32769 and silently ignore the caller.
+  assert.equal(cfg({ max_tokens: 100, output_config: { effort: "high" }, messages: msg }, "gemini-3.8-flash-high").maxOutputTokens, 100);
+  assert.equal(cfg({ max_tokens: 100, thinking: { budget_tokens: 32768 }, messages: msg }, "gemini-3.8-flash-high").maxOutputTokens, 100);
+  assert.equal(cfg({ max_tokens: 2000, output_config: { effort: "medium" }, messages: msg }, "gemini-3.8-flash-high").maxOutputTokens, 2000);
+  // An absent limit means the model's own ceiling, not the old 8192.
+  assert.equal(cfg({ messages: msg }, "claude-sonnet-4-6").maxOutputTokens, 64000);
+  assert.equal(cfg({ messages: msg }, "gemini-3.8-flash-high").maxOutputTokens, 65536);
+  assert.equal(cfg({ messages: msg }, "gpt-oss-120b-medium").maxOutputTokens, 32768);
+  // Claude is capped at 64000 by the catalog; a larger ask is clamped to that, not to 16384.
+  assert.equal(cfg({ max_tokens: 200000, messages: msg }, "claude-sonnet-4-6").maxOutputTokens, 64000);
+  // Thinking still works when there is room for it, and fits inside a tight answer.
+  assert.equal(cfg({ max_tokens: 64000, output_config: { effort: "high" }, messages: msg }, "gemini-3.8-flash-high").thinkingConfig.thinkingBudget, 32768);
+  assert.equal(cfg({ max_tokens: 100, output_config: { effort: "high" }, messages: msg }, "gemini-3.8-flash-high").thinkingConfig.thinkingBudget, 99);
+  // Claude-branded models reject a thinkingConfig, so they must never carry one.
+  assert.equal(cfg({ max_tokens: 64000, output_config: { effort: "high" }, messages: msg }, "claude-sonnet-4-6").thinkingConfig, undefined);
+});
+
 test("request translation maps text, system and tools", async () => {
   const ant = await import("../bin/cc-antigravity.mjs?t=" + Date.now());
   const adapter = await import("../proxy/antigravity.mjs?t=" + Date.now());
