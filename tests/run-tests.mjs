@@ -19,13 +19,18 @@ if (!files.length) { console.error("no test files matched: " + filters.join(", "
 // Generous: the slowest file is a few seconds locally and under a minute on a slow runner.
 const FILE_TIMEOUT_MS = Number(process.env.MODELMESH_TEST_TIMEOUT_MS || 180000);
 // node:test's own per-test deadline, so a hung test names itself instead of the file.
+// --test-timeout only exists from Node 20, and Node 18 is still supported, so probe for it
+// rather than passing a flag that makes the runner refuse to start.
 const TEST_TIMEOUT_MS = Number(process.env.MODELMESH_TEST_CASE_TIMEOUT_MS || 60000);
+const supportsTestTimeout = spawnSync(process.execPath, ["--test-timeout=1000", "--test", "--help"], { stdio: "ignore" }).status === 0
+  || !/bad option/.test(String(spawnSync(process.execPath, ["--test-timeout=1000", "-e", ""], { encoding: "utf8" }).stderr || ""));
+const nodeArgs = supportsTestTimeout ? ["--test", "--test-timeout=" + TEST_TIMEOUT_MS] : ["--test"];
 
 let failed = 0;
 const timedOut = [];
 for (const f of files) {
   console.log("\n# " + f);
-  const r = spawnSync(process.execPath, ["--test", "--test-timeout=" + TEST_TIMEOUT_MS, path.join(dir, f)], {
+  const r = spawnSync(process.execPath, [...nodeArgs, path.join(dir, f)], {
     stdio: "inherit",
     timeout: FILE_TIMEOUT_MS,
     killSignal: "SIGKILL",

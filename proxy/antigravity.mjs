@@ -334,6 +334,8 @@ export async function proxyAntigravity(req, res, route, body, { anthropicError, 
   const max429 = Number(process.env.MODELMESH_ANTIGRAVITY_429_RETRIES || 2);
   let last429Text = "";
   let lastDelay = 0;
+  // How many distinct hosts returned 429. A refusal is only real when this reaches the end.
+  let hostsTried = 0;
   for (const url of GENERATE_URLS) {
     for (let attempt = 0; upstream.status === 429 && attempt < max429; attempt++) {
       last429Text = await upstream.text();
@@ -353,15 +355,23 @@ export async function proxyAntigravity(req, res, route, body, { anthropicError, 
       try { upstream = await sendUpstream(token, url); } catch (e) { break; }
     }
     if (upstream.status !== 429) break;
+    hostsTried += 1;
     try { last429Text = await upstream.text(); } catch (e) { }
     if (GENERATE_URLS.indexOf(url) === 0 && GENERATE_URLS.length > 1) {
       console.error(new Date().toISOString(), "antigravity still 429; trying secondary host");
       try { upstream = await sendUpstream(token, GENERATE_URLS[1]); } catch (e) { break; }
     }
   }
-  if (upstream.status === 429) {
+  // Cache a refusal only when the request genuinely could not be served. The secondary host
+  // answers 429 for requests the daily host handles fine, and caching on that made the next
+  // identical request fail locally without ever trying upstream - which looked exactly like
+  // exhausted quota and survived a re-login, because the block lived here.
+  const everyHost429 = upstream.status === 429 && hostsTried === GENERATE_URLS.length;
+  if (everyHost429) {
     const blockMs = rememberRefusal(fp, lastDelay);
-    console.error(new Date().toISOString(), "antigravity refusal cached for", blockMs, "ms");
+    console.error(new Date().toISOString(), "antigravity refusal cached for", blockMs, "ms (every host answered 429)");
+  } else if (upstream.status === 429) {
+    console.error(new Date().toISOString(), "antigravity 429 not cached: only " + hostsTried + " of " + GENERATE_URLS.length + " hosts were tried");
   }
   if (!upstream.ok) {
     const text = upstream.status === 429 && last429Text ? last429Text : await upstream.text();
@@ -370,7 +380,19 @@ export async function proxyAntigravity(req, res, route, body, { anthropicError, 
     try { const j = JSON.parse(text); msg = (j.error && (j.error.message || j.error.status)) || msg; } catch (e) { }
     const type = upstream.status === 401 ? "authentication_error" : upstream.status === 429 ? "rate_limit_error" : "api_error";
     try { if (upstream.status === 429) res.setHeader("retry-after", "10"); } catch (e) { }
-    const suffix = upstream.status === 429 ? " (Antigravity temporarily rate-limited; usage may still be available - retry shortly or switch model with /model)" : "";
+    let suffix = "";
+    if (upstream.status === 429) {
+      // Name what is actually out, so a genuine per-model limit is not confused with a
+      // misbehaving host. Nothing exhausted means the limit is transient.
+      let detail = "";
+      try {
+        const { fetchQuotaBuckets, describeExhausted } = await import("../bin/cc-antigravity.mjs");
+        const q = await fetchQuotaBuckets({ timeoutMs: 8000 });
+        const low = describeExhausted(q.models, 0.01);
+        detail = low ? " exhausted: " + low : " (no model is out of quota, so this is a temporary limit)";
+      } catch (e) { }
+      suffix = " (Antigravity rate-limited" + detail + " - retry shortly or switch model with /model)";
+    }
     return fail(upstream.status, type, "Antigravity upstream " + upstream.status + ": " + msg + suffix);
   }
   const reader = upstream.body.getReader();

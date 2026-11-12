@@ -326,6 +326,28 @@ async function doctor(fix) {
     const allow = cfgNow.classifier && cfgNow.classifier.allow != null
       ? Boolean(cfgNow.classifier.allow)
       : process.env.MODELMESH_CLASSIFIER_ALLOW !== "0";
+    // Antigravity quota, per model. A family rollup hides which model is actually out.
+    try {
+      const agMod = await import("./cc-antigravity.mjs");
+      if (agMod.loadCredentials && agMod.loadCredentials()) {
+        const q = await agMod.fetchQuotaBuckets({ timeoutMs: 10000 });
+        const low = q.models.filter((m) => m.remaining < 0.5).sort((a, b) => a.remaining - b.remaining);
+        if (low.length) warn("antigravity quota low: " + low.map((m) => m.model + " " + Math.round(m.remaining * 100) + "%").join(", "));
+        else pass("antigravity quota healthy across " + q.models.length + " models");
+      }
+    } catch (e) { }
+
+    // Antigravity quota, per model. A family rollup hides which model is actually out.
+    try {
+      const agMod = await import("./cc-antigravity.mjs");
+      if (agMod.loadCredentials && agMod.loadCredentials()) {
+        const q = await agMod.fetchQuotaBuckets({ timeoutMs: 10000 });
+        const low = q.models.filter((m) => m.remaining < 0.5).sort((a, b) => a.remaining - b.remaining);
+        if (low.length) warn("antigravity quota low: " + low.map((m) => m.model + " " + Math.round(m.remaining * 100) + "%").join(", "));
+        else pass("antigravity quota healthy across " + q.models.length + " models");
+      }
+    } catch (e) { }
+
     if (allow) pass("auto-mode classifier answered locally");
     else warn("auto-mode classifier is sent upstream; with no Anthropic account every Bash call will stall");
   } catch (e) { }

@@ -376,9 +376,15 @@ export async function fetchQuotaBuckets({ fetchImpl = fetch, timeoutMs = 10000 }
   const token = await ensureAccessToken(creds, { fetchImpl });
   const data = await postCloud(QUOTA_URLS, token, creds.project_id ? { project: creds.project_id } : {}, { fetchImpl, timeoutMs });
   const byFamily = new Map();
+  const models = [];
   for (const b of (data && data.buckets) || []) {
     if (!b || typeof b !== "object") continue;
     const id = String(b.modelId || "");
+    // Keep the raw per-model numbers too: the family rollup hides which model is out.
+    {
+      const frac = Number(b.remainingFraction);
+      if (Number.isFinite(frac)) models.push({ model: id || "unknown", remaining: frac, reset: b.resetTime || null });
+    }
     const family = /argon/.test(id) ? "argon" : /gemini/.test(id) ? "gemini" : /claude|gpt/.test(id) ? "claude" : "other";
     const frac = Number(b.remainingFraction);
     if (!Number.isFinite(frac)) continue;
@@ -388,7 +394,16 @@ export async function fetchQuotaBuckets({ fetchImpl = fetch, timeoutMs = 10000 }
     cur.windows.session = { percent: Math.min(prev ? prev.percent : 100, Math.max(0, Math.min(100, frac * 100))), resetAt: prev && prev.resetAt && resetAt ? (Date.parse(prev.resetAt) < Date.parse(resetAt) ? prev.resetAt : resetAt) : (prev && prev.resetAt) || resetAt || null, description: "" };
     byFamily.set(family, cur);
   }
-  return { groups: [...byFamily.values()] };
+  return { groups: [...byFamily.values()], models };
+}
+
+// The models with little room left, named, for a 429 message or doctor.
+export function describeExhausted(models, threshold = 0.01) {
+  const low = (models || []).filter((m) => typeof m.remaining === "number" && m.remaining <= threshold);
+  if (!low.length) return "";
+  return low
+    .map((m) => m.model + (m.reset ? " (resets " + String(m.reset).slice(0, 16).replace("T", " ") + ")" : ""))
+    .join(", ");
 }
 
 export async function getAntigravityUsage({ force = false, fetchImpl = fetch, timeoutMs = 10000 } = {}) {

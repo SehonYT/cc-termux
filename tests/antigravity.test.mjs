@@ -313,3 +313,46 @@ test("competing-agent identity is scrubbed so Antigravity does not answer a fals
   const sys = env.request.systemInstruction.parts.map((p) => p.text).join("\n");
   assert.ok(!/claude agent/i.test(sys) && !/x-anthropic-billing-header/i.test(sys), "upstream system prompt must be clean");
 });
+
+test("a refusal is only cached when every host fails", () => {
+  // The secondary host answers 429 for requests the daily host serves fine. Caching on
+  // that made the next identical request fail locally without trying upstream, which
+  // looked exactly like exhausted quota and survived a re-login.
+  const src = fs.readFileSync(path.join(root, "proxy", "antigravity.mjs"), "utf8");
+  assert.match(src, /let hostsTried = 0/, "it counts the hosts that answered 429");
+  assert.match(src, /hostsTried \+= 1/, "incrementing only when a host is exhausted");
+  assert.match(src, /const everyHost429 = upstream\.status === 429 && hostsTried === GENERATE_URLS\.length/, "a refusal needs every host to have failed");
+  assert.match(src, /if \(everyHost429\) \{/, "and the cache is only written then");
+  assert.match(src, /antigravity 429 not cached/, "anything else is logged as not cached");
+});
+
+test("a 429 names the model that is out, or says none is", () => {
+  // The message used to say quota may still be available, which is useless when the
+  // account has 19 buckets and only some are low.
+  const src = fs.readFileSync(path.join(root, "proxy", "antigravity.mjs"), "utf8");
+  assert.match(src, /describeExhausted/, "it consults the per-model buckets");
+  assert.match(src, /no model is out of quota, so this is a temporary limit/, "and says so when nothing is out");
+  assert.match(src, /exhausted: /, "naming the models when something is");
+});
+
+test("per-model quota is kept, not flattened into families", () => {
+  const src = fs.readFileSync(path.join(root, "bin", "cc-antigravity.mjs"), "utf8");
+  assert.match(src, /const models = \[\]/, "the buckets are retained");
+  assert.match(src, /models\.push\(\{ model: id/, "with their model ids");
+  assert.match(src, /return \{ groups: \[\.\.\.byFamily\.values\(\)\], models \}/, "and returned alongside the families");
+  assert.match(src, /export function describeExhausted/, "there is a reader for them");
+  // doctor must report it, since that is where a user looks.
+  const cli = fs.readFileSync(path.join(root, "bin", "modelmesh"), "utf8");
+  assert.match(cli, /antigravity quota low/, "doctor warns about a low model");
+  assert.match(cli, /antigravity quota healthy across/, "and confirms a healthy account");
+});
+
+test("the test runner does not pass a flag older Node rejects", () => {
+  // --test-timeout landed in Node 20 and Node 18 is still supported, so passing it
+  // unconditionally made every file fail to start with bad option.
+  const runner = fs.readFileSync(path.join(root, "tests", "run-tests.mjs"), "utf8");
+  assert.match(runner, /supportsTestTimeout/, "it probes for the flag");
+  assert.match(runner, /bad option/, "by looking for the rejection");
+  assert.match(runner, /nodeArgs/, "and builds the argument list from the answer");
+  assert.match(runner, /\[\.\.\.nodeArgs, path\.join\(dir, f\)\]/, "passing only what this Node accepts");
+});
