@@ -25,11 +25,14 @@ jobs:
       - run: node install.mjs --check
       - run: npm test
 
-  # macOS gets its own job on one Node version. Its runners are scarce and were being
-  # cancelled before starting when three jobs asked for one at once; the other versions are
-  # covered on Linux and Windows, and the code under test is identical.
+  # macOS is off for now. Its runners are routinely not allocated at all ("The job was not
+  # acquired by Runner of type hosted"), which hangs the job until its own timeout and
+  # withholds the verified marker from otherwise green commits. macOS behaviour is covered by
+  # the platform unit tests, which run on Linux. Set the repository variable CI_MACOS=true to
+  # bring this job and the install smoke run back.
   macos:
     name: check (macos-latest, node ${{ matrix.node }})
+    if: vars.CI_MACOS == 'true'
     runs-on: macos-latest
     timeout-minutes: 12
     strategy:
@@ -93,6 +96,8 @@ jobs:
   # shims and CLI. The Claude Code binary is faked, so nothing is downloaded.
   install-smoke:
     name: install smoke (${{ matrix.os }})
+    # macOS is off with the check job above; see the note there.
+    if: matrix.os != 'macos-latest' || vars.CI_MACOS == 'true'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 12
     strategy:

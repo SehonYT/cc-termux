@@ -217,6 +217,15 @@ test("the CI matrix covers every operating system we claim", () => {
   for (const needed of ["ubuntu-latest", "macos-latest", "windows-latest"]) {
     assert.ok(platforms.has(needed), "CI must run on " + needed + ", saw " + [...platforms].join(", "));
   }
+  // macOS is gated off while GitHub cannot allocate its runners, but it must be a switch
+  // rather than a deletion, or the coverage claim quietly becomes untrue.
+  assert.match(wf, /CI_MACOS/, "macOS is disabled by a variable, not removed");
+  assert.match(wf, /if: vars\.CI_MACOS == 'true'/, "and one variable brings it back");
+  // Linux and Windows must never be gated: they are the coverage that always runs.
+  const checkBlock = wf.slice(wf.indexOf("  check:"), wf.indexOf("  macos:"));
+  const checkHeader = checkBlock.slice(0, checkBlock.indexOf("steps:"));
+  assert.ok(!/CI_MACOS/.test(checkHeader), "the linux and windows matrix is never gated");
+  assert.ok(!/^\s+if:/m.test(checkHeader), "and carries no condition at all");
   const oses = [...platforms];
   assert.ok(oses.includes("ubuntu-latest") && oses.includes("windows-latest"), "linux and windows cover every Node version");
   // macos-13 was dropped: it sat queued for hours on every run, and a job that never starts
