@@ -15,6 +15,7 @@ let server;
 let port;
 let lastEnvelope = null;
 let generateMode = 'ok';
+let overloadLeft = 0;
 
 test.before(async () => {
   server = http.createServer((req, res) => {
@@ -49,6 +50,16 @@ test.before(async () => {
         if (generateMode === "quota") {
           res.writeHead(429, { "content-type": "application/json" });
           return res.end(JSON.stringify({ error: { code: 429, message: "Resource has been exhausted (e.g. check quota).", status: "RESOURCE_EXHAUSTED" } }));
+        }
+        // "The model is overloaded" is a transient 503, not a broken install.
+        if (generateMode === "overload" && overloadLeft > 0) {
+          overloadLeft--;
+          res.writeHead(503, { "content-type": "application/json" });
+          return res.end(JSON.stringify({ error: { code: 503, message: "The model is overloaded. Please try again later.", status: "UNAVAILABLE" } }));
+        }
+        if (generateMode === "drop") {
+          // Drop the socket the way a flaky mobile connection does.
+          return res.socket.destroy();
         }
         res.writeHead(200, { "content-type": "text/event-stream" });
         res.write("data: " + JSON.stringify({ response: { candidates: [{ content: { parts: [{ text: "hello " }, { text: "world" }] }, finishReason: "STOP" }], usageMetadata: { promptTokenCount: 7, candidatesTokenCount: 2 } } }) + "\n\n");
@@ -321,9 +332,11 @@ test("a refusal is only cached when every host fails", () => {
   const src = fs.readFileSync(path.join(root, "proxy", "antigravity.mjs"), "utf8");
   assert.match(src, /let hostsTried = 0/, "it counts the hosts that answered 429");
   assert.match(src, /hostsTried \+= 1/, "incrementing only when a host is exhausted");
-  assert.match(src, /const everyHost429 = upstream\.status === 429 && hostsTried === GENERATE_URLS\.length/, "a refusal needs every host to have failed");
-  assert.match(src, /if \(everyHost429\) \{/, "and the cache is only written then");
-  assert.match(src, /antigravity 429 not cached/, "anything else is logged as not cached");
+  // Widened to any exhausted retryable status so an overloaded host also shares a back-off,
+  // but the invariant is unchanged: every host must have failed before anything is cached.
+  assert.match(src, /const everyHostFailed = retryable\(upstream\.status\) && hostsTried === GENERATE_URLS\.length/, "a refusal needs every host to have failed");
+  assert.match(src, /if \(everyHostFailed\) \{/, "and the cache is only written then");
+  assert.match(src, /not cached: only /, "anything else is logged as not cached");
 });
 
 test("a 429 names the model that is out, or says none is", () => {
@@ -333,6 +346,62 @@ test("a 429 names the model that is out, or says none is", () => {
   assert.match(src, /describeExhausted/, "it consults the per-model buckets");
   assert.match(src, /no model is out of quota, so this is a temporary limit/, "and says so when nothing is out");
   assert.match(src, /exhausted: /, "naming the models when something is");
+});
+
+// A flaky connection used to fail the whole request with the bare message "fetch failed", so
+// every network blip on a phone looked like a broken install.
+test("a dropped connection still reports why instead of a bare 'fetch failed'", async () => {
+  const ant = await import("../bin/cc-antigravity.mjs?t=" + Date.now());
+  ant.saveCredentials({ access_token: "access-new", refresh_token: "refresh-new", expires_at: Date.now() + 3600_000, project_id: "project-123" });
+  const adapter = await import("../proxy/antigravity.mjs?t=" + Date.now());
+  generateMode = "drop";
+  process.env.MODELMESH_ANTIGRAVITY_NET_DELAYS = "20,40";
+  const errors = [];
+  try {
+    await adapter.proxyAntigravity({}, { writeHead() { }, flushHeaders() { }, write() { }, end() { }, destroy() { } },
+      { name: "antigravity", model: "gemini-3.8-flash-high", provider: { type: "antigravity" } },
+      { max_tokens: 20, messages: [{ role: "user", content: "hi" }] },
+      { anthropicError: (_r, status, type, message) => errors.push([status, type, message]) });
+  } finally { generateMode = "ok"; delete process.env.MODELMESH_ANTIGRAVITY_NET_DELAYS; }
+  assert.equal(errors.length, 1, "a dropped socket still has to be reported");
+  assert.equal(errors[0][0], 502);
+  // The message must name the cause, not just repeat "fetch failed".
+  assert.match(errors[0][2], /\(/, "the cause code is included: " + errors[0][2]);
+});
+
+test("a transient 503 overload is retried, a permanent one still surfaces", async () => {
+  const ant = await import("../bin/cc-antigravity.mjs?t=" + Date.now());
+  ant.saveCredentials({ access_token: "access-new", refresh_token: "refresh-new", expires_at: Date.now() + 3600_000, project_id: "project-123" });
+  const adapter = await import("../proxy/antigravity.mjs?t=" + Date.now());
+  const run = async () => {
+    const errors = [];
+    let out = "";
+    await adapter.proxyAntigravity({}, { writeHead() { }, flushHeaders() { }, write(s) { out += s; }, end() { }, destroy() { } },
+      { name: "antigravity", model: "gemini-3.8-flash-high", provider: { type: "antigravity" } },
+      { max_tokens: 20, messages: [{ role: "user", content: "hi" }] },
+      { anthropicError: (_r, status, type, message) => errors.push([status, type, message]) }).catch((e) => errors.push([e.status || 0, e.type || "", e.message]));
+    return { errors, out };
+  };
+  generateMode = "overload";
+  overloadLeft = 2;
+  const savedDelays = process.env.MODELMESH_ANTIGRAVITY_429_DELAYS;
+  const savedRetries = process.env.MODELMESH_ANTIGRAVITY_429_RETRIES;
+  process.env.MODELMESH_ANTIGRAVITY_429_DELAYS = "10";
+  process.env.MODELMESH_ANTIGRAVITY_429_RETRIES = "2";
+  try {
+    const transient = await run();
+    assert.equal(transient.errors.length, 0, JSON.stringify(transient.errors));
+    assert.match(transient.out, /hello/, "the retried request must deliver the answer");
+    // A real outage is not hidden: it is reported once the retries are spent.
+    overloadLeft = 99;
+    const permanent = await run();
+    assert.ok(permanent.errors.length > 0, "a permanent 503 must not hang or pass silently");
+    assert.match(String(permanent.errors[0][2]), /overloaded|503/i);
+  } finally {
+    generateMode = "ok"; overloadLeft = 0;
+    if (savedDelays === undefined) delete process.env.MODELMESH_ANTIGRAVITY_429_DELAYS; else process.env.MODELMESH_ANTIGRAVITY_429_DELAYS = savedDelays;
+    if (savedRetries === undefined) delete process.env.MODELMESH_ANTIGRAVITY_429_RETRIES; else process.env.MODELMESH_ANTIGRAVITY_429_RETRIES = savedRetries;
+  }
 });
 
 test("per-model quota is kept, not flattened into families", () => {

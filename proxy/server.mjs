@@ -663,7 +663,10 @@ async function proxyResponses(res, route, body) {
 // flight: doing so truncates the stream and the client reports a failure for a healthy turn.
 let inFlight = 0;
 
+// Match OmniRoute's listener settings: without these a slow or idle client can hold a socket
+// open indefinitely, and a half-open phone connection is never reclaimed.
 const server = http.createServer(async (req, res) => {
+  try { req.socket.setNoDelay(true); } catch (e) { }
   // Counted so the idle check cannot shut the gateway down mid-response.
   if (req.url !== '/health') { inFlight += 1; res.on('close', () => { inFlight -= 1; }); }
   try {
@@ -823,6 +826,8 @@ if (!/^(127\.0\.0\.1|::1|localhost)$/.test(listenHost) && process.env.MODELMESH_
   LOG('refusing non-loopback listen host ' + listenHost + ' (set MODELMESH_ALLOW_REMOTE=1 to override)');
   listenHost = '127.0.0.1';
 }
+server.keepAliveTimeout = 65000;
+server.headersTimeout = 66000;
 server.on('error', (e) => { LOG('gateway server error', e.code || e.message); process.exit(1); });
 server.listen(port, listenHost, () => {
   LOG('gateway listening on', port, 'active=' + CONFIG.active, 'config=' + CONFIG_PATH);

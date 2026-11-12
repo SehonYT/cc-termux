@@ -2,11 +2,31 @@
 // Translates Anthropic Messages <-> Gemini generateContent and streams SSE.
 import crypto from "node:crypto";
 import fs from "node:fs";
+import http from "node:http";
+import https from "node:https";
 import os from "node:os";
 import { cacheDir } from "../bin/cc-paths.mjs";
 import path from "node:path";
 import { ensureAccessToken, loadCredentials, GENERATE_URLS, antigravityContentHeaders } from "../bin/cc-antigravity.mjs";
 import { refreshStatusLine } from "../bin/cc-statusline.mjs";
+
+// Connection pool agents with TCP keep-alive, ported from OmniRoute's Antigravity bridge
+// (bin/antigravity-bridge.mjs:28-43). Their pool is pinned rather than left to the runtime
+// default, which is what keeps a flaky link from opening a fresh TLS handshake per request.
+const HTTP_AGENT = new http.Agent({
+  keepAlive: true,
+  keepAliveMsecs: 60000,
+  maxSockets: 64,
+  maxFreeSockets: 16,
+  timeout: 120000,
+});
+const HTTPS_AGENT = new https.Agent({
+  keepAlive: true,
+  keepAliveMsecs: 60000,
+  maxSockets: 64,
+  maxFreeSockets: 16,
+  timeout: 120000,
+});
 
 const MODEL_ALIASES = {
   "gemini-3.7-flash": "gemini-3.7-flash-tiered",
@@ -314,11 +334,52 @@ export async function proxyAntigravity(req, res, route, body, { anthropicError, 
     return fail(429, "rate_limit_error",
       "Antigravity refused this exact request moments ago; modelmesh is not resending it (retry in " + wait + "s, or use /model)");
   }
-  const sendUpstream = async (accessToken, url) => fetch(url, {
-    method: "POST",
-    headers: antigravityContentHeaders(accessToken, { accept: "text/event-stream" }),
-    body: JSON.stringify(envelope),
-    signal: AbortSignal.timeout(15 * 60 * 1000),
+  const describeNetError = (e) => {
+    const code = (e && e.cause && (e.cause.code || e.cause.message)) || (e && e.code) || "";
+    if (e && e.name === "TimeoutError") return "the connection timed out";
+    const m = String((e && e.message) || e);
+    return code && !m.includes(code) ? m + " (" + code + ")" : m;
+  };
+  // Ported from OmniRoute's forwarding branch (bin/antigravity-bridge.mjs:418-503): a plain
+  // https.request over the pinned keep-alive agent, with setNoDelay on the request. Their
+  // resilience comes from the socket handling, not from retries - the bridge retries nothing.
+  const sendUpstream = (accessToken, url) => new Promise((resolve, reject) => {
+    let target;
+    try { target = new URL(url); } catch (e) { return reject(e); }
+    const isHttps = target.protocol === "https:";
+    const payload = JSON.stringify(envelope);
+    const req = (isHttps ? https : http).request({
+      hostname: target.hostname,
+      port: target.port || (isHttps ? 443 : 80),
+      path: target.pathname + target.search,
+      method: "POST",
+      headers: { ...antigravityContentHeaders(accessToken, { accept: "text/event-stream" }), "content-length": Buffer.byteLength(payload) },
+      agent: isHttps ? HTTPS_AGENT : HTTP_AGENT,
+    }, (res) => {
+      res.status = res.statusCode;
+      res.ok = res.statusCode >= 200 && res.statusCode < 300;
+      // The forwarder exposes text()/headers.get(); keep that shape for the callers below.
+      res.headers.get = (n) => res.headers[String(n).toLowerCase()];
+      // text() is idempotent: the retry loop reads the body, and the error formatter reads it
+      // again. A single-consumer stream made the second read throw "Body has already been read".
+      let cachedText = null;
+      res.text = () => {
+        if (cachedText !== null) return Promise.resolve(cachedText);
+        return new Promise((ok, no) => {
+          const chunks = [];
+          res.on("data", (c) => chunks.push(c));
+          res.on("end", () => { cachedText = Buffer.concat(chunks).toString("utf8"); ok(cachedText); });
+          res.on("error", no);
+        });
+      };
+      res.body = res;
+      resolve(res);
+    });
+    // Nagle off, exactly as the bridge does for every socket it owns.
+    req.setNoDelay(true);
+    req.on("error", reject);
+    req.write(payload);
+    req.end();
   });
   const collected = { text: "", tools: [] };
   const wantStream = body.stream !== false;
@@ -329,7 +390,7 @@ export async function proxyAntigravity(req, res, route, body, { anthropicError, 
   let started = false, blockIndex = -1, blockKind = null, textOpen = false, stop = "end_turn";
   let upstream;
   try { upstream = await sendUpstream(token, GENERATE_URLS[0]); }
-  catch (e) { return fail(502, "api_error", "Antigravity request failed: " + e.message); }
+  catch (e) { return fail(502, "api_error", "Antigravity request failed: " + describeNetError(e)); }
   if ((upstream.status === 401 || upstream.status === 403) && creds.refresh_token) {
     try {
       token = await ensureAccessToken(loadCredentials(), { force: true });
@@ -344,10 +405,14 @@ export async function proxyAntigravity(req, res, route, body, { anthropicError, 
   const max429 = Number(process.env.MODELMESH_ANTIGRAVITY_429_RETRIES || retryDelays.length);
   let last429Text = "";
   let lastDelay = 0;
+  // "The model is overloaded" arrives as 503 and used to be handed straight to the user, so a
+  // momentary capacity spike looked like a broken install. It is transient by definition, so
+  // it is retried on the same backoff as a 429. A genuine outage still surfaces after that.
+  const retryable = (status) => status === 429 || status === 503;
   // How many distinct hosts returned 429. A refusal is only real when this reaches the end.
   let hostsTried = 0;
   for (const url of GENERATE_URLS) {
-    for (let attempt = 0; upstream.status === 429 && attempt < max429; attempt++) {
+    for (let attempt = 0; retryable(upstream.status) && attempt < max429; attempt++) {
       last429Text = await upstream.text();
       let delay = retryDelays[Math.min(attempt, retryDelays.length - 1)] || 0;
       try {
@@ -362,15 +427,17 @@ export async function proxyAntigravity(req, res, route, body, { anthropicError, 
         if (d && typeof d.retryDelay === "string") { const sec = parseFloat(d.retryDelay); if (sec > 0) delay = Math.min(Math.max(...retryDelays, 500), sec * 1000); }
       } catch (e) { }
       lastDelay = delay;
-      console.error(new Date().toISOString(), "antigravity rate-limited; retry", attempt + 1, "in", delay + "ms");
+      console.error(new Date().toISOString(), "antigravity " + upstream.status + (upstream.status === 429 ? " rate-limited" : " overloaded") + "; retry", attempt + 1, "in", delay + "ms");
       await new Promise((r) => setTimeout(r, delay));
       try { upstream = await sendUpstream(token, url); } catch (e) { break; }
     }
-    if (upstream.status !== 429) break;
+    // A 503 that survived the retries fails over exactly like a 429. Breaking here left the
+    // secondary host untried, so "model overloaded" was final on one host.
+    if (!retryable(upstream.status)) break;
     hostsTried += 1;
     try { last429Text = await upstream.text(); } catch (e) { }
     if (GENERATE_URLS.indexOf(url) === 0 && GENERATE_URLS.length > 1) {
-      console.error(new Date().toISOString(), "antigravity still 429; trying secondary host");
+      console.error(new Date().toISOString(), "antigravity still " + upstream.status + "; trying secondary host");
       try { upstream = await sendUpstream(token, GENERATE_URLS[1]); } catch (e) { break; }
     }
   }
@@ -378,12 +445,14 @@ export async function proxyAntigravity(req, res, route, body, { anthropicError, 
   // answers 429 for requests the daily host handles fine, and caching on that made the next
   // identical request fail locally without ever trying upstream - which looked exactly like
   // exhausted quota and survived a re-login, because the block lived here.
-  const everyHost429 = upstream.status === 429 && hostsTried === GENERATE_URLS.length;
-  if (everyHost429) {
+  // Cache on any exhausted retryable status, not just 429: an overloaded host needs the same
+  // shared back-off, or every concurrent request retries on its own and amplifies the spike.
+  const everyHostFailed = retryable(upstream.status) && hostsTried === GENERATE_URLS.length;
+  if (everyHostFailed) {
     const blockMs = rememberRefusal(fp, lastDelay);
-    console.error(new Date().toISOString(), "antigravity refusal cached for", blockMs, "ms (every host answered 429)");
-  } else if (upstream.status === 429) {
-    console.error(new Date().toISOString(), "antigravity 429 not cached: only " + hostsTried + " of " + GENERATE_URLS.length + " hosts were tried");
+    console.error(new Date().toISOString(), "antigravity refusal cached for", blockMs, "ms (every host answered " + upstream.status + ")");
+  } else if (retryable(upstream.status)) {
+    console.error(new Date().toISOString(), "antigravity " + upstream.status + " not cached: only " + hostsTried + " of " + GENERATE_URLS.length + " hosts were tried");
   }
   if (!upstream.ok) {
     const text = upstream.status === 429 && last429Text ? last429Text : await upstream.text();
@@ -407,7 +476,10 @@ export async function proxyAntigravity(req, res, route, body, { anthropicError, 
     }
     return fail(upstream.status, type, "Antigravity upstream " + upstream.status + ": " + msg + suffix);
   }
-  const reader = upstream.body.getReader();
+  // Async-iterate the Node response: this is the same "for await" the bridge's pipe uses,
+  // without a web ReadableStream in between. It also gives natural backpressure - the socket
+  // is paused between chunks instead of buffering the whole answer in memory.
+  const reader = upstream[Symbol.asyncIterator]();
   const dec = new TextDecoder();
   let buf = "";
   let usage = { input: 0, output: 0 }, sawContent = false;
@@ -495,9 +567,20 @@ export async function proxyAntigravity(req, res, route, body, { anthropicError, 
     }
     if (cand && cand.finishReason && stop !== "tool_use") stop = stopReason(cand.finishReason);
   };
+  // Idle watchdog, matching OmniRoute's socket-inactivity semantics: a stalled link should be
+  // noticed in seconds, not after a wall clock that also truncates healthy long turns.
+  const IDLE_MS = Number(process.env.MODELMESH_ANTIGRAVITY_IDLE_MS || 120000);
+  let idleTimer = null;
+  const readWithIdle = () => new Promise((resolve, reject) => {
+    idleTimer = setTimeout(() => {
+      try { upstream.destroy(); } catch (e) { }
+      reject(Object.assign(new Error("Antigravity sent nothing for " + Math.round(IDLE_MS / 1000) + "s; the connection stalled"), { name: "IdleError" }));
+    }, IDLE_MS);
+    reader.next().then((r) => { clearTimeout(idleTimer); resolve(r); }, (e) => { clearTimeout(idleTimer); reject(e); });
+  });
   try {
     for (;;) {
-      const { done, value } = await reader.read();
+      const { done, value } = await readWithIdle();
       if (done) break;
       buf += dec.decode(value, { stream: true });
       let nl;
@@ -540,6 +623,7 @@ export async function proxyAntigravity(req, res, route, body, { anthropicError, 
       sse("message_stop", { type: "message_stop" });
     } catch (e2) { }
   } finally {
+    if (idleTimer) { try { clearTimeout(idleTimer); } catch (e) { } }
     try { res.end(); } catch (e) { try { res.destroy(); } catch (e2) { } }
     refreshStatusLine({ modelId: route.model, provider: route.name }).catch(() => { });
   }
