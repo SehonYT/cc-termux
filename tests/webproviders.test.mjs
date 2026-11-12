@@ -128,16 +128,27 @@ test("Jina reads both the JSON and the plain-text SERP shapes", async () => {
 });
 
 test("the chain falls through quota and errors to the local scraper", async () => {
+  // The providers call the global fetch, so stubbing fetchImpl would leave this test making
+  // real requests to three search APIs. It answered "quota" only when the network failed,
+  // which made it slow and flaky.
+  const realFetch = globalThis.fetch;
   const calls = [];
-  const out = await wp.searchChain("q", {
-    chain: ["tavily", "brave", "jina", "local"],
-    cfg: { keys: { tavily: "t", brave: "b", jina: "j" } },
-    localSearch: async () => { calls.push("local"); return [{ title: "Local", url: "https://local.test", snippet: "" }]; },
-    fetchImpl: async () => { throw new Error("unused"); },
-  });
-  assert.equal(out.provider, "local", "the local scraper answers when every remote fails");
-  assert.equal(out.rows[0].url, "https://local.test");
-  assert.deepEqual(out.attempts.map((a) => a.status), ["quota", "quota", "quota", "ok"]);
+  globalThis.fetch = async (url) => {
+    calls.push(String(url));
+    return { ok: false, status: 429, headers: { get: () => null }, text: async () => JSON.stringify({ error: { message: "quota exceeded" } }) };
+  };
+  try {
+    const out = await wp.searchChain("q", {
+      chain: ["tavily", "brave", "jina", "local"],
+      cfg: { keys: { tavily: "t", brave: "b", jina: "j" } },
+      localSearch: async () => [{ title: "Local", url: "https://local.test", snippet: "" }],
+    });
+    assert.equal(out.provider, "local", "the local scraper answers when every remote fails");
+    assert.equal(out.rows[0].url, "https://local.test");
+    assert.deepEqual(out.attempts.map((a) => a.status), ["quota", "quota", "quota", "ok"]);
+    assert.equal(calls.length, 3, "each remote provider was tried once");
+    assert.ok(calls.every((u) => /tavily|brave|jina/.test(u)), "and no other host was contacted");
+  } finally { globalThis.fetch = realFetch; }
 });
 
 test("the chain stops at the first provider that answers", async () => {

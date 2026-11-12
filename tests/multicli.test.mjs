@@ -93,6 +93,47 @@ test("an Antigravity provider is served on the OpenAI surface too", () => {
   assert.ok(!/not_implemented_error/.test(server), "the 501 fallback is gone");
 });
 
+test("the Windows installers survive PowerShell 5.1 and iex", () => {
+  // Windows ships PowerShell 5.1, which rejects the ?? operator and the ternary at parse
+  // time, and irm | iex leaves $PSScriptRoot empty.
+  for (const file of ["get.ps1", "install.ps1"]) {
+    const src = fs.readFileSync(path.join(root, file), "utf8");
+    assert.ok(!/\?\?/.test(src), file + " must not use the PowerShell 7 null-coalescing operator");
+    assert.ok(!/&&|\|\|/.test(src), file + " must not use the PowerShell 7 chain operators");
+    const scriptRootLines = src.split("\n").filter((l) => /\$PSScriptRoot/.test(l) && !/^\s*#/.test(l));
+    for (const line of scriptRootLines) {
+      const near = src.slice(Math.max(0, src.indexOf(line) - 300), src.indexOf(line) + 300);
+      assert.match(near, /if \(\$PSScriptRoot\)/, file + " must guard $PSScriptRoot, which iex leaves empty");
+    }
+  }
+});
+
+test("a downloaded Node is verified before it is extracted", () => {
+  // The runtime is unpacked and executed, so a corrupted or tampered download must not pass.
+  for (const file of ["get.ps1", "install.ps1"]) {
+    const src = fs.readFileSync(path.join(root, file), "utf8");
+    assert.match(src, /SHASUMS256/, file + " must fetch the published checksums");
+    assert.match(src, /Get-FileHash.*SHA256/, file + " must hash the download");
+    assert.match(src, /checksum mismatch/, file + " must fail on a mismatch");
+    assert.ok(!/catch \[System\.Management[\s\S]{0,60}\{ throw \}/.test(src), file + " must not swallow the mismatch in a typed catch");
+    // The order matters: verify, then extract.
+    assert.ok(src.indexOf("Get-FileHash") < src.indexOf("Expand-Archive"), file + " must verify before extracting");
+  }
+});
+
+test("the Windows bootstrap resolves the verified ref", () => {
+  // get.sh was gated but get.ps1 still resolved the tip of main.
+  const ps = fs.readFileSync(path.join(root, "get.ps1"), "utf8");
+  assert.match(ps, /commits\/verified\.atom/, "get.ps1 reads the verified feed");
+  assert.match(ps, /no verified commit yet/, "and says so when falling back");
+  const verifiedIdx = ps.indexOf("commits/verified.atom");
+  const mainIdx = ps.indexOf("commits/main.atom");
+  assert.ok(verifiedIdx > 0 && verifiedIdx < mainIdx, "verified is tried before main");
+  // install.sh and install.ps1 run install.mjs, which downloads no source at all.
+  const inst = fs.readFileSync(path.join(root, "install.mjs"), "utf8");
+  assert.ok(!/commits\/main\.atom/.test(inst), "the installer must not fetch source from main");
+});
+
 test("start prints a block another tool can use", async () => {
   const mod = await import("../bin/cc-start.mjs");
   const text = mod.startInstructions({ port: 9999, token: "tok_demo" });

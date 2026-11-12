@@ -23,6 +23,13 @@ function Ensure-Node {
   $url = "https://nodejs.org/dist/$ver/node-$ver-win-$arch.zip"
   Write-Host "modelmesh: downloading Node.js from $url" -ForegroundColor Cyan
   Invoke-WebRequest $url -OutFile $zip -UseBasicParsing -TimeoutSec 600
+  # Node publishes a checksum beside every build. Verify before extracting: a download that
+  # is unpacked and executed must not be trusted on the strength of TLS alone.
+  $sums = (Invoke-WebRequest "https://nodejs.org/dist/$ver/SHASUMS256.txt" -UseBasicParsing -TimeoutSec 30).Content
+  $want = ([regex]::Match($sums, "([0-9a-f]{64})\s+node-$ver-win-$arch\.zip")).Groups[1].Value
+  if (-not $want) { throw "could not find a checksum for node-$ver-win-$arch.zip in SHASUMS256.txt" }
+  $got = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
+  if ($got -ne $want) { throw "checksum mismatch for $url (expected $want, got $got)" }
   Expand-Archive -Path $zip -DestinationPath $dir -Force
   Remove-Item $zip -Force
   return (Join-Path $dir "node-$ver-win-$arch\node.exe")
@@ -40,8 +47,21 @@ try {
     $Date = ""
     try {
       if ($Ref -eq "main") {
-        $atom = (Invoke-WebRequest "https://github.com/$Repo/commits/main.atom" -UseBasicParsing -TimeoutSec 20).Content
+        # The newest commit whose tests passed, not the tip of main: a commit that failed ci
+        # must never be installed by default. MODELMESH_REF=main opts into bleeding edge.
+        $feed = "verified"
+        try {
+          $atom = (Invoke-WebRequest "https://github.com/$Repo/commits/verified.atom" -UseBasicParsing -TimeoutSec 20).Content
+        } catch {
+          $atom = ""
+        }
         $m = [regex]::Match($atom, "Grit::Commit/([0-9a-f]{40})")
+        if (-not $m.Success) {
+          Write-Host "modelmesh: no verified commit yet; falling back to main (untested)" -ForegroundColor Yellow
+          $feed = "main"
+          $atom = (Invoke-WebRequest "https://github.com/$Repo/commits/main.atom" -UseBasicParsing -TimeoutSec 20).Content
+          $m = [regex]::Match($atom, "Grit::Commit/([0-9a-f]{40})")
+        }
         if ($m.Success) {
           $Sha = $m.Groups[1].Value
           $d = [regex]::Match($atom, "<updated>([^<]+)</updated>")
