@@ -253,3 +253,30 @@ test("the release job refuses a run that verified nothing", () => {
   assert.match(wf, /refs\/tags\/verified/, "a green run moves the verified marker");
   assert.match(wf, /conclusion == 'success'/, "only a green run reaches it");
 });
+
+test("a job cancelled before starting is not a failed build", () => {
+  // GitHub cancels jobs when it cannot allocate a runner, which marks the run failed and
+  // withheld the verified marker from good commits, blocking update and get.sh for
+  // everyone. A cancelled job with zero steps never ran; one with steps did.
+  const wf = fs.readFileSync(path.join(repoRoot, ".github", "workflows", "version.yml"), "utf8");
+  assert.match(wf, /conclusion == 'failure'/, "a failed run is still inspected");
+  assert.match(wf, /cancelled" and \(\.steps \| length\) == 0/, "only a job that never started is excused");
+  assert.match(wf, /genuinely failed/, "a real failure is still refused");
+  assert.match(wf, /refusing to tag/, "and the tag is withheld");
+  assert.match(wf, /runner allocation/, "the cancellation is reported as infrastructure");
+  // The excuse must not swallow a genuine failure: that check comes first.
+  const realIdx = wf.indexOf("if [ \"$real\" -gt 0 ]");
+  const infraIdx = wf.indexOf("if [ \"$infraless\" -gt 0 ]");
+  assert.ok(realIdx > 0 && realIdx < infraIdx, "a real failure is refused before an infrastructure one is excused");
+});
+
+test("macOS asks for as few runners as it can", () => {
+  // Its runners are scarce and were being cancelled when four jobs asked at once.
+  const wf = fs.readFileSync(path.join(repoRoot, ".github", "workflows", "ci.yml"), "utf8");
+  const jobs = wf.split(/\n  (?=\w)/).filter((b) => /runs-on:/.test(b));
+  const macJobs = jobs.filter((b) => /macos-latest/.test(b.split("steps:")[0]));
+  assert.ok(macJobs.length <= 2, "at most two macOS jobs, found " + macJobs.length);
+  // The platform is still covered, just not three times over for the same code.
+  assert.match(wf, /macos-latest/, "macOS is still tested");
+  assert.match(wf, /\[18, 20, 22\]/, "every Node version is still covered somewhere");
+});

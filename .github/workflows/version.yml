@@ -15,8 +15,11 @@ concurrency:
 
 jobs:
   tag:
+    # A run that only fell over on runner allocation is not a failed build. The step below
+    # re-checks that and refuses when a test genuinely failed.
     if: >-
-      github.event.workflow_run.conclusion == 'success' &&
+      (github.event.workflow_run.conclusion == 'success' ||
+       github.event.workflow_run.conclusion == 'failure') &&
       github.event.workflow_run.event == 'push' &&
       github.event.workflow_run.head_repository.full_name == github.repository &&
       !contains(github.event.workflow_run.head_commit.message, '[skip version]')
@@ -28,6 +31,7 @@ jobs:
       # A stalled run reports success with no jobs. Tagging there would publish a release
       # whose tests never ran, so the job count is checked before anything else.
       - name: Refuse to tag a run that produced no jobs
+        id: gate
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -37,6 +41,20 @@ jobs:
           if [ "$jobs" -eq 0 ]; then
             echo "::error::the ci run produced no jobs, so nothing was verified; refusing to tag"
             exit 1
+          fi
+          # A job with zero steps never ran: GitHub cancelled it before a runner picked it
+          # up, which says nothing about the code. A job with steps that failed does.
+          infraless=$(gh api "repos/${{ github.repository }}/actions/runs/$RUN_ID/jobs?per_page=100" \
+            --jq '[.jobs[] | select(.conclusion == "cancelled" and (.steps | length) == 0)] | length')
+          real=$(gh api "repos/${{ github.repository }}/actions/runs/$RUN_ID/jobs?per_page=100" \
+            --jq '[.jobs[] | select(.conclusion == "failure")] | length')
+          echo "cancelled before starting: $infraless | genuinely failed: $real"
+          if [ "$real" -gt 0 ]; then
+            echo "::error::$real job(s) ran and failed; refusing to tag"
+            exit 1
+          fi
+          if [ "$infraless" -gt 0 ]; then
+            echo "::warning::$infraless job(s) were cancelled before starting (runner allocation), not counted as failures"
           fi
       # Always check out the trusted default branch, never untrusted PR code.
       - uses: actions/checkout@v4

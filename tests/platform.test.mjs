@@ -204,12 +204,21 @@ test("the CI matrix covers every operating system we claim", () => {
   // is checking.
   const repoRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
   const wf = fs.readFileSync(path.join(repoRoot, ".github", "workflows", "ci.yml"), "utf8");
-  const matrix = /os: \[([^\]]+)\]/.exec(wf);
-  assert.ok(matrix, "the check job has an os matrix");
-  const oses = matrix[1].split(",").map((s) => s.trim());
-  for (const needed of ["ubuntu-latest", "macos-latest", "windows-latest"]) {
-    assert.ok(oses.includes(needed), "CI must run on " + needed);
+  // macOS has its own job rather than a row in the os matrix: its runners are scarce and
+  // were being cancelled before starting when several jobs asked at once. Coverage is what
+  // matters, so collect every platform the workflow can land on, matrix rows included.
+  const platforms = new Set();
+  for (const m of wf.matchAll(/os: \[([^\]]+)\]/g)) {
+    for (const v of m[1].split(",")) platforms.add(v.trim());
   }
+  for (const m of wf.matchAll(/runs-on: ([\w.-]+)/g)) {
+    if (!m[1].includes("${{")) platforms.add(m[1]);
+  }
+  for (const needed of ["ubuntu-latest", "macos-latest", "windows-latest"]) {
+    assert.ok(platforms.has(needed), "CI must run on " + needed + ", saw " + [...platforms].join(", "));
+  }
+  const oses = [...platforms];
+  assert.ok(oses.includes("ubuntu-latest") && oses.includes("windows-latest"), "linux and windows cover every Node version");
   // macos-13 was dropped: it sat queued for hours on every run, and a job that never starts
   // is not coverage. Intel macOS is covered by the unit tests instead.
   assert.ok(!oses.includes("macos-13"), "the starved Intel runner must stay out of the matrix");
