@@ -3,6 +3,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
+import { cacheDir } from "../bin/cc-paths.mjs";
 import path from "node:path";
 import { ensureAccessToken, loadCredentials, GENERATE_URLS, antigravityContentHeaders } from "../bin/cc-antigravity.mjs";
 import { refreshStatusLine } from "../bin/cc-statusline.mjs";
@@ -291,7 +292,7 @@ export async function proxyAntigravity(req, res, route, body, { anthropicError }
   const envelope = anthropicToGemini(body, upstreamModel(route.model), creds);
   if (process.env.CC_TERMUX_ANTIGRAVITY_DEBUG === "1") {
     try {
-      const dir = path.join(os.homedir(), ".cache", "cc-termux");
+      const dir = cacheDir();
       fs.mkdirSync(dir, { recursive: true });
       fs.writeFileSync(path.join(dir, "antigravity-request.json"), JSON.stringify(envelope, null, 2) + "\n");
       fs.writeFileSync(path.join(dir, "antigravity-body.json"), JSON.stringify(body, null, 2) + "\n");

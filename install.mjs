@@ -146,7 +146,12 @@ function copyAssets() {
     const from = path.join(SRC, f);
     const to = path.join(ROOT, f);
     fs.mkdirSync(path.dirname(to), { recursive: true });
-    if (fs.existsSync(from)) { fs.copyFileSync(from, to); if (!f.endsWith(".json")) fs.chmodSync(to, 0o755); }
+    // The execute bit is meaningless on Windows and can be refused elsewhere, so a copy
+    // must never fail because setting it did.
+    if (fs.existsSync(from)) {
+      fs.copyFileSync(from, to);
+      if (!f.endsWith(".json") && process.platform !== "win32") { try { fs.chmodSync(to, 0o755); } catch (e) { } }
+    }
   }
   try { fs.chmodSync(path.join(ROOT, "bin", "cc-launcher.mjs"), 0o755); } catch {}
   const cmds = path.join(SRC, "commands");

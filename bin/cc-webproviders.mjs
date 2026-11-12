@@ -4,6 +4,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { configDir } from "./cc-paths.mjs";
 
 export const WEB_PROVIDERS = ["google", "tavily", "brave", "jina", "local"];
 
@@ -47,7 +48,7 @@ export const PROVIDER_INFO = {
 };
 
 export function webConfigPath() {
-  const dir = process.env.CC_TERMUX_CONFIG ? path.dirname(process.env.CC_TERMUX_CONFIG) : path.join(os.homedir(), ".config", "cc-termux");
+  const dir = configDir();
   return path.join(dir, "web.json");
 }
 export function readWebConfig() {

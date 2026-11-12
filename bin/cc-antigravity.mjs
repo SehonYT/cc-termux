@@ -9,6 +9,7 @@ import crypto from "node:crypto";
 import readline from "node:readline";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { cacheDir, configFile, configDir as pathsConfigDir } from "./cc-paths.mjs";
 
 const MASK = "cc-termux-oauth-v1";
 const ID_BYTES = [82,83,26,69,85,66,91,69,78,29,90,88,68,89,28,64,30,66,16,10,67,70,13,64,92,25,27,95,10,83,70,65,30,89,25,93,12,9,69,64,2,70,93,70,29,93,65,0,5,4,27,3,17,94,12,4,65,17,16,1,8,7,27,66,1,21,16,26,28,3,21,94,14];
@@ -49,7 +50,7 @@ export const QUOTA_URLS = [
   "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota",
 ];
 export function usageCachePath() {
-  return path.join(process.env.CC_TERMUX_CACHE || path.join(os.homedir(), ".cache", "cc-termux"), "antigravity-usage.json");
+  return path.join(cacheDir(), "antigravity-usage.json");
 }
 export function readUsageCache() {
   try { return JSON.parse(fs.readFileSync(usageCachePath(), "utf8")); } catch (e) { return null; }
@@ -70,10 +71,8 @@ export const USER_AGENT = "antigravity/" + IDE_VERSION + " darwin/arm64";
 export const IDE_NODE_USER_AGENT = "antigravity/" + IDE_VERSION + " darwin/arm64 google-api-nodejs-client/10.3.0";
 export const X_GOOG_API_CLIENT = "gl-node/22.21.1";
 
-export function configDir() {
-  const cfg = process.env.CC_TERMUX_CONFIG || path.join(os.homedir(), ".config", "cc-termux", "config.json");
-  return path.dirname(cfg);
-}
+// Wraps cc-paths so the config location has one definition rather than two.
+export function configDir() { return pathsConfigDir(); }
 export function credsPath() { return path.join(configDir(), "antigravity.json"); }
 
 function atomicWrite(file, data, mode = 0o600) {
@@ -408,7 +407,7 @@ export async function getAntigravityUsage({ force = false, fetchImpl = fetch, ti
 export async function updateProviderModels({ log = console.log, timeoutMs = 15000, fetchImpl = fetch } = {}) {
   const models = await fetchAvailableModels({ fetchImpl, timeoutMs });
   if (!models.length) throw new Error("Antigravity returned no models");
-  const cfgFile = process.env.CC_TERMUX_CONFIG || path.join(os.homedir(), ".config", "cc-termux", "config.json");
+  const cfgFile = configFile();
   const cfg = JSON.parse(fs.readFileSync(cfgFile, "utf8"));
   const name = Object.keys(cfg.providers || {}).find((n) => cfg.providers[n].type === "antigravity") || "antigravity";
   const p = cfg.providers[name];

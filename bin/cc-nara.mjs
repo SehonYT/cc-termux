@@ -3,6 +3,7 @@
 // Limits and model tiers come from the public /api/plans endpoint, so no key is needed.
 import fs from "node:fs";
 import os from "node:os";
+import { cacheDir } from "./cc-paths.mjs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -10,7 +11,7 @@ export const NARA_BASE = "https://router.bynara.id/v1";
 export const NARA_PLANS_URL = "https://router.bynara.id/api/plans";
 
 export function naraCachePath() {
-  const cache = process.env.CC_TERMUX_CACHE || path.join(os.homedir(), ".cache", "cc-termux");
+  const cache = cacheDir();
   return path.join(cache, "nararouter.json");
 }
 export function readNaraCache() {
