@@ -9,7 +9,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import crypto from "node:crypto";
-import { installRoot, configFile, configDir, cacheDir } from "./cc-paths.mjs";
+import { installRoot, configFile, configDir, cacheDir, gatewayToken, ensureGatewayToken } from "./cc-paths.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.dirname(HERE);
@@ -28,17 +28,9 @@ export function modelList(cfg = readConfig()) {
   return out;
 }
 
-/** The token the gateway requires. Generated once and kept beside the config. */
-export function gatewayToken(cfg = readConfig()) {
-  if (cfg.gatewayToken) return cfg.gatewayToken;
-  const token = crypto.randomBytes(24).toString("base64url");
-  try {
-    const next = { ...cfg, gatewayToken: token };
-    fs.mkdirSync(path.dirname(configFile()), { recursive: true });
-    fs.writeFileSync(configFile(), JSON.stringify(next, null, 2) + "\n", { mode: 0o600 });
-  } catch (e) { }
-  return token;
-}
+// Re-exported from cc-paths: the launcher and the server read the same value, and writing
+// a different one here was what made every request fail with an invalid gateway token.
+export { gatewayToken } from "./cc-paths.mjs";
 
 /** Where the MCP server and the skills live, so another tool can be pointed at them. */
 export function assetPaths(root = ROOT) {
@@ -101,12 +93,12 @@ export async function start({ port, quiet = false, foreground = true } = {}) {
   if (await healthy(base)) {
     if (!quiet) {
       console.log("  gateway already running on " + base);
-      console.log(startInstructions({ host, port: chosen, token: gatewayToken(cfg), cfg }));
+      console.log(startInstructions({ host, port: chosen, token: gatewayToken(), cfg }));
     }
     return { alreadyRunning: true, base };
   }
 
-  const token = gatewayToken(cfg);
+  const token = ensureGatewayToken();
   const child = spawn(process.execPath, [path.join(ROOT, "proxy", "server.mjs")], {
     env: { ...process.env, MODELMESH_GATEWAY_TOKEN: token },
     stdio: foreground ? ["ignore", "inherit", "inherit"] : ["ignore", "ignore", "ignore"],

@@ -8,6 +8,8 @@ on:
 jobs:
   check:
     runs-on: ${{ matrix.os }}
+    # A hung test must fail with a name, not consume the runner's own limit.
+    timeout-minutes: 12
     strategy:
       fail-fast: false
       matrix:
@@ -27,6 +29,7 @@ jobs:
   alpine:
     name: check (alpine, node ${{ matrix.node }})
     runs-on: ubuntu-latest
+    timeout-minutes: 12
     strategy:
       fail-fast: false
       matrix:
@@ -70,6 +73,7 @@ jobs:
   install-smoke:
     name: install smoke (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 12
     strategy:
       fail-fast: false
       matrix:

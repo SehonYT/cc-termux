@@ -22,7 +22,7 @@ import {
   anthropicToOpenAI,
 } from "./translate.mjs";
 import { refreshStatusLine } from "../bin/cc-statusline.mjs";
-import { configFile, configDir, cacheDir } from "../bin/cc-paths.mjs";
+import { configFile, configDir, cacheDir, gatewayToken } from "../bin/cc-paths.mjs";
 import { classifyNara429 } from "../bin/cc-nara.mjs";
 
 const CONFIG_PATH = configFile();
@@ -51,7 +51,8 @@ for (const [n, p] of Object.entries(CONFIG.providers || {})) { p.name = p.name |
 const CONFIG_DIR = configDir();
 const CACHE_DIR = cacheDir();
 const KEYS_PATH = path.join(CONFIG_DIR, 'keys.json');
-const GATEWAY_TOKEN = process.env.MODELMESH_GATEWAY_TOKEN || (CONFIG.gatewayToken || 'modelmesh-local');
+// Resolved by cc-paths so the launcher, the server and start always agree.
+const GATEWAY_TOKEN = gatewayToken();
 const QUOTA_PATH = path.join(CACHE_DIR, 'quota.json');
 const ERRORS_PATH = path.join(CACHE_DIR, 'errors.log');
 function redact(text) {

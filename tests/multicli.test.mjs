@@ -134,6 +134,41 @@ test("the Windows bootstrap resolves the verified ref", () => {
   assert.ok(!/commits\/main\.atom/.test(inst), "the installer must not fetch source from main");
 });
 
+test("every component agrees on one gateway token", async () => {
+  // start wrote a random token to the config while the launcher still used a literal, so
+  // Claude Code sent one value and the gateway expected another: every request was 401.
+  const paths = await import("../bin/cc-paths.mjs");
+  const start = await import("../bin/cc-start.mjs");
+  const launcher = fs.readFileSync(path.join(root, "bin", "cc-launcher.mjs"), "utf8");
+  const srv = fs.readFileSync(path.join(root, "proxy", "server.mjs"), "utf8");
+
+  assert.match(paths.gatewayToken.toString() + "", /./);
+  assert.equal(typeof paths.gatewayToken, "function", "cc-paths owns the token");
+  assert.equal(start.gatewayToken(), paths.gatewayToken(), "start re-exports the same value");
+  // The launcher and the server must read it, not invent their own.
+  assert.match(launcher, /const GATEWAY_TOKEN = gatewayToken\(\);/, "the launcher reads the shared value");
+  assert.ok(!/\"modelmesh-local\"/.test(launcher), "the launcher must not fall back to a literal");
+  assert.match(srv, /const GATEWAY_TOKEN = gatewayToken\(\);/, "the server reads the shared value");
+  // And it is overridable, which the tests and CI rely on.
+  const { gatewayToken } = paths;
+  const prev = process.env.MODELMESH_GATEWAY_TOKEN;
+  process.env.MODELMESH_GATEWAY_TOKEN = "explicit-token";
+  assert.equal(gatewayToken(), "explicit-token", "an explicit env var wins");
+  if (prev === undefined) delete process.env.MODELMESH_GATEWAY_TOKEN; else process.env.MODELMESH_GATEWAY_TOKEN = prev;
+});
+
+test("a hanging test cannot consume the whole CI runner", () => {
+  // Three macOS jobs died at exactly 15m0s with no indication of which test was stuck.
+  const runner = fs.readFileSync(path.join(root, "tests", "run-tests.mjs"), "utf8");
+  assert.match(runner, /FILE_TIMEOUT_MS/, "a file has a deadline");
+  assert.match(runner, /timeout: FILE_TIMEOUT_MS/, "which is passed to the child");
+  assert.match(runner, /--test-timeout=/, "and node:test gets a per-test deadline");
+  assert.match(runner, /TIMEOUT after/, "a timeout names the file rather than dying silently");
+  const ci = fs.readFileSync(path.join(root, ".github", "workflows", "ci.yml"), "utf8");
+  const timeouts = ci.match(/timeout-minutes:/g) || [];
+  assert.ok(timeouts.length >= 3, "every job carries a timeout, found " + timeouts.length);
+});
+
 test("start prints a block another tool can use", async () => {
   const mod = await import("../bin/cc-start.mjs");
   const text = mod.startInstructions({ port: 9999, token: "tok_demo" });
@@ -150,11 +185,16 @@ test("start prints a block another tool can use", async () => {
   assert.ok(fs.existsSync(assets.skills), "the skills directory exists");
 });
 
-test("the token is generated once and kept", () => {
-  const src = fs.readFileSync(path.join(root, "bin", "cc-start.mjs"), "utf8");
-  assert.match(src, /cfg\.gatewayToken/, "an existing token is reused");
-  assert.match(src, /randomBytes/, "a missing one is generated");
-  assert.match(src, /0o600/, "and the config stays private");
+test("the token is generated once and kept private", () => {
+  // start no longer owns the token: cc-paths does, so the launcher and the server read the
+  // same value. One writer, one reader contract.
+  const paths = fs.readFileSync(path.join(root, "bin", "cc-paths.mjs"), "utf8");
+  assert.match(paths, /export function gatewayToken/, "cc-paths resolves it");
+  assert.match(paths, /cfg\.gatewayToken/, "an existing token is reused");
+  assert.match(paths, /export function ensureGatewayToken/, "and one can be generated");
+  assert.match(paths, /randomBytes/, "a missing one is generated");
+  assert.match(paths, /0o600/, "the config stays private");
+  assert.match(paths, /CC_TERMUX_GATEWAY_TOKEN/, "the pre-rename variable still works");
 });
 
 test("installation tells the user about the other tools", () => {

@@ -1,6 +1,7 @@
 // Single source of truth for modelmesh's own directories (XDG on POSIX, APPDATA on Windows).
 // Claude Code's ~/.claude is deliberately not resolved here; the CLI must agree with it.
 import fs from "node:fs";
+import crypto from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 
@@ -98,4 +99,34 @@ export function atomicWrite(file, data, mode = 0o600) {
   fs.renameSync(tmp, file);
   // Windows ignores the mode on create, and some filesystems refuse chmod entirely.
   if (process.platform !== "win32") { try { fs.chmodSync(file, mode); } catch (e) { } }
+}
+
+// The token the local gateway requires. One definition, read by the launcher, the server
+// and start, because two of them computing it differently is a silent 401.
+export function gatewayToken(environment) {
+  const e = env(environment);
+  if (e.MODELMESH_GATEWAY_TOKEN) return e.MODELMESH_GATEWAY_TOKEN;
+  if (e.CC_TERMUX_GATEWAY_TOKEN) return e.CC_TERMUX_GATEWAY_TOKEN;
+  try {
+    const cfg = JSON.parse(fs.readFileSync(configFile(environment), "utf8"));
+    if (cfg.gatewayToken) return cfg.gatewayToken;
+  } catch (err) { }
+  return "modelmesh-local";
+}
+
+// The same value, written into the config when it is absent so a later start prints the
+// token that is actually in force rather than inventing a new one.
+export function ensureGatewayToken(environment) {
+  const existing = gatewayToken(environment);
+  const e = env(environment);
+  if (e.MODELMESH_GATEWAY_TOKEN || e.CC_TERMUX_GATEWAY_TOKEN) return existing;
+  try {
+    const file = configFile(environment);
+    const cfg = JSON.parse(fs.readFileSync(file, "utf8"));
+    if (cfg.gatewayToken) return cfg.gatewayToken;
+    const token = crypto.randomBytes(24).toString("base64url");
+    cfg.gatewayToken = token;
+    fs.writeFileSync(file, JSON.stringify(cfg, null, 2) + "\n", { mode: 0o600 });
+    return token;
+  } catch (err) { return existing; }
 }

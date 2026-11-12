@@ -6,7 +6,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
-import { installRoot, configFile, configDir, cacheDir, claudeDir } from "./cc-paths.mjs";
+import {installRoot, configFile, configDir, cacheDir, claudeDir, gatewayToken } from "./cc-paths.mjs";
 
 const ROOT = installRoot();
 const CFG = configFile();
@@ -20,7 +20,9 @@ const cfg = loadConfig();
 const port = (cfg.listen && cfg.listen.port) || 8788;
 const base = "http://127.0.0.1:" + port;
 const SESSIONS = path.join(CACHE, "sessions");
-const GATEWAY_TOKEN = process.env.MODELMESH_GATEWAY_TOKEN || "modelmesh-local";
+// One definition, shared with the server and start. A literal here disagreed with a token
+// start had written to the config, and every request came back 401.
+const GATEWAY_TOKEN = gatewayToken();
 fs.mkdirSync(SESSIONS, { recursive: true });
 const sessionFile = path.join(SESSIONS, process.pid + ".session");
 let sessionRegistered = false;
