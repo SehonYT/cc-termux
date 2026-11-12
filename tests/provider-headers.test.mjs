@@ -93,6 +93,29 @@ test("the AgentRouter preset uses the Responses API", () => {
   assert.match(ar.notes, /Responses API/);
 });
 
+test("a provider finds its key under its id or its display name", () => {
+  // keys.json is filed by id, but a provider's name can be a display label like
+  // "AgentRouter". Matching only on name silently sent no token, which surfaced as
+  // "no token provided" from the upstream instead of a config error.
+  const server = fs.readFileSync(path.join(root, "proxy", "server.mjs"), "utf8");
+  const fn = /function providerKey\(p\) \{[\s\S]*?\n\}/.exec(server)[0];
+  assert.match(fn, /p\.keyName, p\.id, p\.name/, "the lookup tries the id and the name");
+  assert.match(fn, /p\.apiKey/, "and still honours a key in the config");
+  // The loader must stamp the id, or there is nothing for the lookup to match on.
+  assert.match(server, /p\.id = n/, "the loader records the provider id");
+});
+
+test("a gateway that omits context length falls back to a documented value", () => {
+  const setup = fs.readFileSync(path.join(root, "bin", "cc-setup.mjs"), "utf8");
+  assert.match(setup, /preset\.contextDefaults/, "the preset can supply context windows");
+  const ar = presets.free.find((p) => p.id === "agentrouter");
+  // Its /models returns no context field at all, verified live.
+  assert.ok(ar.contextDefaults, "agentrouter documents its model windows");
+  for (const [id, ctx] of Object.entries(ar.contextDefaults)) {
+    assert.ok(Number.isFinite(ctx) && ctx > 1000, id + " needs a real context size");
+  }
+});
+
 test("cc-patch resolves its root through cc-paths", () => {
   const patch = fs.readFileSync(path.join(root, "bin", "cc-patch.mjs"), "utf8");
   assert.match(patch, /import \{ installRoot \} from "\.\/cc-paths\.mjs"/);

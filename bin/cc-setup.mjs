@@ -254,7 +254,10 @@ async function fetchPresetModels(preset, key, { tier } = {}) {
     let models = (Array.isArray(arr) ? arr : []).map((m) => ({
       id: m.id || m.name,
       name: m.name || m.id,
-      contextTokens: m.context_length || m.max_context_length || m.inputTokenLimit || null,
+      // A gateway can omit context length entirely; fall back to a documented value from
+      // the preset so the model list is not full of unknown entries.
+      contextTokens: m.context_length || m.max_context_length || m.inputTokenLimit
+        || (preset.contextDefaults && preset.contextDefaults[m.id || m.name]) || null,
       inUsd: m.pricing && m.pricing.prompt != null ? +(parseFloat(m.pricing.prompt) * 1e6).toFixed(3) : null,
       outUsd: m.pricing && m.pricing.completion != null ? +(parseFloat(m.pricing.completion) * 1e6).toFixed(3) : null,
     }));

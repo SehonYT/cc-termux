@@ -302,14 +302,19 @@
       "baseUrl": "https://agentrouter.org/v1",
       "path": "/chat/completions",
       "keyUrl": "https://agentrouter.org",
-      "notes": "new-api gateway: sign in, create a key, then paste it. Speaks the OpenAI Responses API and requires the Codex client headers.",
+      "notes": "new-api gateway: sign in, create a key, then paste it. Speaks the OpenAI Responses API and requires the Codex client headers. Its /models omits context length, so the preset supplies documented windows.",
       "headers": {
         "user-agent": "codex_cli_rs/0.20.0",
         "originator": "codex_cli_rs",
         "codex_cli_rs": "1"
       },
       "api": "responses",
-      "pathResponses": "/v1/responses"
+      "pathResponses": "/v1/responses",
+      "contextDefaults": {
+        "gpt-5.6-sol": 1050000,
+        "gpt-6-astra": 1050000,
+        "gpt-6.1-sol": 1050000
+      }
     },
     {
       "id": "ollama",

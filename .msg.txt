@@ -1,0 +1,26 @@
+Find a provider key by id, not only by display name
+
+keys.json is filed by provider id, but providerKey looked the key up under p.name. For
+every provider whose name equals its id that works by accident; for AgentRouter, whose name
+is the label AgentRouter, the lookup missed, fell through to an empty apiKey, and the
+request went upstream with no token at all. The upstream answered 401 with 'no token
+provided', which reads like a bad key rather than a lookup miss.
+
+providerKey now tries keyName, then the id, then the name, and the loader stamps each
+provider with its id so there is something to match on. Verified by reproducing the exact
+failing config - key only in keys.json, provider carrying a display name - which went from
+401 no-token to reaching upstream auth.
+
+AgentRouter then answers 402 'Budget pool quota has been exhausted', and the same 402 comes
+back from the API directly with the key, so the remaining block is the account budget and
+not the client. Confirmed independently rather than inferred.
+
+The unknown context was not a bug either: AgentRouter /models returns no context field at
+all. The preset now carries documented windows and the setup flow uses them when the API
+omits context, so the model list is no longer full of unknowns.
+
+My earlier verification was incomplete and this is why it passed: it injected apiKey into
+the provider object, bypassing the keys.json path entirely. The new tests exercise the real
+lookup, and one asserts the loader stamps the id.
+
+Suite is 335 tests, all passing.

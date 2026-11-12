@@ -44,7 +44,7 @@ function loadConfig() {
   return JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
 }
 let CONFIG = loadConfig();
-for (const [n, p] of Object.entries(CONFIG.providers || {})) p.name = p.name || n;
+for (const [n, p] of Object.entries(CONFIG.providers || {})) { p.name = p.name || n; p.id = n; }
 const CONFIG_DIR = configDir();
 const CACHE_DIR = cacheDir();
 const KEYS_PATH = path.join(CONFIG_DIR, 'keys.json');
@@ -230,8 +230,12 @@ async function fetchWithRetry(url, opts, provider, label) {
 }
 function providerKey(p) {
   const KEYS = loadKeys();
-  const byName = p.name && KEYS[p.name];
-  if (byName) return byName;
+  // A provider's display name is not its key: "AgentRouter" is the label while keys.json is
+  // filed under the id "agentrouter". Try both, then the key the config carries directly.
+  for (const candidate of [p.keyName, p.id, p.name]) {
+    if (candidate && KEYS[candidate]) return KEYS[candidate];
+  }
+  if (p.name && KEYS.providers && KEYS.providers[p.name]) return KEYS.providers[p.name];
   let k = p.apiKey || '';
   if (k.startsWith('env:')) k = process.env[k.slice(4)] || '';
   if (!k && p.apiKeyEnv) k = process.env[p.apiKeyEnv] || '';
@@ -515,7 +519,7 @@ async function proxyResponses(res, route, body) {
 
 const server = http.createServer(async (req, res) => {
   try {
-    try { CONFIG = loadConfig(); for (const [n, p] of Object.entries(CONFIG.providers || {})) p.name = p.name || n; } catch {}
+    try { CONFIG = loadConfig(); for (const [n, p] of Object.entries(CONFIG.providers || {})) { p.name = p.name || n; p.id = n; } } catch {}
     const u = new URL(req.url, 'http://localhost');
     if (u.pathname !== '/health') {
       const auth = String(req.headers.authorization || '');
