@@ -659,7 +659,13 @@ async function proxyResponses(res, route, body) {
   }
 }
 
+// Requests currently being served. The idle check must not kill the gateway while one is in
+// flight: doing so truncates the stream and the client reports a failure for a healthy turn.
+let inFlight = 0;
+
 const server = http.createServer(async (req, res) => {
+  // Counted so the idle check cannot shut the gateway down mid-response.
+  if (req.url !== '/health') { inFlight += 1; res.on('close', () => { inFlight -= 1; }); }
   try {
     try { CONFIG = loadConfig(); for (const [n, p] of Object.entries(CONFIG.providers || {})) { p.name = p.name || n; p.id = n; } } catch {}
     const u = new URL(req.url, 'http://localhost');
@@ -805,8 +811,10 @@ if (process.env.MODELMESH_MANAGED === '1') {
         catch (e) { try { fs.unlinkSync(path.join(SESS, f)); } catch (e2) { } }
       }
     } catch (e) { }
+    // A request in flight means the gateway is in use, whatever the session files say.
+    if (inFlight > 0) { idle = 0; return; }
     idle = alive === 0 ? idle + 1 : 0;
-    if (idle >= 2) { LOG('no sessions left, shutting down'); process.exit(0); }
+    if (idle >= 4) { LOG('no sessions left, shutting down'); process.exit(0); }
   }, 5000).unref();
 }
 

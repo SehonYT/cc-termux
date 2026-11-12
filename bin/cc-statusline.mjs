@@ -52,7 +52,18 @@ export function activeModel(cfg, explicitId, explicitProvider) {
     else if (!sm && cfg.override && cfg.override.provider === key && cfg.override.model) id = cfg.override.model;
     else {
       const ps = /^provswitch\/([^/]+)$/.exec(sm);
-      if (ps && cfg.providers && cfg.providers[ps[1]]) { key = ps[1]; p = cfg.providers[key]; id = p.model; }
+      if (ps && cfg.providers && cfg.providers[ps[1]]) {
+        // A switch is a request to change provider; the override records the result. Prefer
+        // the override when it exists, so the line follows what the gateway actually routes
+        // to rather than a value that may long since have been superseded.
+        if (cfg.override && cfg.override.provider && cfg.providers[cfg.override.provider]) {
+          key = cfg.override.provider;
+          p = cfg.providers[key];
+          id = cfg.override.model || p.model;
+        } else {
+          key = ps[1]; p = cfg.providers[key]; id = p.model;
+        }
+      }
     }
   }
   if (!p) return null;
@@ -121,7 +132,15 @@ export function installStatusLine() {
   const settingsFile = path.join(claudeDir(), "settings.json");
   const settings = readJson(settingsFile);
   const current = settings.statusLine;
-  const ours = current && typeof current.command === "string" && /modelmesh\s+statusline|antigravity-status\.txt/.test(current.command);
+  // Any command that reads an antigravity-status.txt is ours, including one written before
+  // the rename. Matching only the current wording left a stale path in place, and the status
+  // line then rendered a file that nothing writes, so it froze at its last value.
+  const readsOurFile = current && typeof current.command === "string" && /antigravity-status\.txt|modelmesh\s+statusline/.test(current.command);
+  const pointsAtCurrentPath = current && typeof current.command === "string"
+    && (process.platform === "win32"
+      ? /modelmesh\s+statusline/.test(current.command)
+      : /\$\{MODELMESH_CACHE:-\$HOME\/\.cache\/modelmesh\}/.test(current.command));
+  const ours = readsOurFile && !pointsAtCurrentPath;
   let installed = true;
   if (!current || ours) {
     // POSIX shells can cat the pre-rendered line in ~1ms; Windows falls back to the shim.
@@ -143,7 +162,7 @@ export function installStatusLine() {
       "",
     ].join("\n"), { mode: 0o644 });
   } catch (e) { }
-  return { settingsFile, cmdFile, installed: installed && (!current || ours) };
+  return { settingsFile, cmdFile, installed: installed && (!current || ours), pointsAtCurrentPath: Boolean(pointsAtCurrentPath) };
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   if (process.argv.includes("--install")) {
@@ -159,6 +178,14 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       process.exitCode = 1;
     }
   } else if (process.argv.includes("--refresh")) {
+    // The launcher spawns this on every start. Repair the status line command too: a device
+    // renamed since install renders a stale path, and the status line then never changes.
+    try {
+      const res = installStatusLine();
+      if (res && res.installed === false && res.pointsAtCurrentPath === false) {
+        console.error("status line: " + res.settingsFile + " points at a stale path and is not writable");
+      }
+    } catch (e) { }
     refreshStatusLine({ force: true }).then((l) => console.log(l)).catch(() => { });
   } else {
     const line = readStatusLine();

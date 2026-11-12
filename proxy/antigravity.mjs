@@ -320,6 +320,40 @@ export async function proxyAntigravity(req, res, route, body, { anthropicError, 
     body: JSON.stringify(envelope),
     signal: AbortSignal.timeout(15 * 60 * 1000),
   });
+  // Open the stream before the upstream call. The model can take seconds to produce a first
+  // token, and until the headers were sent there was no stream to keep alive, so the client
+  // showed a frozen elapsed timer over dead air.
+  const collected = { text: "", tools: [] };
+  // Claude Code's elapsed timer redraws on traffic. A model that reasons before answering
+  // sends nothing for a while, so the counter appeared frozen even though the request was
+  // healthy. A ping every few seconds keeps it moving, which is what the native API does.
+  const wantStream = body.stream !== false;
+  let lastWrite = Date.now();
+  const sse = (event, data) => {
+    if (sink) { sink(event, data); return; }
+    if (wantStream) res.write("event: " + event + "\ndata: " + JSON.stringify(data) + "\n\n");
+    lastWrite = Date.now();
+  };
+  // Tick often, ping rarely: the interval must be shorter than the quiet window it covers.
+  const PING_AFTER_MS = Number(process.env.MODELMESH_PING_AFTER_MS || 2000);
+  const keepalive = setInterval(() => {
+    if (!wantStream || sink) return;
+    if (Date.now() - lastWrite < PING_AFTER_MS) return;
+    try { res.write("event: ping\ndata: " + JSON.stringify({ type: "ping" }) + "\n\n"); lastWrite = Date.now(); } catch (e) { }
+  }, Math.max(250, Math.floor(PING_AFTER_MS / 4)));
+  const stopKeepalive = () => clearInterval(keepalive);
+
+  // Declared before the early open below, which needs them.
+  let started = false, blockIndex = -1, blockKind = null, textOpen = false, stop = "end_turn";
+  const wantStreamEarly = wantStream && !sink;
+  if (wantStreamEarly) {
+    try {
+      res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
+      res.flushHeaders();
+      started = true;
+      sse("message_start", { type: "message_start", message: { id: "msg_" + Date.now(), type: "message", role: "assistant", model: route.model, content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 0, output_tokens: 0 } } });
+    } catch (e) { }
+  }
   let upstream;
   try { upstream = await sendUpstream(token, GENERATE_URLS[0]); }
   catch (e) { return fail(502, "api_error", "Antigravity request failed: " + e.message); }
@@ -331,7 +365,10 @@ export async function proxyAntigravity(req, res, route, body, { anthropicError, 
   }
   // A 429 can mean real quota or a content-triggered refusal: retry with backoff, fall back
   // to the secondary host, then remember the refusal so retries do not hammer upstream.
-  const max429 = Number(process.env.MODELMESH_ANTIGRAVITY_429_RETRIES || 2);
+  // Delays before each retry, in order. Two attempts at 2s+5s on each of two hosts was 14s
+  // of waiting a user cannot see or cancel, which is what made a request feel hung.
+  const retryDelays = (process.env.MODELMESH_ANTIGRAVITY_429_DELAYS || "750,2500").split(",").map(Number).filter((n) => n >= 0);
+  const max429 = Number(process.env.MODELMESH_ANTIGRAVITY_429_RETRIES || retryDelays.length);
   let last429Text = "";
   let lastDelay = 0;
   // How many distinct hosts returned 429. A refusal is only real when this reaches the end.
@@ -339,15 +376,17 @@ export async function proxyAntigravity(req, res, route, body, { anthropicError, 
   for (const url of GENERATE_URLS) {
     for (let attempt = 0; upstream.status === 429 && attempt < max429; attempt++) {
       last429Text = await upstream.text();
-      let delay = [2000, 5000][Math.min(attempt, 1)];
+      let delay = retryDelays[Math.min(attempt, retryDelays.length - 1)] || 0;
       try {
         const ra = upstream.headers && upstream.headers.get("retry-after");
-        if (ra && /^\d+$/.test(ra.trim())) delay = Math.min(15000, Math.max(500, Number(ra) * 1000));
+        // Honour retry-after only up to the delay we are willing to hide. A long one is
+        // reported to the client instead, which can show it.
+        if (ra && /^\d+$/.test(ra.trim())) delay = Math.min(Math.max(...retryDelays, 500), Math.max(250, Number(ra) * 1000));
       } catch (e) { }
       try {
         const j = JSON.parse(last429Text);
         const d = (j.error && j.error.details || []).find((x) => x["@type"] && /RetryInfo/.test(x["@type"]));
-        if (d && typeof d.retryDelay === "string") { const sec = parseFloat(d.retryDelay); if (sec > 0) delay = Math.min(15000, sec * 1000); }
+        if (d && typeof d.retryDelay === "string") { const sec = parseFloat(d.retryDelay); if (sec > 0) delay = Math.min(Math.max(...retryDelays, 500), sec * 1000); }
       } catch (e) { }
       lastDelay = delay;
       console.error(new Date().toISOString(), "antigravity rate-limited; retry", attempt + 1, "in", delay + "ms");
@@ -398,14 +437,7 @@ export async function proxyAntigravity(req, res, route, body, { anthropicError, 
   const reader = upstream.body.getReader();
   const dec = new TextDecoder();
   let buf = "";
-  let started = false, blockIndex = -1, blockKind = null, textOpen = false, stop = "end_turn";
   let usage = { input: 0, output: 0 }, sawContent = false;
-  const wantStream = body.stream !== false;
-  const collected = { text: "", tools: [] };
-  const sse = (event, data) => {
-    if (sink) { sink(event, data); return; }
-    if (wantStream) res.write("event: " + event + "\ndata: " + JSON.stringify(data) + "\n\n");
-  };
   const start = () => {
     if (started) return;
     started = true;
@@ -439,7 +471,22 @@ export async function proxyAntigravity(req, res, route, body, { anthropicError, 
       sawContent = true;
     }
     for (const part of parts) {
-      if (part.thought) continue;
+      if (part.thought || part.thoughtSignature) {
+        // Thinking used to be dropped, so a model that reasons for a while sent nothing at
+        // all: Claude Code showed a frozen timer over dead air. Forward it as a thinking
+        // block, which is what the native API sends and what the client renders.
+        const thinking = typeof part.text === "string" ? part.text : "";
+        if (!thinking) continue;
+        start();
+        if (blockKind !== "thinking") {
+          closeBlock();
+          blockIndex++;
+          blockKind = "thinking";
+          sse("content_block_start", { type: "content_block_start", index: blockIndex, content_block: { type: "thinking", thinking: "" } });
+        }
+        sse("content_block_delta", { type: "content_block_delta", index: blockIndex, delta: { type: "thinking_delta", thinking } });
+        continue;
+      }
       if (typeof part.text === "string" && part.text) {
         const m = /^[\s\S]*?\[Tool call:\s*([^\]\n]+)\]\s*\nArguments:\s*([\s\S]+?)\s*$/.exec(part.text);
         if (m) {
@@ -521,6 +568,7 @@ export async function proxyAntigravity(req, res, route, body, { anthropicError, 
       sse("message_stop", { type: "message_stop" });
     } catch (e2) { }
   } finally {
+    stopKeepalive();
     try { res.end(); } catch (e) { try { res.destroy(); } catch (e2) { } }
     refreshStatusLine({ modelId: route.model, provider: route.name }).catch(() => { });
   }
