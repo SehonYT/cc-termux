@@ -5,8 +5,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import crypto from "node:crypto";
+import { installRoot } from "./cc-paths.mjs";
 
-const ROOT = process.env.CC_TERMUX_ROOT || path.join(os.homedir(), ".local", "share", "cc-termux");
+// Resolve the install root the same way the rest of cc-termux does, so a custom
+// --root or a Windows layout is not silently read from the wrong place.
+const ROOT = installRoot();
 const BIN = path.join(ROOT, "bin", process.platform === "win32" ? "claude.exe" : "claude.bin");
 const BACKUP = BIN + ".orig";
 const BACKUP_META = BACKUP + ".json";

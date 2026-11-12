@@ -356,10 +356,11 @@ function anthropicError(res, status, type, message) {
 
 async function proxyAnthropic(res, route, body, req) {
   const p = route.provider;
-  const url = p.baseUrl.replace(/\/$/, '') + (p.path || '/v1/messages');
+  const url = joinUrl(p.baseUrl, p.path || '/v1/messages');
   const key = providerKey(p);
   const headers = { 'content-type': 'application/json', 'anthropic-version': '2023-06-01', accept: 'application/json' };
   if (key) { headers['authorization'] = 'Bearer ' + key; headers['x-api-key'] = key; }
+  for (const [k, v] of Object.entries(p.headers || {})) headers[k] = String(v);
   if (req && req.headers['anthropic-beta']) headers['anthropic-beta'] = req.headers['anthropic-beta'];
   if (req && req.headers['anthropic-version']) headers['anthropic-version'] = req.headers['anthropic-version'];
   const abort = abortOnClose(req, res);
@@ -390,10 +391,13 @@ async function proxyAnthropic(res, route, body, req) {
 
 async function proxyOpenAI(res, route, body) {
   const p = route.provider;
-  const url = p.baseUrl.replace(/\/$/, '') + (p.path || '/chat/completions');
+  const url = joinUrl(p.baseUrl, p.path || '/chat/completions');
   const key = providerKey(p);
   const headers = { 'content-type': 'application/json', accept: 'application/json' };
   if (key) headers['authorization'] = 'Bearer ' + key;
+  // Some gateways fingerprint the client and reject anything that is not the expected
+  // client, so a preset can pin extra headers.
+  for (const [k, v] of Object.entries(p.headers || {})) headers[k] = String(v);
   const payload = toOpenAI(body, route.model);
   const started = Date.now();
   const abort = abortOnClose(null, res);
@@ -453,12 +457,25 @@ async function proxyOpenAI(res, route, body) {
 
 
 
+// Providers differ on whether baseUrl already includes the version segment. Joining
+// naively produced /v1/v1/responses for every preset whose baseUrl ends in /v1.
+export function joinUrl(base, suffix) {
+  const b = String(base || '').replace(/\/+$/, '');
+  let s = String(suffix || '');
+  if (!s.startsWith('/')) s = '/' + s;
+  // If the base already ends in a version segment, drop any version the suffix repeats.
+  // Providers use /v1, /v1beta, /v1alpha and similar, so match the shape, not one literal.
+  if (/\/v\d+[a-z]*$/i.test(b)) s = s.replace(/^\/v\d+[a-z]*(?=\/)/i, '');
+  return b + s;
+}
+
 async function proxyResponses(res, route, body) {
   const p = route.provider;
-  const url = p.baseUrl.replace(/\/$/, '') + (p.pathResponses || '/v1/responses');
+  const url = joinUrl(p.baseUrl, p.pathResponses || '/v1/responses');
   const key = providerKey(p);
   const headers = { 'content-type': 'application/json', accept: 'application/json' };
   if (key) headers['authorization'] = 'Bearer ' + key;
+  for (const [k, v] of Object.entries(p.headers || {})) headers[k] = String(v);
   LOG('API responses', route.name, route.model);
   const abort = abortOnClose(null, res);
   const upstream = await fetchWithRetry(url, { method: 'POST', headers, body: JSON.stringify(toResponses(body, route.model)), signal: abort.signal }, p, 'responses ' + route.model);

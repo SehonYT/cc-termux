@@ -1,0 +1,97 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+const presets = JSON.parse(fs.readFileSync(path.join(root, "presets.json"), "utf8"));
+const server = fs.readFileSync(path.join(root, "proxy", "server.mjs"), "utf8");
+
+// The real helper, lifted from the server source and evaluated here. Importing server.mjs
+// would start a gateway, so the function is extracted and compiled instead of mirrored.
+const joinUrlSrc = /function joinUrl\(base, suffix\) \{[\s\S]*?\n\}/.exec(server)[0];
+const joinUrl = new Function(joinUrlSrc + "; return joinUrl;")();
+
+test("a baseUrl that already carries a version is not doubled", () => {
+  // Every OpenAI-kind preset sets baseUrl ending in /v1, so the naive concat produced
+  // /v1/v1/responses and the provider 404'd.
+  assert.equal(joinUrl("https://host/v1", "/v1/responses"), "https://host/v1/responses");
+  assert.equal(joinUrl("https://host/v1/", "/v1/responses"), "https://host/v1/responses");
+  assert.equal(joinUrl("https://host", "/v1/responses"), "https://host/v1/responses");
+  assert.equal(joinUrl("https://host/v1beta", "/v1/responses"), "https://host/v1beta/responses");
+  assert.equal(joinUrl("https://host/v1", "v1/responses"), "https://host/v1/responses");
+  // A base with no version keeps the suffix intact.
+  assert.equal(joinUrl("https://host/api", "/v1/responses"), "https://host/api/v1/responses");
+});
+
+test("no shipped preset builds a doubled version path", () => {
+  for (const preset of presets.free) {
+    if (preset.kind === "anthropic") continue;
+    for (const suffix of [preset.path || "/v1/messages", preset.pathResponses || "/v1/responses"]) {
+      const url = joinUrl(preset.baseUrl, suffix);
+      assert.ok(!/\/v\d+[a-z]*\/v\d+/i.test(url), preset.id + " doubles the version: " + url);
+      assert.match(url, /^https?:\/\//, preset.id + " must produce an absolute URL");
+    }
+  }
+});
+
+test("all three proxy paths build their URL the same way", () => {
+  // The chat path kept its own naive concat after the responses path was fixed, which is
+  // exactly how the AgentRouter 401 stayed hidden.
+  const uses = server.match(/joinUrl\(p\.baseUrl/g) || [];
+  assert.equal(uses.length, 3, "every proxy path resolves its URL through joinUrl");
+  assert.ok(!/p\.baseUrl\.replace\(\/\\\/\$\/, ''\) \+/.test(server), "no path may concat baseUrl by hand");
+});
+
+test("every proxy path forwards the preset's own headers", () => {
+  // A gateway can fingerprint the client and reject anything that is not the expected one,
+  // so the preset headers have to reach all three paths, not just one.
+  const loops = server.match(/Object\.entries\(p\.headers \|\| \{\}\)/g) || [];
+  assert.equal(loops.length, 3, "chat, messages and responses must each forward preset headers");
+});
+
+test("the AgentRouter preset sends the client identity its gateway requires", () => {
+  const ar = presets.free.find((p) => p.id === "agentrouter");
+  assert.ok(ar, "the preset exists");
+  assert.equal(ar.baseUrl, "https://agentrouter.org/v1");
+  // Verified against the live API: without these it answers "unauthorized client detected";
+  // with them the request reaches normal auth and the key is accepted.
+  assert.equal(ar.headers["user-agent"], "codex_cli_rs/0.20.0");
+  assert.equal(ar.headers.originator, "codex_cli_rs");
+  assert.equal(ar.headers.codex_cli_rs, "1");
+  assert.match(ar.notes, /Codex client headers/);
+});
+
+test("a preset header cannot be overridden by an empty key", () => {
+  // The key is applied first, so a preset can pin a header even when no key is set.
+  const openaiIdx = server.indexOf("async function proxyOpenAI");
+  const block = server.slice(openaiIdx, openaiIdx + 700);
+  const keyIdx = block.indexOf("headers['authorization']");
+  const presetIdx = block.indexOf("Object.entries(p.headers");
+  assert.ok(keyIdx >= 0 && presetIdx > keyIdx, "preset headers are applied after the key");
+});
+
+test("cc-patch resolves its root through cc-paths", () => {
+  const patch = fs.readFileSync(path.join(root, "bin", "cc-patch.mjs"), "utf8");
+  assert.match(patch, /import \{ installRoot \} from "\.\/cc-paths\.mjs"/);
+  assert.match(patch, /const ROOT = installRoot\(\)/);
+  // A hardcoded home path would ignore a custom --root, exactly as the uninstaller once did.
+  assert.ok(!/path\.join\(os\.homedir\(\), "\.local", "share", "cc-termux"\)/.test(patch),
+    "no hardcoded install root");
+});
+
+test("the installer moves an npm .ps1 aside so it cannot shadow our shim", () => {
+  const inst = fs.readFileSync(path.join(root, "install.mjs"), "utf8");
+  // PowerShell prefers .ps1 over .cmd in the same directory.
+  assert.match(inst, /\.ps1/, "the windows shim block handles .ps1");
+  assert.match(inst, /cc-termux-backup/, "a leftover is moved aside, never deleted");
+  assert.match(inst, /cc-launcher\.mjs.*cc-termux|cc-termux.*cc-launcher\.mjs/s, "our own shim is recognised and kept");
+});
+
+test("the AgentRouter slug and docs match the preset", () => {
+  const p = presets.free.find((x) => x.id === "agentrouter");
+  assert.equal(p.kind, "openai");
+  assert.equal(p.path, "/chat/completions");
+  assert.match(p.keyUrl, /agentrouter\.org/);
+});

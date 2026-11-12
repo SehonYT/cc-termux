@@ -313,7 +313,22 @@ function installShims(t) {
         fs.mkdirSync(dir, { recursive: true });
         fs.accessSync(dir, fs.constants.W_OK);
         for (const [name, argv] of Object.entries(scripts)) {
-          fs.writeFileSync(path.join(dir, name + ".cmd"), "@echo off\r\n\"" + node + "\" \"" + argv[0] + "\" %*\r\n");
+          const cmd = path.join(dir, name + ".cmd");
+          // PowerShell picks .ps1 over .cmd when both sit in the same directory, so an npm
+          // leftover would shadow our shim and fail. Move it aside rather than delete it.
+          for (const ext of [".ps1", ".bat", ""]) {
+            if (!ext) continue;
+            const stale = path.join(dir, name + ext);
+            try {
+              if (fs.existsSync(stale)) {
+                const body = fs.readFileSync(stale, "utf8");
+                if (!body.includes("cc-launcher.mjs") && !body.includes("cc-termux")) {
+                  fs.renameSync(stale, stale + ".cc-termux-backup");
+                }
+              }
+            } catch (e) { }
+          }
+          fs.writeFileSync(cmd, "@echo off\r\n\"" + node + "\" \"" + argv[0] + "\" %*\r\n");
         }
         placed = dir;
         break;

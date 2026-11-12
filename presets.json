@@ -302,7 +302,12 @@
       "baseUrl": "https://agentrouter.org/v1",
       "path": "/chat/completions",
       "keyUrl": "https://agentrouter.org",
-      "notes": "new-api gateway: sign in, create a key, then paste it here"
+      "notes": "new-api gateway: sign in, create a key, then paste it. Sends the Codex client headers this gateway requires.",
+      "headers": {
+        "user-agent": "codex_cli_rs/0.20.0",
+        "originator": "codex_cli_rs",
+        "codex_cli_rs": "1"
+      }
     },
     {
       "id": "ollama",
