@@ -1,26 +1,20 @@
-Find a provider key by id, not only by display name
+Report each model's context so nothing shows as unknown
 
-keys.json is filed by provider id, but providerKey looked the key up under p.name. For
-every provider whose name equals its id that works by accident; for AgentRouter, whose name
-is the label AgentRouter, the lookup missed, fell through to an empty apiKey, and the
-request went upstream with no token at all. The upstream answered 401 with 'no token
-provided', which reads like a bad key rather than a lookup miss.
+Every provider showed a 200k window because the gateway's /v1/models emitted no capacity
+field at all. With nothing to read the client falls back to its own default, so a 1.05M
+model looked like a 200k one and AgentRouter's three models looked unknown.
 
-providerKey now tries keyName, then the id, then the name, and the loader stamps each
-provider with its id so there is something to match on. Verified by reproducing the exact
-failing config - key only in keys.json, provider carrying a display name - which went from
-401 no-token to reaching upstream auth.
+/v1/models now reports context_length and max_input_tokens per model, taken from the model,
+then the provider, or omitted when neither knows. Verified live: 70 of 70 models report a
+context length.
 
-AgentRouter then answers 402 'Budget pool quota has been exhausted', and the same 402 comes
-back from the API directly with the key, so the remaining block is the account budget and
-not the client. Confirmed independently rather than inferred.
+AgentRouter publishes no context data anywhere. /v1/models returns only id, object, created,
+owned_by and supported_endpoint_types; /api/pricing adds ratios and enable_groups; /v1/model
+and /api/models do not serve it. So the values are supplied from each model's own
+specification: 1,050,000 context and 128,000 max output for gpt-5.6-sol, gpt-6-astra and
+gpt-6.1-sol, all three confirmed against vendor documentation.
 
-The unknown context was not a bug either: AgentRouter /models returns no context field at
-all. The preset now carries documented windows and the setup flow uses them when the API
-omits context, so the model list is no longer full of unknowns.
+The setup flow also persists what it learns: a documented default is used when the API
+omits context, and the output cap is carried through with it.
 
-My earlier verification was incomplete and this is why it passed: it injected apiKey into
-the provider object, bypassing the keys.json path entirely. The new tests exercise the real
-lookup, and one asserts the loader stamps the id.
-
-Suite is 335 tests, all passing.
+Suite is 337 tests, all passing.

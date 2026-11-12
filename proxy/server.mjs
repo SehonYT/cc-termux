@@ -542,7 +542,16 @@ const server = http.createServer(async (req, res) => {
       for (const [name, p] of Object.entries(CONFIG.providers || {})) {
         if (p.hidden) continue;
         for (const [id, info] of Object.entries(p.modelsById || {})) {
-          models.push({ type: 'model', id: 'prov/' + name + '/' + id, display_name: (info.name || id) + ' (' + name + ')', created_at: new Date().toISOString() });
+          // Report capacity, or a client has no number to read and falls back to its own
+          // default, which is what made every provider look like a 200k model.
+          const ctx = info.contextTokens || info.context_length || p.contextWindow || null;
+          models.push({
+            type: 'model',
+            id: 'prov/' + name + '/' + id,
+            display_name: (info.name || id) + ' (' + name + ')',
+            created_at: new Date().toISOString(),
+            ...(ctx ? { context_length: ctx, max_input_tokens: ctx, max_output_tokens: info.maxOutputTokens || null } : {}),
+          });
         }
       }
       const body = { data: models, has_more: false, first_id: models[0] && models[0].id, last_id: models.length ? models[models.length - 1].id : null };

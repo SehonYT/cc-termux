@@ -116,6 +116,29 @@ test("a gateway that omits context length falls back to a documented value", () 
   }
 });
 
+test("the gateway reports each model's context so a client need not guess", () => {
+  const server = fs.readFileSync(path.join(root, "proxy", "server.mjs"), "utf8");
+  const idx = server.indexOf("'/v1/models'");
+  const block = server.slice(idx, idx + 900);
+  // With no capacity field the client falls back to its own default, which made every
+  // provider look like a 200k model.
+  assert.match(block, /context_length/, "the model list reports context_length");
+  assert.match(block, /max_input_tokens/, "and max_input_tokens");
+  // It must come from the model, then the provider, or be omitted.
+  assert.match(block, /info\.contextTokens \|\| info\.context_length \|\| p\.contextWindow/);
+});
+
+test("AgentRouter carries the documented windows for its models", () => {
+  const ar = presets.free.find((p) => p.id === "agentrouter");
+  // Verified live: neither /v1/models nor /api/pricing exposes any context field, so the
+  // values come from each model's own specification.
+  for (const id of ["gpt-5.6-sol", "gpt-6-astra", "gpt-6.1-sol"]) {
+    assert.equal(ar.contextDefaults[id], 1050000, id + " has a 1.05M window");
+    assert.equal(ar.maxOutputDefaults[id], 128000, id + " caps output at 128k");
+  }
+  assert.match(ar.notes, /no context data/, "the reason for manual values is recorded");
+});
+
 test("cc-patch resolves its root through cc-paths", () => {
   const patch = fs.readFileSync(path.join(root, "bin", "cc-patch.mjs"), "utf8");
   assert.match(patch, /import \{ installRoot \} from "\.\/cc-paths\.mjs"/);

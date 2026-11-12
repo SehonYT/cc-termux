@@ -258,6 +258,8 @@ async function fetchPresetModels(preset, key, { tier } = {}) {
       // the preset so the model list is not full of unknown entries.
       contextTokens: m.context_length || m.max_context_length || m.inputTokenLimit
         || (preset.contextDefaults && preset.contextDefaults[m.id || m.name]) || null,
+      maxOutputTokens: m.max_output_tokens || m.maxOutputTokens
+        || (preset.maxOutputDefaults && preset.maxOutputDefaults[m.id || m.name]) || null,
       inUsd: m.pricing && m.pricing.prompt != null ? +(parseFloat(m.pricing.prompt) * 1e6).toFixed(3) : null,
       outUsd: m.pricing && m.pricing.completion != null ? +(parseFloat(m.pricing.completion) * 1e6).toFixed(3) : null,
     }));
@@ -761,7 +763,7 @@ async function envMode() {
   const bgPick = bgId && f.models.find(m => m.id === bgId);
   if (bgId && !bgPick) throw new Error("background model " + bgId + " not found at this provider");
   const bg = bgPick || main;
-  const ctx = Number(process.env.CC_SETUP_CONTEXT || main.contextTokens || 128000);
+  const ctx = Number(process.env.CC_SETUP_CONTEXT || main.contextTokens || preset.contextDefaults?.[main.id] || 128000);
   const c = loadCfg();
   let name = process.env.CC_SETUP_NAME || providerName(c, f.family);
   const same = visible(c).find(([, p]) => p.baseUrl === f.baseUrl);
