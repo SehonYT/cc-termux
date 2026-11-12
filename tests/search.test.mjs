@@ -4,6 +4,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+
 import {
   parseBing,
   parseBrave,
@@ -357,4 +359,22 @@ test("formatSearchReport omits healthy engines and lists the rest", () => {
   assert.match(text, /google: blocked - HTTP 429/);
   assert.match(text, /bing: irrelevant/);
   assert.doesNotMatch(text, /duckduckgo/);
+});
+
+test("the shared text helpers have exactly one implementation", async () => {
+  // decodeEntities lived in both the MCP server and the search engine, and had already
+  // drifted: a null input decoded to "null" in one and "" in the other.
+  const mcpSrc = fs.readFileSync(path.join(root, "bin", "cc-mcp.mjs"), "utf8");
+  const searchSrc = fs.readFileSync(path.join(root, "bin", "cc-search.mjs"), "utf8");
+  assert.ok(!/function decodeEntities/.test(mcpSrc), "the MCP server must not define its own");
+  assert.ok(!/function decodeEntities/.test(searchSrc), "nor must the search engine");
+  assert.match(fs.readFileSync(path.join(root, "bin", "cc-text.mjs"), "utf8"), /export function decodeEntities/);
+
+  // And both importers must behave identically, including on null.
+  const a = await import("../bin/cc-mcp.mjs");
+  const b = await import("../bin/cc-search.mjs");
+  for (const v of [null, undefined, "", "&amp;x", "&#x27;", 42]) {
+    assert.equal(a.decodeEntities(v), b.decodeEntities(v), "the two importers disagree on " + JSON.stringify(v));
+  }
+  assert.equal(a.decodeEntities(null), "", "a null must decode to empty, not the string null");
 });

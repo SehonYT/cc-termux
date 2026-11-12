@@ -2,6 +2,8 @@
 // modelmesh web tools (stdio MCP server): Web Fetch and Web Search for Claude Code.
 // Every hop is SSRF-checked and pinned; fetched text is fenced as untrusted data.
 import fs from "node:fs";
+import { decodeEntities } from "./cc-text.mjs";
+export { decodeEntities };
 import http from "node:http";
 import https from "node:https";
 import dns from "node:dns";
@@ -284,12 +286,7 @@ const ENTITIES = {
   laquo: "«", raquo: "»", sect: "§", para: "¶", plusmn: "±", micro: "µ",
   frac12: "½", frac14: "¼", frac34: "¾", sup2: "²", sup3: "³",
 };
-export function decodeEntities(s) {
-  return String(s)
-    .replace(/&#x([0-9a-f]+);/gi, (_, h) => { try { return String.fromCodePoint(parseInt(h, 16)); } catch (e) { return ""; } })
-    .replace(/&#(\d+);/g, (_, d) => { try { return String.fromCodePoint(Number(d)); } catch (e) { return ""; } })
-    .replace(/&([a-z]+|#\d+);/gi, (m, name) => (ENTITIES[name.toLowerCase()] !== undefined ? ENTITIES[name.toLowerCase()] : m));
-}
+
 
 // Visible text of an HTML page, shaped for a model: headings, lists, tables and code kept,
 // boilerplate dropped, links readable as "label (url)". `pageUrl` resolves relative hrefs.

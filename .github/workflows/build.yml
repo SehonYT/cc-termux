@@ -1,53 +1,94 @@
 name: Build
 
+# Reports the outcome of the real test workflow. This job must never decide success on its
+# own: the previous version ran "echo Building project..." and reported that, so every
+# Discord message said the build passed while ci was stalling or failing.
 on:
-  push:
+  workflow_run:
+    workflows: ["ci"]
+    types: [completed]
     branches: [main]
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
-  build:
+  notify:
     runs-on: ubuntu-latest
-
+    if: github.event.workflow_run.conclusion != ''
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Summarise the real run
+        id: r
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # Read the conclusion GitHub recorded for the test workflow, not this job's status.
+          conclusion="${{ github.event.workflow_run.conclusion }}"
+          echo "conclusion=$conclusion" >> "$GITHUB_OUTPUT"
 
-      - name: Build
-        run: echo "Building project..."
+          # Count the jobs that failed or never started, so a stall cannot look like a pass.
+          jobs=$(gh api "repos/$REPO/actions/runs/$RUN_ID/jobs?per_page=100" --jq '.jobs')
+          total=$(echo "$jobs" | jq 'length')
+          failed=$(echo "$jobs" | jq '[.[] | select(.conclusion == "failure")] | length')
+          cancelled=$(echo "$jobs" | jq '[.[] | select(.conclusion == "cancelled" or .conclusion == "timed_out")] | length')
+          ok=$(echo "$jobs" | jq '[.[] | select(.conclusion == "success")] | length')
+          echo "total=$total" >> "$GITHUB_OUTPUT"
+          echo "failed=$failed" >> "$GITHUB_OUTPUT"
+          echo "cancelled=$cancelled" >> "$GITHUB_OUTPUT"
+          echo "ok=$ok" >> "$GITHUB_OUTPUT"
+
+          # Name what broke, so the message is actionable rather than a colour.
+          names=$(echo "$jobs" | jq -r '[.[] | select(.conclusion == "failure") | .name] | join(", ")')
+          echo "names=$names" >> "$GITHUB_OUTPUT"
+          echo "run $RUN_ID: $conclusion ($ok ok, $failed failed, $cancelled cancelled of $total)"
 
       - name: Send Discord update
         if: always()
         continue-on-error: true
         env:
           WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
-          STATUS: ${{ job.status }}
+          CONCLUSION: ${{ steps.r.outputs.conclusion }}
+          TOTAL: ${{ steps.r.outputs.total }}
+          FAILED: ${{ steps.r.outputs.failed }}
+          CANCELLED: ${{ steps.r.outputs.cancelled }}
+          OK: ${{ steps.r.outputs.ok }}
+          FAILED_NAMES: ${{ steps.r.outputs.names }}
         run: |
           if [ -z "$WEBHOOK_URL" ]; then
             echo "WEBHOOK_URL secret is not configured; skipping notification."
             exit 0
           fi
-          case "$STATUS" in
-            success)  color=5763719; title="✅ Build successful" ;;
-            failure)  color=15548997; title="❌ Build failed" ;;
-            cancelled) color=16776960; title="⏹ Build cancelled" ;;
-            *)        color=3447003; title="🔨 Build $STATUS" ;;
+          # A run that produced no jobs is a stall, not a pass.
+          if [ "${TOTAL:-0}" -eq 0 ]; then
+            CONCLUSION="stalled"
+          fi
+          case "$CONCLUSION" in
+            success)  color=5763719; title="✅ CI passed" ;;
+            failure)  color=15548997; title="❌ CI failed" ;;
+            cancelled) color=16776960; title="⏹ CI cancelled" ;;
+            stalled)  color=16776960; title="⚠️ CI produced no jobs" ;;
+            *)        color=3447003; title="🔨 CI $CONCLUSION" ;;
           esac
-          short=$(git rev-parse --short HEAD)
-          logo="https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$GITHUB_SHA/assets/logo.png"
+          short=$(echo "${{ github.event.workflow_run.head_sha }}" | cut -c1-7)
+          logo="https://raw.githubusercontent.com/$GITHUB_REPOSITORY/${{ github.event.workflow_run.head_sha }}/assets/logo.png"
+          detail="${OK:-0}/${TOTAL:-0} jobs passed"
+          [ "${FAILED:-0}" -gt 0 ] && detail="$detail · ${FAILED} failed: ${FAILED_NAMES}"
+          [ "${CANCELLED:-0}" -gt 0 ] && detail="$detail · ${CANCELLED} cancelled (a stalled runner)"
           payload=$(jq -n \
             --arg logo "$logo" \
             --arg title "$title" \
             --argjson color "$color" \
-            --arg status "$STATUS" \
+            --arg status "$CONCLUSION" \
+            --arg detail "$detail" \
             --arg repo "$GITHUB_REPOSITORY" \
-            --arg workflow "$GITHUB_WORKFLOW" \
-            --arg branch "$GITHUB_REF_NAME" \
-            --arg actor "$GITHUB_ACTOR" \
+            --arg branch "${{ github.event.workflow_run.head_branch }}" \
+            --arg actor "${{ github.event.workflow_run.actor.login }}" \
             --arg short "$short" \
-            --arg url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --arg url "${{ github.event.workflow_run.html_url }}" \
             --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             '{
               username: "modelmesh CI",
@@ -61,11 +102,10 @@ jobs:
                 thumbnail: {url: $logo},
                 fields: [
                   {name: "Repository", value: $repo, inline: true},
-                  {name: "Workflow", value: $workflow, inline: true},
-                  {name: "Status", value: ("`" + $status + "`"), inline: true},
-                  {name: "Branch", value: ("`" + $branch + "`"), inline: true},
+                  {name: "Result", value: ("`" + $status + "`"), inline: true},
+                  {name: "Jobs", value: $detail, inline: false},
                   {name: "Commit", value: ("`" + $short + "`"), inline: true},
-                  {name: "Run", value: ("[Open workflow run](" + $url + ")"), inline: false},
+                  {name: "Run", value: ("[Open workflow run](" + $url + ")", inline: false},
                   {name: "Community", value: "[Join the modelmesh Discord](https://discord.gg/AF8zvEDcSG)", inline: false}
                 ],
                 footer: {text: "modelmesh · GitHub Actions", icon_url: $logo},
@@ -73,4 +113,4 @@ jobs:
               }]
             }')
           curl -fsS -X POST "$WEBHOOK_URL" -H "Content-Type: application/json" -d "$payload"
-          echo "Discord embed sent."
+          echo "Discord embed sent for $CONCLUSION."

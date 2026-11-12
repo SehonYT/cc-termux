@@ -2,6 +2,8 @@
 // Testable because the engine runners take an injected fetchPage/decodeBody pair.
 
 // ---------------------------------------------------------------- small HTML helpers
+import { decodeEntities } from "./cc-text.mjs";
+export { decodeEntities };
 
 const ENTITIES = {
   nbsp: " ", amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", "#39": "'",
@@ -9,12 +11,7 @@ const ENTITIES = {
   copy: "(c)", reg: "(r)", trade: "(tm)", middot: "·", bull: "•",
 };
 
-export function decodeEntities(s) {
-  return String(s == null ? "" : s)
-    .replace(/&#x([0-9a-f]+);/gi, (_, h) => { try { return String.fromCodePoint(parseInt(h, 16)); } catch (e) { return ""; } })
-    .replace(/&#(\d+);/g, (_, d) => { try { return String.fromCodePoint(Number(d)); } catch (e) { return ""; } })
-    .replace(/&([a-z]+|#\d+);/gi, (m, name) => (ENTITIES[name.toLowerCase()] !== undefined ? ENTITIES[name.toLowerCase()] : m));
-}
+
 
 // Visible text of an HTML fragment, without pulling in a DOM parser.
 export function plainText(html) {
