@@ -553,6 +553,7 @@ const HELP = [
   "  nararouter usage      NaraRouter plans, rate limits and model tiers",
   "  web [status|key|test] web search providers (Tavily, Brave, Jina) + built-in scraper",
   "  skills [install|status] agent skills (ponytail, agent-browser, security, design)",
+  "  start [--port N]   run the gateway alone, for any CLI, IDE or app (--print to just show it)",
   "  uninstall [--yes]  remove modelmesh and restore Claude Code to normal",
   "  antigravity models --update   refresh models from Google",
   "  statusline [--install]        Claude Code status line (model + quota)",
@@ -901,6 +902,31 @@ switch (cmd) {
       break;
     }
     console.log("usage: modelmesh nararouter [usage|plans] [plan] [--json]");
+    break;
+  }
+  case "start": {
+    const { start, startInstructions } = await import("./cc-start.mjs");
+    const portArg = args.indexOf("--port");
+    const port = portArg >= 0 ? Number(args[portArg + 1]) : undefined;
+    if (args.includes("--print") || args.includes("--json")) {
+      // Show what to configure without starting anything.
+      const cfg = JSON.parse(fs.readFileSync(configFile(), "utf8"));
+      if (args.includes("--json")) {
+        const { assetPaths, gatewayToken, modelList } = await import("./cc-start.mjs");
+        console.log(JSON.stringify({ baseUrl: "http://127.0.0.1:" + (port || (cfg.listen && cfg.listen.port) || 8788), token: gatewayToken(cfg), models: modelList(cfg), ...assetPaths() }, null, 2));
+      } else {
+        const { startInstructions, gatewayToken } = await import("./cc-start.mjs");
+        console.log(startInstructions({ port: port || (cfg.listen && cfg.listen.port) || 8788, token: gatewayToken(cfg), cfg }));
+      }
+      break;
+    }
+    const bg = args.includes("--background") || args.includes("-d");
+    try {
+      const r = await start({ port, foreground: !bg });
+      if (bg) { console.log("  gateway started in the background on " + r.base); break; }
+      // Foreground: hold the process until interrupted.
+      await new Promise(() => { });
+    } catch (e) { console.error("modelmesh start: " + e.message); process.exitCode = 1; }
     break;
   }
   case "uninstall": {

@@ -268,6 +268,33 @@ An install from before the rename keeps working: every resolver reads the old en
 fallback, and the old directories are moved to the new names on first use, keys included.
 The GitHub remote keeps its URL until the repository itself is renamed.
 
+### Other CLIs, editors and apps
+
+`modelmesh start` runs the gateway on its own and prints what a client needs. Three
+surfaces are served from the same process, so every provider, retry and quota rule applies
+to all of them:
+
+| Surface | Path | For |
+|---|---|---|
+| Anthropic Messages | `/v1/messages` | Claude Code and anything speaking the Anthropic API |
+| OpenAI chat | `/v1/chat/completions` | most CLIs, editors and apps |
+| MCP | `/mcp` | a client that cannot spawn the stdio server |
+
+The OpenAI surface reshapes the request into the Anthropic one and runs it through the same
+router, so there is no second code path to keep in step. Streaming follows the OpenAI chunk
+shape: a role chunk, deltas, a finish reason, then `[DONE]`.
+
+Model ids may be given as `provider/model`, which is what `start --print` advertises, or as
+the `prov/provider/model` form the picker uses.
+
+The MCP server and the skills directory are printed as filesystem paths, since a client
+reads them directly rather than over the network. The gateway token is generated once and
+kept in the config.
+
+An Antigravity provider is not served on the OpenAI surface yet: its stream is produced
+inside its own HTTP handler, which this endpoint cannot reuse. It answers 501 with that
+explanation rather than failing obscurely.
+
 ### Provider chain
 
 Search tries a chain of providers and stops at the first one that answers. A quota error, a

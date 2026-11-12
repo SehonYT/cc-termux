@@ -917,6 +917,7 @@ async function ttyMode() {
   console.log();
   console.log(bold("  modelmesh setup"));
   console.log(dim("  Claude Code + any provider  ·  " + (stamp.version || "dev") + "  ·  " + process.platform + " " + process.arch));
+  console.log(dim("  Other CLIs, editors and apps: modelmesh start --print"));
   let c = loadCfg();
   for (;;) {
     let list = visible(c);

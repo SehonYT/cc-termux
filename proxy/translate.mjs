@@ -349,6 +349,108 @@ function estimate(value) {
   return 1;
 }
 
+
+// ---------- inbound OpenAI chat, for CLIs that are not Claude Code
+// A third-party CLI sends an OpenAI request; the gateway needs an Anthropic-shaped body so
+// the existing routing and translators apply unchanged. Tools map one to one.
+function fromOpenAIMessages(body) {
+  const out = [];
+  for (const m of body.messages || []) {
+    const text = typeof m.content === 'string'
+      ? m.content
+      : Array.isArray(m.content)
+        ? m.content.map((c) => (typeof c === 'string' ? c : c && c.text ? c.text : '')).join('')
+        : '';
+    if (m.role === 'system' || m.role === 'developer') continue;
+    if (m.role === 'tool') {
+      out.push({ role: 'user', content: [{ type: 'tool_result', tool_use_id: m.tool_call_id || 'call_0', content: text }] });
+      continue;
+    }
+    if (m.role === 'assistant' && Array.isArray(m.tool_calls) && m.tool_calls.length) {
+      const parts = [];
+      if (text) parts.push({ type: 'text', text });
+      for (const call of m.tool_calls) {
+        let input = {};
+        try { input = JSON.parse((call.function && call.function.arguments) || '{}'); } catch (e) { input = {}; }
+        parts.push({ type: 'tool_use', id: call.id || 'call_0', name: (call.function && call.function.name) || 'tool', input });
+      }
+      out.push({ role: 'assistant', content: parts });
+      continue;
+    }
+    out.push({ role: m.role === 'assistant' ? 'assistant' : 'user', content: text });
+  }
+  return out;
+}
+
+function toAnthropicTools(tools) {
+  if (!Array.isArray(tools)) return undefined;
+  const out = [];
+  for (const t of tools) {
+    const fn = t && (t.function || t);
+    if (!fn || !fn.name) continue;
+    out.push({ name: fn.name, description: fn.description || '', input_schema: fn.parameters || { type: 'object', properties: {} } });
+  }
+  return out.length ? out : undefined;
+}
+
+// An OpenAI request, as an Anthropic one.
+function openAIToAnthropic(body) {
+  const system = [];
+  for (const m of body.messages || []) {
+    if (m.role !== 'system' && m.role !== 'developer') continue;
+    const text = typeof m.content === 'string' ? m.content : Array.isArray(m.content) ? m.content.map((c) => (c && c.text) || '').join('') : '';
+    if (text) system.push({ type: 'text', text });
+  }
+  const out = {
+    model: body.model,
+    max_tokens: body.max_tokens || body.max_completion_tokens || 4096,
+    messages: fromOpenAIMessages(body),
+    stream: Boolean(body.stream),
+  };
+  if (system.length) out.system = system;
+  const tools = toAnthropicTools(body.tools);
+  if (tools) out.tools = tools;
+  if (body.temperature != null) out.temperature = body.temperature;
+  if (body.top_p != null) out.top_p = body.top_p;
+  if (Array.isArray(body.stop) && body.stop.length) out.stop_sequences = body.stop;
+  else if (typeof body.stop === 'string') out.stop_sequences = [body.stop];
+  if (body.tool_choice && body.tool_choice !== 'auto') {
+    if (body.tool_choice === 'required') out.tool_choice = { type: 'any' };
+    else if (body.tool_choice === 'none') out.tool_choice = { type: 'none' };
+    else if (body.tool_choice.function && body.tool_choice.function.name) out.tool_choice = { type: 'tool', name: body.tool_choice.function.name };
+  }
+  return out;
+}
+
+// An Anthropic message, as an OpenAI completion.
+function anthropicToOpenAI(message, model) {
+  const content = message.content || [];
+  let text = '';
+  const calls = [];
+  for (const part of content) {
+    if (part.type === 'text') text += part.text || '';
+    else if (part.type === 'tool_use') {
+      calls.push({ id: part.id, type: 'function', function: { name: part.name, arguments: JSON.stringify(part.input || {}) } });
+    }
+  }
+  const stop = message.stop_reason === 'max_tokens' ? 'length'
+    : message.stop_reason === 'tool_use' ? 'tool_calls'
+    : message.stop_reason === 'stop_sequence' ? 'stop' : 'stop';
+  const msg = { role: 'assistant', content: text || null };
+  if (calls.length) msg.tool_calls = calls;
+  return {
+    id: message.id || 'chatcmpl-' + Date.now(),
+    object: 'chat.completion',
+    created: Math.floor(Date.now() / 1000),
+    model: model || message.model || 'modelmesh',
+    choices: [{ index: 0, message: msg, finish_reason: stop }],
+    usage: {
+      prompt_tokens: (message.usage && message.usage.input_tokens) || 0,
+      completion_tokens: (message.usage && message.usage.output_tokens) || 0,
+      total_tokens: ((message.usage && message.usage.input_tokens) || 0) + ((message.usage && message.usage.output_tokens) || 0),
+    },
+  };
+}
 export {
   mapStop,
   flatten,
@@ -359,6 +461,8 @@ export {
   fromOpenAI,
   createTranslator,
   responsesApi,
+  openAIToAnthropic,
+  anthropicToOpenAI,
   toResponses,
   fromResponses,
   createResponsesTranslator,

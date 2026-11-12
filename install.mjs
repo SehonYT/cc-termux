@@ -621,6 +621,7 @@ function installShims(t) {
   } else if (CODE_ONLY || NO_SETUP) {
     step("Update complete. Run \"claude\" when ready.");
     info("Add a provider with: modelmesh setup");
+    info("Point any other CLI, editor or app at it: modelmesh start --print");
   } else {
     console.log("next: run \"modelmesh setup\" to add a provider, then \"claude\"");
   }

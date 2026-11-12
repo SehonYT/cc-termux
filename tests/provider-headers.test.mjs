@@ -40,7 +40,7 @@ test("all three proxy paths build their URL the same way", () => {
   // The chat path kept its own naive concat after the responses path was fixed, which is
   // exactly how the AgentRouter 401 stayed hidden.
   const uses = server.match(/joinUrl\(p\.baseUrl/g) || [];
-  assert.equal(uses.length, 3, "every proxy path resolves its URL through joinUrl");
+  assert.ok(uses.length >= 4, "every proxy path resolves its URL through joinUrl, got " + uses.length);
   assert.ok(!/p\.baseUrl\.replace\(\/\\\/\$\/, ''\) \+/.test(server), "no path may concat baseUrl by hand");
 });
 
@@ -48,7 +48,7 @@ test("every proxy path forwards the preset's own headers", () => {
   // A gateway can fingerprint the client and reject anything that is not the expected one,
   // so the preset headers have to reach all three paths, not just one.
   const loops = server.match(/Object\.entries\(p\.headers \|\| \{\}\)/g) || [];
-  assert.equal(loops.length, 3, "chat, messages and responses must each forward preset headers");
+  assert.ok(loops.length >= 4, "every proxy path must forward preset headers, got " + loops.length);
 });
 
 test("the AgentRouter preset sends the client identity its gateway requires", () => {
@@ -65,8 +65,9 @@ test("the AgentRouter preset sends the client identity its gateway requires", ()
 
 test("a preset header cannot be overridden by an empty key", () => {
   // The key is applied first, so a preset can pin a header even when no key is set.
-  const openaiIdx = server.indexOf("async function proxyOpenAI");
-  const block = server.slice(openaiIdx, openaiIdx + 700);
+  const openaiIdx = server.indexOf("async function proxyOpenAI(");
+  const after = server.slice(openaiIdx);
+  const block = after.slice(0, after.indexOf("\n}\n") + 2);
   const keyIdx = block.indexOf("headers['authorization']");
   const presetIdx = block.indexOf("Object.entries(p.headers");
   assert.ok(keyIdx >= 0 && presetIdx > keyIdx, "preset headers are applied after the key");

@@ -18,6 +18,8 @@ import {
   fromResponses,
   createResponsesTranslator,
   estimate,
+  openAIToAnthropic,
+  anthropicToOpenAI,
 } from "./translate.mjs";
 import { refreshStatusLine } from "../bin/cc-statusline.mjs";
 import { configFile, configDir, cacheDir } from "../bin/cc-paths.mjs";
@@ -273,6 +275,17 @@ function pickRoute(model) {
   if (prov && CONFIG.providers[prov[1]]) {
     return { name: prov[1], provider: CONFIG.providers[prov[1]], model: prov[2] };
   }
+  // 0b) the short "provider/model" form that modelmesh start advertises. Checked against
+  //     the configured providers so a model id containing a slash still falls through.
+  const short = /^([^/]+)\/(.+)$/.exec(String(model));
+  if (short && CONFIG.providers[short[1]] && !CONFIG.providers[short[1]].hidden) {
+    const p = CONFIG.providers[short[1]];
+    const wants = short[2];
+    // Accept the exact id, or a unique suffix of it, since detail ids carry slashes.
+    if (!p.modelsById || p.modelsById[wants]) return { name: short[1], provider: p, model: wants };
+    const match = Object.keys(p.modelsById).find((id) => id.endsWith("/" + wants) || id === wants);
+    if (match) return { name: short[1], provider: p, model: match };
+  }
   // 1) an explicit override (set by /provider or a provswitch row) wins for any model
   //    that does not belong to the override provider itself.
   const ov = validOverride();
@@ -341,6 +354,131 @@ function classifierVerdict(res, body, model) {
 
 
 
+// ---- MCP over HTTP
+// The MCP server is stdio for a local client. A tool that cannot spawn a process needs
+// the same protocol over HTTP, so this exposes tools/list and tools/call at /mcp.
+async function handleMcpHttp(req, res, body) {
+  const { handleRequest } = await import('../bin/cc-mcp.mjs');
+  const messages = Array.isArray(body) ? body : [body];
+  const replies = [];
+  for (const msg of messages) {
+    if (!msg || typeof msg !== 'object') continue;
+    try {
+      const reply = await handleRequest(msg);
+      if (reply) replies.push(reply);
+    } catch (e) {
+      replies.push({ jsonrpc: '2.0', id: msg.id, error: { code: -32603, message: String((e && e.message) || e) } });
+    }
+  }
+  res.writeHead(200, { 'content-type': 'application/json' });
+  return res.end(JSON.stringify(Array.isArray(body) ? replies : replies[0] || {}));
+}
+// ---- OpenAI-compatible endpoint
+// A CLI, editor or app that speaks the OpenAI chat API can point here. The request is
+// reshaped into the Anthropic one the router already understands, so every provider, retry
+// and quota rule applies with no second code path. The reply is reshaped back.
+async function proxyOpenAIInbound(req, res, body) {
+  const fail = (status, message, type) => {
+    res.writeHead(status, { 'content-type': 'application/json' });
+    return res.end(JSON.stringify({ error: { message, type: type || 'invalid_request_error' } }));
+  };
+  const anthropicBody = openAIToAnthropic(body);
+  const shapeError = requestShapeError(anthropicBody);
+  if (shapeError) return fail(400, shapeError);
+  const hasProviders = Object.keys(CONFIG.providers || {}).some((n) => !CONFIG.providers[n].hidden);
+  if (!CONFIG.active || !hasProviders) return fail(400, 'no provider configured on this machine - run: modelmesh setup');
+  let route;
+  try { route = pickRoute(anthropicBody.model); } catch (e) { return fail(400, e.message); }
+  if (route.provider.type === 'antigravity') {
+    return fail(501, 'this endpoint does not serve an Antigravity provider yet; use Claude Code for it, or switch with: modelmesh provider', 'not_implemented_error');
+  }
+  LOG('REQ openai', route.name, '->', route.model, 'stream=' + !!body.stream, 'tools=' + ((anthropicBody.tools || []).length));
+  const parts = [];
+  let stopReason = null;
+  let usage = null;
+  const onEvent = (event, data) => {
+    if (event === 'content_block_start' && data.content_block) {
+      if (data.content_block.type === 'text') parts.push({ type: 'text', text: '' });
+      else if (data.content_block.type === 'tool_use') parts.push({ type: 'tool_use', id: data.content_block.id, name: data.content_block.name, input: {}, _raw: '' });
+    } else if (event === 'content_block_delta' && data.delta) {
+      const last = parts[parts.length - 1];
+      if (data.delta.type === 'text_delta' && last && last.type === 'text') last.text += data.delta.text || '';
+      else if (data.delta.type === 'input_json_delta' && last && last.type === 'tool_use') last._raw += data.delta.partial_json || '';
+    } else if (event === 'message_delta') {
+      stopReason = (data.delta && data.delta.stop_reason) || stopReason;
+      usage = data.usage || usage;
+    }
+  };
+  try {
+    await runUpstream(route, { ...anthropicBody, stream: true }, onEvent);
+  } catch (e) {
+    return fail(e.status || 502, e.message || String(e), e.type || 'api_error');
+  }
+  for (const part of parts) {
+    if (part.type !== 'tool_use') continue;
+    try { part.input = part._raw ? JSON.parse(part._raw) : {}; } catch (e) { part.input = {}; }
+    delete part._raw;
+  }
+  const message = {
+    id: 'msg_' + Date.now(), type: 'message', role: 'assistant', model: route.model,
+    content: parts, stop_reason: stopReason || 'end_turn', usage: usage || {},
+  };
+  if (!body.stream) {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    return res.end(JSON.stringify(anthropicToOpenAI(message, body.model)));
+  }
+  const id = 'chatcmpl-' + Date.now();
+  const created = Math.floor(Date.now() / 1000);
+  const model = body.model || message.model || 'modelmesh';
+  const chunk = (delta, finish) => ({
+    id, object: 'chat.completion.chunk', created, model,
+    choices: [{ index: 0, delta, finish_reason: finish || null }],
+  });
+  res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });
+  const frame = (payload) => res.write('data: ' + JSON.stringify(payload) + '\n\n');
+  frame(chunk({ role: 'assistant', content: '' }));
+  let callIndex = -1;
+  for (const part of parts) {
+    if (part.type === 'text' && part.text) frame(chunk({ content: part.text }));
+    else if (part.type === 'tool_use') {
+      callIndex += 1;
+      frame(chunk({ tool_calls: [{ index: callIndex, id: part.id, type: 'function', function: { name: part.name, arguments: '' } }] }));
+      frame(chunk({ tool_calls: [{ index: callIndex, function: { arguments: JSON.stringify(part.input || {}) } }] }));
+    }
+  }
+  const finish = message.stop_reason === 'max_tokens' ? 'length' : callIndex >= 0 ? 'tool_calls' : 'stop';
+  frame(chunk({}, finish));
+  res.write('data: [DONE]\n\n');
+  return res.end();
+}
+
+// Drive one upstream request and emit the translator's Anthropic events to onEvent.
+async function runUpstream(route, body, onEvent) {
+  const p = route.provider;
+  const url = joinUrl(p.baseUrl, p.path || '/chat/completions');
+  const key = providerKey(p);
+  const headers = { 'content-type': 'application/json', accept: 'text/event-stream' };
+  if (key) headers['authorization'] = 'Bearer ' + key;
+  for (const [k, v] of Object.entries(p.headers || {})) headers[k] = String(v);
+  const upstream = await fetchWithRetry(url, {
+    method: 'POST', headers, body: JSON.stringify(toOpenAI(body, route.model)),
+  }, p, 'openai-inbound ' + route.model);
+  if (!upstream.ok) {
+    const text = await upstream.text();
+    const err = new Error('upstream ' + upstream.status + ': ' + text.slice(0, 200));
+    err.status = upstream.status;
+    throw err;
+  }
+  const tr = createTranslator(route.model, (event, data) => onEvent(event, data), { log: LOG });
+  const reader = upstream.body.getReader();
+  const dec = new TextDecoder();
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    tr.onData(dec.decode(value, { stream: true }));
+  }
+  tr.onEnd();
+}
 function sseSend(res) {
   return (event, data) => res.write('event: ' + event + '\ndata: ' + JSON.stringify(data) + '\n\n');
 }
@@ -584,6 +722,11 @@ const server = http.createServer(async (req, res) => {
     let body;
     try { body = JSON.parse(raw || '{}'); }
     catch (e) { return anthropicError(res, 400, 'invalid_request_error', 'invalid JSON body'); }
+    if (u.pathname === '/mcp') return handleMcpHttp(req, res, body);
+    // ---- OpenAI-compatible surface, for CLIs and editors that are not Claude Code.
+    if (u.pathname === '/v1/chat/completions') {
+      return proxyOpenAIInbound(req, res, body);
+    }
     if (u.pathname === '/v1/messages/count_tokens') {
       const shapeError = requestShapeError(body);
       if (shapeError) return anthropicError(res, 400, 'invalid_request_error', shapeError);
