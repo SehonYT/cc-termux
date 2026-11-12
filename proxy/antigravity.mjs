@@ -29,22 +29,42 @@ const HTTPS_AGENT = new https.Agent({
   timeout: 120000,
 });
 
+// Only ids the live catalog still serves may appear on the right-hand side. Verified against
+// fetchAvailableModels: gemini-3.7-flash-tiered, gemini-pro-agent and gemini-4-argon-medium all
+// answer 404 now, so the aliases that pointed at them were dead ends for anyone who picked them.
+const WORKING_MODELS = ["gemini-3.8-flash-high", "gemini-3.8-flash-medium", "gemini-3.8-flash-low", "claude-sonnet-4-6", "claude-opus-4-6-thinking", "gpt-oss-120b-medium"];
 const MODEL_ALIASES = {
-  "gemini-3.7-flash": "gemini-3.7-flash-tiered",
-  "gemini-3.7-flash-high": "gemini-3.7-flash-tiered",
-  "gemini-3.7-flash-medium": "gemini-3.7-flash-tiered",
-  "gemini-3.7-flash-low": "gemini-3.7-flash-tiered",
+  // Retired Gemini 3.7 builds collapse onto the 3.8 equivalents that replaced them.
+  "gemini-3.7-flash": "gemini-3.8-flash-high",
+  "gemini-3.7-flash-tiered": "gemini-3.8-flash-high",
+  "gemini-3.7-flash-high": "gemini-3.8-flash-high",
+  "gemini-3.7-flash-medium": "gemini-3.8-flash-medium",
+  "gemini-3.7-flash-low": "gemini-3.8-flash-low",
   "gemini-3.8-flash": "gemini-3.8-flash-high",
   "gemini-3.8-flash-tiered": "gemini-3.8-flash-high",
-  "gemini-4-argon": "gemini-4-argon-medium",
+  // Argon is no longer served under any effort suffix; high is the closest live model.
+  "gemini-4-argon": "gemini-3.8-flash-high",
+  "gemini-4-argon-high": "gemini-3.8-flash-high",
+  "gemini-4-argon-medium": "gemini-3.8-flash-medium",
+  "gemini-4-argon-low": "gemini-3.8-flash-low",
+  "gemini-4-pro": "gemini-3.8-flash-high",
+  "gemini-4-pro-high": "gemini-3.8-flash-high",
+  // Gemini 3.1 Pro and the agent id are gone; the Claude thinking model is the deep option.
+  "gemini-3.1-pro-high": "claude-opus-4-6-thinking",
+  "gemini-pro-agent": "claude-opus-4-6-thinking",
   "gpt-oss-120b": "gpt-oss-120b-medium",
-  "gemini-3.1-pro-high": "gemini-pro-agent",
   "gemini-claude-sonnet-4-5": "claude-sonnet-4-6",
   "gemini-claude-sonnet-4-5-thinking": "claude-sonnet-4-6",
   "gemini-claude-opus-4-5-thinking": "claude-opus-4-6-thinking",
 };
-const upstreamModel = (m) => MODEL_ALIASES[m] || m;
-
+// Last line of defence: a model id that is not in the live catalog is remapped rather than
+// sent, because upstream answers 404 for it and the user only sees "entity was not found".
+const upstreamModel = (m) => {
+  const mapped = MODEL_ALIASES[m] || m;
+  if (WORKING_MODELS.includes(mapped)) return mapped;
+  console.error(new Date().toISOString(), "antigravity: unknown model", mapped, "- using gemini-3.8-flash-high");
+  return "gemini-3.8-flash-high";
+};
 const MAX_OUTPUT = 65536;
 // Antigravity sends this lightweight system prompt itself; an oversized systemInstruction
 // is rejected with a misleading 429, so the client prompt moves to the first user turn.
