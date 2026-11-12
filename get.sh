@@ -19,9 +19,17 @@ fetch_text() {
 }
 if [ -z "${MODELMESH_ARCHIVE:-}" ]; then
   if [ "$REF" = "main" ]; then
-    ATOM=$(fetch_text "https://github.com/$REPO/commits/main.atom")
-    SHA=$(printf "%s" "$ATOM" | grep -o "Grit::Commit/[0-9a-f]\{40\}" | head -1 | cut -d/ -f2 || true)
-    DATE=$(printf "%s" "$ATOM" | sed -n "s/.*<updated>\([^<]*\)<\/updated>.*/\1/p" | head -1 || true)
+    # Resolve the newest commit whose tests passed, not the tip of main. A commit that
+    # failed ci must never be installed by default; MODELMESH_REF=main opts into bleeding edge.
+    VERIFIED=$(fetch_text "https://github.com/$REPO/commits/verified.atom")
+    SHA=$(printf "%s" "$VERIFIED" | grep -o "Grit::Commit/[0-9a-f]\{40\}" | head -1 | cut -d/ -f2 || true)
+    DATE=$(printf "%s" "$VERIFIED" | sed -n "s/.*<updated>\([^<]*\)<\/updated>.*/\1/p" | head -1 || true)
+    if [ -z "$SHA" ]; then
+      printf '%s\n' "modelmesh: no verified commit yet; falling back to main (untested)" >&2
+      ATOM=$(fetch_text "https://github.com/$REPO/commits/main.atom")
+      SHA=$(printf "%s" "$ATOM" | grep -o "Grit::Commit/[0-9a-f]\{40\}" | head -1 | cut -d/ -f2 || true)
+      DATE=$(printf "%s" "$ATOM" | sed -n "s/.*<updated>\([^<]*\)<\/updated>.*/\1/p" | head -1 || true)
+    fi
   else
     API=$(fetch_text "https://api.github.com/repos/$REPO/commits/$REF")
     SHA=$(printf "%s" "$API" | sed -n 's/.*"sha"[[:space:]]*:[[:space:]]*"\([0-9a-f]\{40\}\)".*/\1/p' | head -1 || true)

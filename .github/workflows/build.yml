@@ -48,7 +48,6 @@ jobs:
 
       - name: Send Discord update
         if: always()
-        continue-on-error: true
         env:
           WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
           CONCLUSION: ${{ steps.r.outputs.conclusion }}
@@ -105,12 +104,17 @@ jobs:
                   {name: "Result", value: ("`" + $status + "`"), inline: true},
                   {name: "Jobs", value: $detail, inline: false},
                   {name: "Commit", value: ("`" + $short + "`"), inline: true},
-                  {name: "Run", value: ("[Open workflow run](" + $url + ")", inline: false},
+                  {name: "Run", value: ("[Open workflow run](" + $url + ")"), inline: false},
                   {name: "Community", value: "[Join the modelmesh Discord](https://discord.gg/AF8zvEDcSG)", inline: false}
                 ],
                 footer: {text: "modelmesh · GitHub Actions", icon_url: $logo},
                 timestamp: $ts
               }]
             }')
-          curl -fsS -X POST "$WEBHOOK_URL" -H "Content-Type: application/json" -d "$payload"
+          # Retry once: a transient webhook failure must not lose the message, and a
+          # permanent one must be visible rather than silently swallowed.
+          if ! curl -fsS --retry 2 --retry-delay 2 -X POST "$WEBHOOK_URL" -H "Content-Type: application/json" -d "$payload"; then
+            echo "::error::the Discord webhook rejected the notification for $CONCLUSION"
+            exit 1
+          fi
           echo "Discord embed sent for $CONCLUSION."

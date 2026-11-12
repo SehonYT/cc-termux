@@ -63,3 +63,11 @@ jobs:
             git push origin "$TAG"
           fi
           gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "$TAG" --notes "Automated release for $TARGET_SHA" || true
+      # A rolling pointer to the newest commit whose tests passed. get.sh and update
+      # resolve this rather than main, so a commit that failed ci is never pulled.
+      - name: Point the verified marker at this commit
+        run: |
+          set -euo pipefail
+          # A lightweight ref in its own namespace: never checked out, only read.
+          git push --force origin "$TARGET_SHA:refs/tags/verified"
+          echo "verified now points at $TARGET_SHA"

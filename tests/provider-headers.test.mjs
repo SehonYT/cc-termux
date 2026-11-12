@@ -67,7 +67,8 @@ test("a preset header cannot be overridden by an empty key", () => {
   // The key is applied first, so a preset can pin a header even when no key is set.
   const openaiIdx = server.indexOf("async function proxyOpenAI(");
   const after = server.slice(openaiIdx);
-  const block = after.slice(0, after.indexOf("\n}\n") + 2);
+  // A checkout on Windows has CRLF, so match the line ending loosely or the slice is empty.
+  const block = after.slice(0, after.search(/\r?\n\}\r?\n/) + 2);
   const keyIdx = block.indexOf("headers['authorization']");
   const presetIdx = block.indexOf("Object.entries(p.headers");
   assert.ok(keyIdx >= 0 && presetIdx > keyIdx, "preset headers are applied after the key");

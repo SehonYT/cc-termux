@@ -65,7 +65,20 @@ async function fetchTextRetry(url, opts = {}, fetchImpl = globalThis.fetch, atte
   throw lastErr || new Error("network unavailable");
 }
 
-async function remoteInfo({ repo = DEFAULT_REPO, fetchImpl = fetch } = {}) {
+// The newest commit whose tests passed. Falls back to main only when the marker is absent,
+// and MODELMESH_CHANNEL=main opts into the untested tip.
+const UA = { "user-agent": "modelmesh" };
+
+async function verifiedInfo({ repo = DEFAULT_REPO, fetchImpl = fetch } = {}) {
+  try {
+    const r = await fetchTextRetry("https://github.com/" + repo + "/commits/verified.atom", { headers: UA, signal: AbortSignal.timeout(8000) }, fetchImpl);
+    const sha = (/Grit::Commit\/([0-9a-f]{40})/.exec(r.text) || [])[1];
+    if (sha) return { sha, date: (/<updated>([^<]*)<\/updated>/.exec(r.text) || [])[1] };
+  } catch (e) { }
+  return null;
+}
+
+async function remoteInfo({ repo = DEFAULT_REPO, fetchImpl = fetch } = { }) {
   const headers = { "user-agent": "modelmesh" };
   let sha = null;
   let version = null;
@@ -73,6 +86,10 @@ async function remoteInfo({ repo = DEFAULT_REPO, fetchImpl = fetch } = {}) {
   let commits = [];
   // The commit atom feed is public, stable per commit and not API rate-limited.
   try {
+    if ((process.env.MODELMESH_CHANNEL || "verified") !== "main") {
+      const v = await verifiedInfo({ repo, fetchImpl });
+      if (v && v.sha) return { sha: v.sha, date: v.date || "" };
+    }
     const r = await fetchTextRetry("https://github.com/" + repo + "/commits/main.atom", { headers, signal: AbortSignal.timeout(8000) }, fetchImpl);
     if (r.ok) {
       const text = await r.text();

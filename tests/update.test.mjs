@@ -5,6 +5,10 @@ import os from "node:os";
 import path from "node:path";
 import { isNewer, semverNewer, check, localInfo, findInstaller, selfUpdate, claudeCodeUpToDate, cmpVersions } from "../bin/cc-update.mjs";
 import zlib from "node:zlib";
+import { fileURLToPath } from "node:url";
+
+// The repository root, for the tests that read source files rather than run code.
+const repoRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
 function tmpRoot(version, sha) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cc-upd-"));
@@ -208,4 +212,44 @@ test("offline update checks throw instead of claiming up to date", async () => {
     const offline = async () => { throw new Error("offline"); };
     await assert.rejects(() => check({ root, fetchImpl: offline, cacheTtlMs: 0 }), /could not reach GitHub/);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+test("updates resolve the verified marker, not the tip of main", async () => {
+  // A commit whose tests failed must never be pulled by default. version.yml moves the
+  // verified ref only after a green run, so resolving it is what gates the download.
+  const src = fs.readFileSync(path.join(repoRoot, "bin", "cc-update.mjs"), "utf8");
+  assert.match(src, /commits\/verified\.atom/, "the updater reads the verified feed");
+  assert.match(src, /MODELMESH_CHANNEL \|\| "verified"/, "verified is the default channel");
+  assert.match(src, /MODELMESH_CHANNEL.*!== "main"/, "main is an explicit opt-in");
+  // Falling back to main is allowed, but it must be a fallback rather than the first try.
+  const verifiedIdx = src.indexOf("verifiedInfo({ repo, fetchImpl })");
+  const mainIdx = src.indexOf("commits/main.atom");
+  assert.ok(verifiedIdx > 0 && verifiedIdx < mainIdx, "verified is tried before main");
+});
+
+test("the install script resolves the verified ref too", () => {
+  const get = fs.readFileSync(path.join(repoRoot, "get.sh"), "utf8");
+  assert.match(get, /commits\/verified\.atom/, "get.sh reads the verified feed");
+  assert.match(get, /no verified commit yet/, "and says so when falling back");
+  // A pipe-to-shell install must never silently pull an untested commit.
+  const verifiedIdx = get.indexOf("commits/verified.atom");
+  const mainIdx = get.indexOf("commits/main.atom");
+  assert.ok(verifiedIdx > 0 && verifiedIdx < mainIdx, "verified is tried before main");
+});
+
+test("the notification fails loudly instead of silently", () => {
+  // The previous version had continue-on-error, so a jq syntax error meant no message and
+  // a green job. Silence is the one outcome a notifier must never produce.
+  const wf = fs.readFileSync(path.join(repoRoot, ".github", "workflows", "build.yml"), "utf8");
+  assert.ok(!/continue-on-error/.test(wf), "the send step must be allowed to fail the job");
+  assert.match(wf, /--retry/, "a transient webhook failure is retried");
+  assert.match(wf, /::error::the Discord webhook rejected/, "a permanent one is reported");
+  assert.match(wf, /CONCLUSION: \$\{\{ steps\.r\.outputs\.conclusion \}\}/, "it reports the real conclusion");
+  assert.match(wf, /produced no jobs|stalled/, "a run with no jobs is not a pass");
+});
+
+test("the release job refuses a run that verified nothing", () => {
+  const wf = fs.readFileSync(path.join(repoRoot, ".github", "workflows", "version.yml"), "utf8");
+  assert.match(wf, /produced no jobs/, "a stalled run cannot tag");
+  assert.match(wf, /refs\/tags\/verified/, "a green run moves the verified marker");
+  assert.match(wf, /conclusion == 'success'/, "only a green run reaches it");
 });
