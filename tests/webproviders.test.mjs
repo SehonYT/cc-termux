@@ -248,14 +248,31 @@ test("grounding SSE parsing survives junk frames", () => {
 });
 
 test("grounding reports a clean quota error so the chain can move on", async () => {
+  // Credentials must exist or the auth check fails before the request is made, which made
+  // this test pass only on a machine that happened to be logged in. A temp config with a
+  // valid-looking token exercises the 429 path anywhere.
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cc-quota-"));
+  const cfgPath = path.join(tmp, "config.json");
+  fs.writeFileSync(cfgPath, "{}");
+  fs.writeFileSync(path.join(tmp, "antigravity.json"), JSON.stringify({
+    access_token: "test-token", refresh_token: "test-refresh",
+    expires_at: Date.now() + 3600 * 1000, project_id: "test-project",
+  }), { mode: 0o600 });
+  const prevCfg = process.env.MODELMESH_CONFIG;
+  process.env.MODELMESH_CONFIG = cfgPath;
   const realFetch = globalThis.fetch;
   globalThis.fetch = async () => ({ ok: false, status: 429, text: async () => JSON.stringify({ error: { message: "Resource has been exhausted" } }) });
   try {
     await assert.rejects(() => wp.antigravityGrounding("test", { model: "gemini-3.8-flash-high" }), (e) => {
+      // A 429 with a valid credential is a quota problem, not an auth one.
       assert.equal(e.quota, true);
       return true;
     });
-  } finally { globalThis.fetch = realFetch; }
+  } finally {
+    globalThis.fetch = realFetch;
+    if (prevCfg === undefined) delete process.env.MODELMESH_CONFIG; else process.env.MODELMESH_CONFIG = prevCfg;
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });
 
 
