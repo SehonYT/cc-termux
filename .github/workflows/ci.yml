@@ -96,14 +96,15 @@ jobs:
   # shims and CLI. The Claude Code binary is faked, so nothing is downloaded.
   install-smoke:
     name: install smoke (${{ matrix.os }})
-    # macOS is off with the check job above; see the note there.
-    if: matrix.os != 'macos-latest' || vars.CI_MACOS == 'true'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 12
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        # macOS is omitted rather than disabled by a condition: matrix values are not
+        # available in a job-level if:, and using one rejects the whole workflow file.
+        # Add macos-latest back here to restore it.
+        os: [ubuntu-latest, windows-latest]
     defaults:
       run:
         shell: bash

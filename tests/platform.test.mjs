@@ -217,6 +217,16 @@ test("the CI matrix covers every operating system we claim", () => {
   for (const needed of ["ubuntu-latest", "macos-latest", "windows-latest"]) {
     assert.ok(platforms.has(needed), "CI must run on " + needed + ", saw " + [...platforms].join(", "));
   }
+  // A job-level if: cannot see matrix values: GitHub evaluates it before the matrix expands,
+  // and referencing one there rejects the entire workflow file rather than failing a job.
+  for (const [name, body] of Object.entries(wf.split(/\n  (?=\w)/).reduce((acc, b) => {
+    const m = /^  (\w[\w-]*):/.exec(b);
+    if (m) acc[m[1]] = b;
+    return acc;
+  }, {}))) {
+    const header = body.slice(0, body.indexOf("steps:") >= 0 ? body.indexOf("steps:") : body.length);
+    assert.ok(!/^\s+if:.*\bmatrix\./m.test(header), name + " must not use matrix values in a job-level if");
+  }
   // macOS is gated off while GitHub cannot allocate its runners, but it must be a switch
   // rather than a deletion, or the coverage claim quietly becomes untrue.
   assert.match(wf, /CI_MACOS/, "macOS is disabled by a variable, not removed");
