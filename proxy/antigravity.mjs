@@ -5,6 +5,7 @@ import fs from "node:fs";
 import http from "node:http";
 import https from "node:https";
 import os from "node:os";
+import zlib from "node:zlib";
 import { cacheDir } from "../bin/cc-paths.mjs";
 import path from "node:path";
 import { ensureAccessToken, loadCredentials, GENERATE_URLS, antigravityContentHeaders } from "../bin/cc-antigravity.mjs";
@@ -353,9 +354,19 @@ export async function proxyAntigravity(req, res, route, body, { anthropicError, 
       port: target.port || (isHttps ? 443 : 80),
       path: target.pathname + target.search,
       method: "POST",
-      headers: { ...antigravityContentHeaders(accessToken, { accept: "text/event-stream" }), "content-length": Buffer.byteLength(payload) },
+      // Ask for an uncompressed stream. node:https does NOT decode for us the way fetch did,
+      // so a gzipped SSE body would decode as garbage and read as "0 events" - a silent empty
+      // response. OmniRoute makes the same demand (bin/antigravity-bridge.mjs:415).
+      headers: { ...antigravityContentHeaders(accessToken, { accept: "text/event-stream", "accept-encoding": "identity" }), "content-length": Buffer.byteLength(payload) },
       agent: isHttps ? HTTPS_AGENT : HTTP_AGENT,
-    }, (res) => {
+    }, (rawRes) => {
+      // Belt and braces: if the host compresses anyway, decompress it rather than parse junk.
+      const enc = String(rawRes.headers["content-encoding"] || "").toLowerCase();
+      const res = enc.includes("gzip") ? rawRes.pipe(zlib.createGunzip())
+        : enc.includes("deflate") ? rawRes.pipe(zlib.createInflate())
+        : enc.includes("br") ? rawRes.pipe(zlib.createBrotliDecompress())
+        : rawRes;
+      if (res !== rawRes) { res.headers = rawRes.headers; res.statusCode = rawRes.statusCode; }
       res.status = res.statusCode;
       res.ok = res.statusCode >= 200 && res.statusCode < 300;
       // The forwarder exposes text()/headers.get(); keep that shape for the callers below.
@@ -567,20 +578,18 @@ export async function proxyAntigravity(req, res, route, body, { anthropicError, 
     }
     if (cand && cand.finishReason && stop !== "tool_use") stop = stopReason(cand.finishReason);
   };
-  // Idle watchdog, matching OmniRoute's socket-inactivity semantics: a stalled link should be
-  // noticed in seconds, not after a wall clock that also truncates healthy long turns.
+  // Silence allowance per read. A stalled link is noticed in two minutes, not never.
   const IDLE_MS = Number(process.env.MODELMESH_ANTIGRAVITY_IDLE_MS || 120000);
-  let idleTimer = null;
-  const readWithIdle = () => new Promise((resolve, reject) => {
-    idleTimer = setTimeout(() => {
-      try { upstream.destroy(); } catch (e) { }
-      reject(Object.assign(new Error("Antigravity sent nothing for " + Math.round(IDLE_MS / 1000) + "s; the connection stalled"), { name: "IdleError" }));
-    }, IDLE_MS);
-    reader.next().then((r) => { clearTimeout(idleTimer); resolve(r); }, (e) => { clearTimeout(idleTimer); reject(e); });
-  });
+  // The stall deadline is the agent's own socket-inactivity timeout, the same mechanism
+  // OmniRoute relies on (bin/antigravity-bridge.mjs:34 timeout: 120000). Verified locally: a
+  // 4.3s stream survives a 1.5s agent timeout while data keeps flowing, so it measures silence
+  // rather than total elapsed time - which is exactly what a long thinking turn needs.
+  let stalledOut = false;
+  const markActivity = () => { try { upstream.setTimeout(IDLE_MS, () => { stalledOut = true; try { upstream.destroy(); } catch (e) { } }); } catch (e) { } };
   try {
     for (;;) {
-      const { done, value } = await readWithIdle();
+      const { done, value } = await reader.next();
+      markActivity();
       if (done) break;
       buf += dec.decode(value, { stream: true });
       let nl;
@@ -619,11 +628,16 @@ export async function proxyAntigravity(req, res, route, body, { anthropicError, 
   } catch (e) {
     try {
       start();
-      sse("error", { type: "error", error: { type: "api_error", message: "Antigravity stream failed: " + e.message } });
+      // A socket we cut for silence reports "Premature close"; say what actually happened and
+      // keep whatever already arrived, so a stall mid-answer is not mistaken for a loss.
+      const stalled = stalledOut || /premature close|aborted|ECONNRESET/i.test(String(e.message || ""));
+      const message = stalled
+        ? "Antigravity stopped sending data (no bytes for " + Math.round(IDLE_MS / 1000) + "s); the stream was closed. Partial output above is kept - retry to continue."
+        : "Antigravity stream failed: " + describeNetError(e);
+      sse("error", { type: "error", error: { type: "api_error", message } });
       sse("message_stop", { type: "message_stop" });
     } catch (e2) { }
   } finally {
-    if (idleTimer) { try { clearTimeout(idleTimer); } catch (e) { } }
     try { res.end(); } catch (e) { try { res.destroy(); } catch (e2) { } }
     refreshStatusLine({ modelId: route.model, provider: route.name }).catch(() => { });
   }
