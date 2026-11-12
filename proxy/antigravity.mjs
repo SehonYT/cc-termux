@@ -282,13 +282,21 @@ function partsFrom(payload) {
   return { payload: r, cand, parts: (cand && cand.content && cand.content.parts) || [] };
 }
 
-export async function proxyAntigravity(req, res, route, body, { anthropicError }) {
+// Drive an Antigravity request and emit Anthropic events to `sink`. When no sink is given
+// the events are written to `res` as SSE, which is what the HTTP handler wants. The OpenAI
+// endpoint passes a sink instead, so both surfaces run one implementation.
+export async function proxyAntigravity(req, res, route, body, { anthropicError, sink = null } = {}) {
+  // With a sink there is no response object; report by throwing so the caller can shape it.
+  const fail = (status, type, message) => {
+    if (sink) { const e = new Error(message); e.status = status; e.type = type; throw e; }
+    return anthropicError(res, status, type, message);
+  };
   const creds = loadCredentials();
   if (!creds || !creds.access_token) {
-    return anthropicError(res, 401, "authentication_error", "Antigravity is not logged in on this device - run: modelmesh antigravity login");
+    return fail(401, "authentication_error", "Antigravity is not logged in on this device - run: modelmesh antigravity login");
   }
   let token = creds.access_token;
-  try { token = await ensureAccessToken(creds); } catch (e) { return anthropicError(res, 401, "authentication_error", e.message); }
+  try { token = await ensureAccessToken(creds); } catch (e) { return fail(401, "authentication_error", e.message); }
   const envelope = anthropicToGemini(body, upstreamModel(route.model), creds);
   if (process.env.MODELMESH_ANTIGRAVITY_DEBUG === "1") {
     try {
@@ -303,7 +311,7 @@ export async function proxyAntigravity(req, res, route, body, { anthropicError }
   if (blockedUntil) {
     const wait = Math.max(1, Math.round((blockedUntil - Date.now()) / 1000));
     try { res.setHeader("retry-after", String(wait)); } catch (e) { }
-    return anthropicError(res, 429, "rate_limit_error",
+    return fail(429, "rate_limit_error",
       "Antigravity refused this exact request moments ago; modelmesh is not resending it (retry in " + wait + "s, or use /model)");
   }
   const sendUpstream = async (accessToken, url) => fetch(url, {
@@ -314,7 +322,7 @@ export async function proxyAntigravity(req, res, route, body, { anthropicError }
   });
   let upstream;
   try { upstream = await sendUpstream(token, GENERATE_URLS[0]); }
-  catch (e) { return anthropicError(res, 502, "api_error", "Antigravity request failed: " + e.message); }
+  catch (e) { return fail(502, "api_error", "Antigravity request failed: " + e.message); }
   if ((upstream.status === 401 || upstream.status === 403) && creds.refresh_token) {
     try {
       token = await ensureAccessToken(loadCredentials(), { force: true });
@@ -363,7 +371,7 @@ export async function proxyAntigravity(req, res, route, body, { anthropicError }
     const type = upstream.status === 401 ? "authentication_error" : upstream.status === 429 ? "rate_limit_error" : "api_error";
     try { if (upstream.status === 429) res.setHeader("retry-after", "10"); } catch (e) { }
     const suffix = upstream.status === 429 ? " (Antigravity temporarily rate-limited; usage may still be available - retry shortly or switch model with /model)" : "";
-    return anthropicError(res, upstream.status, type, "Antigravity upstream " + upstream.status + ": " + msg + suffix);
+    return fail(upstream.status, type, "Antigravity upstream " + upstream.status + ": " + msg + suffix);
   }
   const reader = upstream.body.getReader();
   const dec = new TextDecoder();
@@ -372,10 +380,14 @@ export async function proxyAntigravity(req, res, route, body, { anthropicError }
   let usage = { input: 0, output: 0 }, sawContent = false;
   const wantStream = body.stream !== false;
   const collected = { text: "", tools: [] };
-  const sse = (event, data) => { if (wantStream) res.write("event: " + event + "\ndata: " + JSON.stringify(data) + "\n\n"); };
+  const sse = (event, data) => {
+    if (sink) { sink(event, data); return; }
+    if (wantStream) res.write("event: " + event + "\ndata: " + JSON.stringify(data) + "\n\n");
+  };
   const start = () => {
     if (started) return;
     started = true;
+    if (sink) return;
     if (!wantStream) return;
     res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
     res.flushHeaders();

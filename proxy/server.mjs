@@ -389,9 +389,7 @@ async function proxyOpenAIInbound(req, res, body) {
   if (!CONFIG.active || !hasProviders) return fail(400, 'no provider configured on this machine - run: modelmesh setup');
   let route;
   try { route = pickRoute(anthropicBody.model); } catch (e) { return fail(400, e.message); }
-  if (route.provider.type === 'antigravity') {
-    return fail(501, 'this endpoint does not serve an Antigravity provider yet; use Claude Code for it, or switch with: modelmesh provider', 'not_implemented_error');
-  }
+  // Antigravity emits the same Anthropic events, so the sink collects them here.
   LOG('REQ openai', route.name, '->', route.model, 'stream=' + !!body.stream, 'tools=' + ((anthropicBody.tools || []).length));
   const parts = [];
   let stopReason = null;
@@ -410,7 +408,12 @@ async function proxyOpenAIInbound(req, res, body) {
     }
   };
   try {
-    await runUpstream(route, { ...anthropicBody, stream: true }, onEvent);
+    if (route.provider.type === 'antigravity') {
+      // Reuse the native handler with a sink instead of an HTTP response.
+      await proxyAntigravity(null, null, route, { ...anthropicBody, stream: true }, { sink: onEvent });
+    } else {
+      await runUpstream(route, { ...anthropicBody, stream: true }, onEvent);
+    }
   } catch (e) {
     return fail(e.status || 502, e.message || String(e), e.type || 'api_error');
   }

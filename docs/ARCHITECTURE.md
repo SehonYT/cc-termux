@@ -291,9 +291,9 @@ The MCP server and the skills directory are printed as filesystem paths, since a
 reads them directly rather than over the network. The gateway token is generated once and
 kept in the config.
 
-An Antigravity provider is not served on the OpenAI surface yet: its stream is produced
-inside its own HTTP handler, which this endpoint cannot reuse. It answers 501 with that
-explanation rather than failing obscurely.
+An Antigravity provider is served on both surfaces. Its stream logic takes an optional event
+sink: the HTTP handler leaves it out and the events go to the response as SSE, while the
+OpenAI endpoint passes a sink and collects them. One implementation, two shapes.
 
 ### Provider chain
 

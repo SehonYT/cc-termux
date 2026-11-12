@@ -79,6 +79,20 @@ test("the short provider/model form routes to its provider", () => {
   assert.match(pick, /endsWith\("\/" \+ wants\)/, "a model id containing slashes still resolves");
 });
 
+test("an Antigravity provider is served on the OpenAI surface too", () => {
+  // Its stream logic used to be locked inside its own HTTP handler, so this endpoint could
+  // only answer 501. It now takes an event sink, and the OpenAI path passes one.
+  const ag = fs.readFileSync(path.join(root, "proxy", "antigravity.mjs"), "utf8");
+  assert.match(ag, /export async function proxyAntigravity\(req, res, route, body, \{ anthropicError, sink = null \}/, "the handler accepts a sink");
+  assert.match(ag, /if \(sink\) \{ sink\(event, data\); return; \}/, "the sink receives the events");
+  // With a sink there is no response to write to, so failures must throw.
+  assert.match(ag, /const fail = \(status, type, message\) =>/, "there is a failure shim");
+  assert.match(ag, /if \(sink\) \{ const e = new Error\(message\); e\.status = status/, "which throws when there is no response");
+  assert.ok(!/anthropicError\(res, 401/.test(ag), "no failure path writes to a null response");
+  assert.match(server, /proxyAntigravity\(null, null, route, \{ \.\.\.anthropicBody, stream: true \}, \{ sink: onEvent \}\)/, "the OpenAI path uses it");
+  assert.ok(!/not_implemented_error/.test(server), "the 501 fallback is gone");
+});
+
 test("start prints a block another tool can use", async () => {
   const mod = await import("../bin/cc-start.mjs");
   const text = mod.startInstructions({ port: 9999, token: "tok_demo" });
