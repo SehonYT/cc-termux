@@ -5,6 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import crypto from "node:crypto";
+import { fileURLToPath } from "node:url";
 import { installRoot, atomicWrite } from "./cc-paths.mjs";
 
 // Resolve the install root the same way the rest of modelmesh does, so a custom
@@ -107,6 +108,62 @@ function ensureBackup(buf) {
   writeBackup(buf);
 }
 
+// Read the ELF interpreter path this binary was built with. Returns null when it is not an
+// ELF or the program header cannot be found, so a lookalike file is left alone.
+export function elfInterpreter(buf) {
+  try {
+    if (buf.length < 64 || buf[0] !== 0x7f || buf[1] !== 0x45 || buf[2] !== 0x4c || buf[3] !== 0x46) return null;
+    const is64 = buf[4] === 2;
+    const little = buf[5] === 1;
+    if (!is64) return null;
+    const read = (off) => (little ? buf.readBigUInt64LE(off) : buf.readBigUInt64BE(off));
+    const phoff = Number(read(0x20));
+    const phentsize = buf.readUInt16LE(0x36);
+    const phnum = buf.readUInt16LE(0x38);
+    for (let i = 0; i < phnum; i++) {
+      const base = phoff + i * phentsize;
+      if (base + 4 > buf.length) break;
+      if (buf.readUInt32LE(base) !== 3) continue; // PT_INTERP
+      const off = Number(read(base + 8));
+      const size = Number(read(base + 32));
+      const end = buf.indexOf(0, off);
+      const stop = end > 0 && end < off + size ? end : off + size;
+      return buf.subarray(off, stop).toString("utf8");
+    }
+    return null;
+  } catch (e) { return null; }
+}
+
+// True when the binary asks for a loader path that no longer exists, which is what a moved
+// install root or a project rename leaves behind.
+export function staleInterpreter() {
+  try {
+    const buf = fs.readFileSync(BIN);
+    const interp = elfInterpreter(buf);
+    if (!interp) return null;
+    if (fs.existsSync(interp)) return null;
+    const want = path.join(ROOT, "lib", path.basename(interp));
+    return fs.existsSync(want) ? { was: interp, want } : null;
+  } catch (e) { return null; }
+}
+
+// Repoint the interpreter with patchelf. Without it the binary cannot be exec'd directly,
+// so the launcher falls back to loader mode, which is slower and limits self-relaunch.
+export function fixInterpreter() {
+  const stale = staleInterpreter();
+  if (!stale) return null;
+  const has = spawnSync("patchelf", ["--version"], { stdio: "ignore" }).status === 0;
+  if (!has) {
+    try { spawnSync("pkg", ["install", "-y", "patchelf"], { stdio: "ignore" }); } catch (e) { }
+  }
+  const ok = spawnSync("patchelf", ["--version"], { stdio: "ignore" }).status === 0;
+  if (!ok) return { ...stale, fixed: false, reason: "patchelf is not installed" };
+  const r = spawnSync("patchelf", ["--set-interpreter", stale.want, BIN], { stdio: "ignore" });
+  if (r.status !== 0) return { ...stale, fixed: false, reason: "patchelf failed" };
+  try { fs.writeFileSync(path.join(ROOT, ".direct-exec"), ""); } catch (e) { }
+  return { ...stale, fixed: true };
+}
+
 function writeStamp(applied, skipped) {
   try {
     fs.writeFileSync(PATCH_STAMP, JSON.stringify({ at: new Date().toISOString(), applied, skipped }, null, 2) + "\n", { mode: 0o600 });
@@ -114,6 +171,11 @@ function writeStamp(applied, skipped) {
 }
 
 function apply() {
+  // A moved install root breaks the interpreter before any content patch matters.
+  try {
+    const fixed = fixInterpreter();
+    if (fixed) console.log(fixed.fixed ? "cc-patch: interpreter repointed " + fixed.was + " -> " + fixed.want : "cc-patch: interpreter still stale (" + fixed.reason + ")");
+  } catch (e) { }
   let buf;
   try { buf = fs.readFileSync(BIN); } catch (e) { console.error("cc-patch: binary not found: " + BIN); process.exit(1); }
   const original = Buffer.from(buf);
@@ -175,8 +237,12 @@ function revert() {
   } catch (e) { console.error("cc-patch: revert failed: " + e.message); process.exit(1); }
 }
 
+// Run only as a CLI. Importing this module must have no side effects: a test that imported
+// it used to apply patches and call process.exit, killing the test runner.
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
 const cmd = process.argv[2] || "--apply";
 if (cmd === "--apply") process.exit(apply());
 else if (cmd === "--status" || cmd === "--check") status();
 else if (cmd === "--revert") revert();
 else console.log("usage: cc-patch [--apply|--status|--revert]");
+}
