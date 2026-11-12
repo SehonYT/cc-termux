@@ -19,6 +19,9 @@ jobs:
             node: 18
           - os: macos-13
             node: 20
+    # Intel runners are scarce and can sit queued for hours. One starved job must not hold
+    # the whole run open, so this leg is advisory while the others report normally.
+    continue-on-error: ${{ matrix.os == 'macos-13' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
