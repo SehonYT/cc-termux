@@ -24,8 +24,8 @@ function sandbox() {
   set("HOME", home);
   set("USERPROFILE", home);
   set("CLAUDE_CONFIG_DIR", claude);
-  set("CC_TERMUX_ROOT", path.join(home, ".local", "share", "cc-termux"));
-  set("CC_TERMUX_CONFIG", path.join(home, ".config", "cc-termux", "config.json"));
+  set("MODELMESH_ROOT", path.join(home, ".local", "share", "modelmesh"));
+  set("MODELMESH_CONFIG", path.join(home, ".config", "modelmesh", "config.json"));
   return {
     tmp, home, claude, bin,
     cleanup() {
@@ -54,7 +54,7 @@ test("the removal plan separates what it owns from what it shares", () => {
   } finally { box.cleanup(); }
 });
 
-test("restoring Claude Code removes only what cc-termux added", () => {
+test("restoring Claude Code removes only what modelmesh added", () => {
   const box = sandbox();
   try {
     const settings = path.join(box.claude, "settings.json");
@@ -112,7 +112,7 @@ test("a missing or corrupt settings file is not a crash", () => {
   } finally { box.cleanup(); }
 });
 
-test("only a cc-termux shim is replaced by the official launcher", () => {
+test("only a modelmesh shim is replaced by the official launcher", () => {
   const box = sandbox();
   try {
     // The shim name and directory are platform-dependent (claude.cmd on Windows), so use
@@ -126,11 +126,11 @@ test("only a cc-termux shim is replaced by the official launcher", () => {
     fs.writeFileSync(shim, "#!/bin/sh\nexec /usr/bin/claude \"$@\"\n", { mode: 0o755 });
     let r = uninstaller.restoreLauncher();
     assert.equal(r.restored, false);
-    assert.match(r.reason, /not a cc-termux shim/);
+    assert.match(r.reason, /not a modelmesh shim/);
     assert.match(fs.readFileSync(shim, "utf8"), /\/usr\/bin\/claude/);
 
     // Our shim is replaced by the backup.
-    fs.writeFileSync(shim, "#!/bin/sh\nexec node \"\$HOME/.local/share/cc-termux/bin/cc-launcher.mjs\" \"$@\"\n");
+    fs.writeFileSync(shim, "#!/bin/sh\nexec node \"\$HOME/.local/share/modelmesh/bin/cc-launcher.mjs\" \"$@\"\n");
     r = uninstaller.restoreLauncher();
     assert.equal(r.restored, true);
     assert.match(fs.readFileSync(shim, "utf8"), /\/usr\/bin\/claude/, "the original is back");
@@ -142,7 +142,7 @@ test("the skill pack leaves a skill the user edited", async () => {
   const box = sandbox();
   try {
     const skills = await import("../bin/cc-skills.mjs");
-    process.env.CC_TERMUX_ROOT = root;
+    process.env.MODELMESH_ROOT = root;
     await skills.installSkills();
     const target = skills.skillsTarget();
     const mine = path.join(target, "my-own");
@@ -189,7 +189,7 @@ test("the shim name and location follow the platform, including Windows", () => 
 });
 
 test("the CLI exposes uninstall and the plan is safe by default", () => {
-  const cli = fs.readFileSync(path.join(root, "bin", "cc-termux"), "utf8");
+  const cli = fs.readFileSync(path.join(root, "bin", "modelmesh"), "utf8");
   assert.match(cli, /case "uninstall": \{/);
   assert.match(cli, /cc-uninstall\.mjs/);
   const src = fs.readFileSync(path.join(root, "bin", "cc-uninstall.mjs"), "utf8");

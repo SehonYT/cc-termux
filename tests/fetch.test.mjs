@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import http from "node:http";
 
 // The fetch path refuses private addresses unless this is set; the suite serves local pages.
-process.env.CC_TERMUX_WEB_ALLOW_PRIVATE = "1";
+process.env.MODELMESH_WEB_ALLOW_PRIVATE = "1";
 const mcp = await import("../bin/cc-mcp.mjs?fetch-suite");
 
 const ARTICLE = [

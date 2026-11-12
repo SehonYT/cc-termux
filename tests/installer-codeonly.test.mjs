@@ -11,7 +11,7 @@ const installer = path.join(repo, "install.mjs");
 const isWin = process.platform === "win32";
 
 // Sandbox with an isolated HOME/USERPROFILE, APPDATA and LOCALAPPDATA, so the installer
-// never touches the developer's real cc-termux install.
+// never touches the developer's real modelmesh install.
 function sandbox(label) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), label));
   const home = path.join(tmp, "home");
@@ -29,14 +29,14 @@ function sandbox(label) {
 // APPDATA/LOCALAPPDATA do the same for Windows .cmd shims.
 function envFor(s, extra = {}) {
   const env = { ...process.env };
-  for (const k of ["CC_TERMUX_ROOT", "CC_TERMUX_CONFIG", "CC_TERMUX_CACHE", "CC_TERMUX_NO_PROMPT", "CC_TERMUX_NO_TUNE", "CC_TERMUX_COMMIT_SHA", "CC_TERMUX_COMMIT_DATE"]) delete env[k];
+  for (const k of ["MODELMESH_ROOT", "MODELMESH_CONFIG", "MODELMESH_CACHE", "MODELMESH_NO_PROMPT", "MODELMESH_NO_TUNE", "MODELMESH_COMMIT_SHA", "MODELMESH_COMMIT_DATE"]) delete env[k];
   env.HOME = s.home;
   env.USERPROFILE = s.home;
   env.APPDATA = s.appData;
   env.LOCALAPPDATA = s.localAppData;
   env.PREFIX = path.join(s.work, "prefix");
-  env.CC_TERMUX_NO_BANNER = "1";
-  env.CC_TERMUX_NO_PROMPT = "1";
+  env.MODELMESH_NO_BANNER = "1";
+  env.MODELMESH_NO_PROMPT = "1";
   return { ...env, ...extra };
 }
 
@@ -45,13 +45,13 @@ function run(args, env, opts = {}) {
 }
 
 function nativeRoot() {
-  return isWin ? path.join("__LOCALAPPDATA__", "cc-termux") : path.join("__HOME__", ".local", "share", "cc-termux");
+  return isWin ? path.join("__LOCALAPPDATA__", "modelmesh") : path.join("__HOME__", ".local", "share", "modelmesh");
 }
 function resolveInSandbox(s, rel) {
   return rel.replace("__HOME__", s.home).replace("__LOCALAPPDATA__", s.localAppData);
 }
 function configPath(s) {
-  return isWin ? path.join(s.appData, "cc-termux", "config.json") : path.join(s.home, ".config", "cc-termux", "config.json");
+  return isWin ? path.join(s.appData, "modelmesh", "config.json") : path.join(s.home, ".config", "modelmesh", "config.json");
 }
 function claudeShim(s) {
   return isWin ? path.join(s.appData, "npm", "claude.cmd") : path.join(s.home, ".local", "bin", "claude");
@@ -92,16 +92,16 @@ test("installer --code-only really installs assets, config and shims (per-OS lay
     assert.ok(fs.existsSync(shim), "missing claude shim at " + shim);
     assert.match(fs.readFileSync(shim, "utf8"), /cc-launcher\.mjs/);
     if (!isWin) {
-      assert.ok(fs.existsSync(path.join(s.work, "prefix", "bin", "cc-termux")), "cc-termux shim in isolated prefix");
-      assert.ok(fs.existsSync(path.join(s.work, "prefix", "bin", "ccp")), "ccp shim in isolated prefix");
+      assert.ok(fs.existsSync(path.join(s.work, "prefix", "bin", "modelmesh")), "modelmesh shim in isolated prefix");
+      assert.ok(fs.existsSync(path.join(s.work, "prefix", "bin", "mm")), "mm shim in isolated prefix");
     } else {
       // Windows layout also includes the new cache directory.
-      assert.ok(fs.existsSync(path.join(s.localAppData, "cc-termux", "cache")), "Windows cache dir must be created");
-      assert.ok(fs.existsSync(path.join(s.appData, "npm", "cc-termux.cmd")), "cc-termux .cmd shim");
+      assert.ok(fs.existsSync(path.join(s.localAppData, "modelmesh", "cache")), "Windows cache dir must be created");
+      assert.ok(fs.existsSync(path.join(s.appData, "npm", "modelmesh.cmd")), "modelmesh .cmd shim");
     }
 
     // The installed CLI is usable.
-    const cli = run([path.join(root, "bin", "cc-termux"), "path"], envFor(s, { CC_TERMUX_ROOT: root }));
+    const cli = run([path.join(root, "bin", "modelmesh"), "path"], envFor(s, { MODELMESH_ROOT: root }));
     assert.equal(cli.status, 0, cli.stderr || cli.stdout);
     assert.ok(cli.stdout.includes(root), "the CLI must resolve the same install root: " + cli.stdout);
   } finally {
@@ -115,7 +115,7 @@ test("installer --check prints the resolver paths and honours env overrides", ()
   const cfg = path.join(s.work, "custom-config", "config.json");
   const cache = path.join(s.work, "custom-cache");
   try {
-    const r = run([installer, "--check"], envFor(s, { CC_TERMUX_ROOT: root, CC_TERMUX_CONFIG: cfg, CC_TERMUX_CACHE: cache }));
+    const r = run([installer, "--check"], envFor(s, { MODELMESH_ROOT: root, MODELMESH_CONFIG: cfg, MODELMESH_CACHE: cache }));
     assert.equal(r.status, 0, r.stderr || r.stdout);
     assert.ok(r.stdout.includes("root     : " + root), r.stdout);
     assert.ok(r.stdout.includes("config   : " + cfg), r.stdout);
@@ -141,7 +141,7 @@ function resolverProbe(s, extraEnv = {}) {
     "",
   ].join("\n"));
   const env = { ...process.env };
-  for (const k of ["CC_TERMUX_ROOT", "CC_TERMUX_CONFIG", "CC_TERMUX_CACHE", "CLAUDE_CONFIG_DIR"]) delete env[k];
+  for (const k of ["MODELMESH_ROOT", "MODELMESH_CONFIG", "MODELMESH_CACHE", "CLAUDE_CONFIG_DIR"]) delete env[k];
   env.HOME = s.home;
   env.USERPROFILE = s.home;
   env.LOCALAPPDATA = s.localAppData;
@@ -159,27 +159,27 @@ test("windows layout: LOCALAPPDATA/APPDATA defaults, legacy fallback and env ove
     const roaming = s.appData;
     let out = resolverProbe(s);
     assert.equal(out.windows, true);
-    assert.equal(out.root, path.join(local, "cc-termux"));
-    assert.equal(out.config, path.join(roaming, "cc-termux", "config.json"));
-    assert.equal(out.cache, path.join(local, "cc-termux", "cache"));
+    assert.equal(out.root, path.join(local, "modelmesh"));
+    assert.equal(out.config, path.join(roaming, "modelmesh", "config.json"));
+    assert.equal(out.cache, path.join(local, "modelmesh", "cache"));
     assert.equal(out.claude, path.join(s.home, ".claude"), "Claude's own config is never relocated");
 
-    // An existing legacy install (~/.local/share/cc-termux) keeps winning until the new
+    // An existing legacy install (~/.local/share/modelmesh) keeps winning until the new
     // location exists, so upgrades from the old Windows layout keep working.
-    fs.mkdirSync(path.join(s.home, ".local", "share", "cc-termux"), { recursive: true });
-    fs.mkdirSync(path.join(s.home, ".config", "cc-termux"), { recursive: true });
-    fs.writeFileSync(path.join(s.home, ".config", "cc-termux", "config.json"), "{}");
-    fs.mkdirSync(path.join(s.home, ".cache", "cc-termux"), { recursive: true });
+    fs.mkdirSync(path.join(s.home, ".local", "share", "modelmesh"), { recursive: true });
+    fs.mkdirSync(path.join(s.home, ".config", "modelmesh"), { recursive: true });
+    fs.writeFileSync(path.join(s.home, ".config", "modelmesh", "config.json"), "{}");
+    fs.mkdirSync(path.join(s.home, ".cache", "modelmesh"), { recursive: true });
     out = resolverProbe(s);
-    assert.equal(out.root, path.join(s.home, ".local", "share", "cc-termux"));
-    assert.equal(out.config, path.join(s.home, ".config", "cc-termux", "config.json"));
-    assert.equal(out.cache, path.join(s.home, ".cache", "cc-termux"));
+    assert.equal(out.root, path.join(s.home, ".local", "share", "modelmesh"));
+    assert.equal(out.config, path.join(s.home, ".config", "modelmesh", "config.json"));
+    assert.equal(out.cache, path.join(s.home, ".cache", "modelmesh"));
 
     // Explicit env overrides always beat both layouts.
     out = resolverProbe(s, {
-      CC_TERMUX_ROOT: path.join(s.work, "r"),
-      CC_TERMUX_CONFIG: path.join(s.work, "c", "config.json"),
-      CC_TERMUX_CACHE: path.join(s.work, "k"),
+      MODELMESH_ROOT: path.join(s.work, "r"),
+      MODELMESH_CONFIG: path.join(s.work, "c", "config.json"),
+      MODELMESH_CACHE: path.join(s.work, "k"),
       CLAUDE_CONFIG_DIR: path.join(s.work, "claude"),
     });
     assert.equal(out.root, path.join(s.work, "r"));

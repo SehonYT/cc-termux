@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const MARKER = "# cc-termux find shim";
+export const MARKER = "# modelmesh find shim";
 const REPLACEMENT = MARKER + " (embedded bfs exits with SIGSYS on Android)\n" +
   'function find { command find ${1+"$@"}; }\n';
 
@@ -49,7 +49,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const dir = snapshotDir();
   patchAll(dir);
   if (!process.argv.includes("--once")) {
-    const until = Date.now() + Number(process.env.CC_TERMUX_SHIM_WATCH_MS || 180000);
+    const until = Date.now() + Number(process.env.MODELMESH_SHIM_WATCH_MS || 180000);
     // Keep the event loop alive (do NOT unref): this process must outlive the first
     // snapshot Claude Code writes, a few hundred milliseconds after it starts.
     const timer = setInterval(() => {

@@ -11,11 +11,11 @@ import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const repo = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
-const CLI = path.join(repo, "bin", "cc-termux");
+const CLI = path.join(repo, "bin", "modelmesh");
 const MCP = path.join(repo, "bin", "cc-mcp.mjs");
 const STATUSLINE = path.join(repo, "bin", "cc-statusline.mjs");
 
-const BAD_OUTPUT = /TypeError|ReferenceError|UnhandledPromiseRejection|at .*\.mjs:\d+|at .*bin\/cc-termux:\d+/;
+const BAD_OUTPUT = /TypeError|ReferenceError|UnhandledPromiseRejection|at .*\.mjs:\d+|at .*bin\/modelmesh:\d+/;
 
 const liveProvider = {
   type: "openai",
@@ -34,9 +34,9 @@ function baseEnv(home) {
     ...process.env,
     HOME: home,
     USERPROFILE: home,
-    CC_TERMUX_ROOT: repo,
-    CC_TERMUX_CONFIG: path.join(home, "config.json"),
-    CC_TERMUX_CACHE: path.join(home, "cache"),
+    MODELMESH_ROOT: repo,
+    MODELMESH_CONFIG: path.join(home, "config.json"),
+    MODELMESH_CACHE: path.join(home, "cache"),
     CLAUDE_CONFIG_DIR: path.join(home, ".claude"),
   };
 }
@@ -172,7 +172,7 @@ test("key usage and unknown-provider errors are clean", async () => {
     writeConfig(home, { active: "live", providers: { live: liveProvider }, routing: {} });
     const noArgs = runCli(home, ["key"]);
     assertClean(noArgs, 1, "key without args");
-    assert.match(noArgs.output, /usage: cc-termux key/);
+    assert.match(noArgs.output, /usage: modelmesh key/);
     const unknown = runCli(home, ["key", "nope", "sk-x"]);
     assertClean(unknown, 1, "key unknown provider");
     assert.match(unknown.output, /unknown provider: nope/);
@@ -255,23 +255,23 @@ test("provider list with zero providers is friendly", async () => {
     const r = runCli(home, ["provider", "list"]);
     assertClean(r, 0, "provider list");
     assert.match(r.stdout, /no providers configured/i);
-    assert.match(r.stdout, /cc-termux setup/);
+    assert.match(r.stdout, /modelmesh setup/);
   });
 });
 
 // ---------------------------------------------------------------------------
 // MCP server: protocol + SSRF guards (imported directly)
 // ---------------------------------------------------------------------------
-// Two module instances: the first sees CC_TERMUX_WEB_ALLOW_PRIVATE unset (SSRF live).
-delete process.env.CC_TERMUX_WEB_ALLOW_PRIVATE;
-delete process.env.CC_TERMUX_WEB_TIMEOUT_MS;
+// Two module instances: the first sees MODELMESH_WEB_ALLOW_PRIVATE unset (SSRF live).
+delete process.env.MODELMESH_WEB_ALLOW_PRIVATE;
+delete process.env.MODELMESH_WEB_TIMEOUT_MS;
 const mcpUrl = pathToFileURL(MCP).href;
 const mcpBlocked = await import(mcpUrl + "?edge=blocked");
-process.env.CC_TERMUX_WEB_ALLOW_PRIVATE = "1";
-process.env.CC_TERMUX_WEB_TIMEOUT_MS = "800";
+process.env.MODELMESH_WEB_ALLOW_PRIVATE = "1";
+process.env.MODELMESH_WEB_TIMEOUT_MS = "800";
 const mcpLocal = await import(mcpUrl + "?edge=local");
-delete process.env.CC_TERMUX_WEB_ALLOW_PRIVATE;
-delete process.env.CC_TERMUX_WEB_TIMEOUT_MS;
+delete process.env.MODELMESH_WEB_ALLOW_PRIVATE;
+delete process.env.MODELMESH_WEB_TIMEOUT_MS;
 
 function startServer(handler) {
   return new Promise((resolve, reject) => {
@@ -294,7 +294,7 @@ test("MCP rejects non-http(s) URL schemes", () => {
   assert.throws(() => mcpBlocked.validateUrl("not a url"), /invalid URL/i);
 });
 
-test("MCP blocks private/loopback/metadata addresses unless CC_TERMUX_WEB_ALLOW_PRIVATE is set", async () => {
+test("MCP blocks private/loopback/metadata addresses unless MODELMESH_WEB_ALLOW_PRIVATE is set", async () => {
   for (const url of [
     "http://127.0.0.1:1/",
     "http://localhost:1/",

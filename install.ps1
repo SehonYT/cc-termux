@@ -1,4 +1,4 @@
-# cc-termux installer for Windows
+# modelmesh installer for Windows
 $ErrorActionPreference = "Stop"
 
 function Ensure-Node {
@@ -9,7 +9,7 @@ function Ensure-Node {
   }
   $arch = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "x64" }
   $ver = if ($env:CC_NODE_VERSION) { $env:CC_NODE_VERSION } else { "v22.14.0" }
-  $dir = Join-Path $HOME ".local\share\cc-termux\runtime"
+  $dir = Join-Path $HOME ".local\share\modelmesh\runtime"
   $cachedNode = Join-Path $dir "node-$ver-win-$arch\node.exe"
   if (Test-Path $cachedNode) {
     try { $cv = [int]((& $cachedNode -p "process.versions.node.split('.')[0]")); if ($cv -ge 18) { return $cachedNode } } catch { }
@@ -17,7 +17,7 @@ function Ensure-Node {
   New-Item -ItemType Directory -Path $dir -Force | Out-Null
   $zip = Join-Path $env:TEMP ("node-" + [guid]::NewGuid().ToString("N") + ".zip")
   $url = "https://nodejs.org/dist/$ver/node-$ver-win-$arch.zip"
-  Write-Host "cc-termux: downloading Node.js from $url" -ForegroundColor Cyan
+  Write-Host "modelmesh: downloading Node.js from $url" -ForegroundColor Cyan
   Invoke-WebRequest $url -OutFile $zip -UseBasicParsing -TimeoutSec 600
   Expand-Archive -Path $zip -DestinationPath $dir -Force
   Remove-Item $zip -Force

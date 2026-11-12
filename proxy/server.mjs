@@ -24,10 +24,10 @@ import { configFile, configDir, cacheDir } from "../bin/cc-paths.mjs";
 
 const CONFIG_PATH = configFile();
 const LOG = (...a) => {
-  if (process.env.CC_TERMUX_QUIET) return;
+  if (process.env.MODELMESH_QUIET) return;
   const line = new Date().toISOString() + " " + a.join(" ");
   console.error(line);
-  if (process.env.CC_TERMUX_MANAGED === '1') return; // stderr is already redirected to gateway.log by the launcher
+  if (process.env.MODELMESH_MANAGED === '1') return; // stderr is already redirected to gateway.log by the launcher
   try {
     const gwLog = path.join(cacheDir(), "gateway.log");
     fs.mkdirSync(path.dirname(gwLog), { recursive: true, mode: 0o700 });
@@ -48,7 +48,7 @@ for (const [n, p] of Object.entries(CONFIG.providers || {})) { p.name = p.name |
 const CONFIG_DIR = configDir();
 const CACHE_DIR = cacheDir();
 const KEYS_PATH = path.join(CONFIG_DIR, 'keys.json');
-const GATEWAY_TOKEN = process.env.CC_TERMUX_GATEWAY_TOKEN || (CONFIG.gatewayToken || 'cc-termux-local');
+const GATEWAY_TOKEN = process.env.MODELMESH_GATEWAY_TOKEN || (CONFIG.gatewayToken || 'modelmesh-local');
 const QUOTA_PATH = path.join(CACHE_DIR, 'quota.json');
 const ERRORS_PATH = path.join(CACHE_DIR, 'errors.log');
 function redact(text) {
@@ -316,7 +316,7 @@ function isClassifierRequest(body) {
   return /<\/block>|<\/severity>/.test(stops);
 }
 function classifierAllow() {
-  const flag = process.env.CC_TERMUX_CLASSIFIER_ALLOW;
+  const flag = process.env.MODELMESH_CLASSIFIER_ALLOW;
   if (flag != null) return flag === '1' || flag === 'true';
   return Boolean(CONFIG.classifier && CONFIG.classifier.allow);
 }
@@ -594,7 +594,7 @@ const server = http.createServer(async (req, res) => {
       const shapeError = requestShapeError(body);
       if (shapeError) return anthropicError(res, 400, 'invalid_request_error', shapeError);
       const hasProviders = Object.keys(CONFIG.providers || {}).some((n) => !CONFIG.providers[n].hidden);
-      if (!CONFIG.active || !hasProviders) return anthropicError(res, 400, 'invalid_request_error', 'no provider configured on this machine - run: cc-termux setup');
+      if (!CONFIG.active || !hasProviders) return anthropicError(res, 400, 'invalid_request_error', 'no provider configured on this machine - run: modelmesh setup');
       let model = body.model || '';
       if (model.startsWith('provswitch/')) {
         const name = model.slice('provswitch/'.length);
@@ -611,7 +611,7 @@ const server = http.createServer(async (req, res) => {
       }
       // Auto mode's classifier is a /v1/messages call with a fixed system marker. Give it
       // a thinking-free turn, or answer locally when classifier.allow is enabled.
-      if (process.env.CC_TERMUX_DEBUG_BODIES === '1') {
+      if (process.env.MODELMESH_DEBUG_BODIES === '1') {
         try {
           const dir = path.join(CACHE_DIR, 'bodies');
           fs.mkdirSync(dir, { recursive: true });
@@ -646,7 +646,7 @@ const server = http.createServer(async (req, res) => {
 });
 
 const port = (CONFIG.listen && CONFIG.listen.port) || 8788;
-if (process.env.CC_TERMUX_MANAGED === '1') {
+if (process.env.MODELMESH_MANAGED === '1') {
   const SESS = path.join(CACHE_DIR, 'sessions');
   let idle = 0;
   setInterval(() => {
@@ -664,8 +664,8 @@ if (process.env.CC_TERMUX_MANAGED === '1') {
 }
 
 let listenHost = (CONFIG.listen && CONFIG.listen.host) || '127.0.0.1';
-if (!/^(127\.0\.0\.1|::1|localhost)$/.test(listenHost) && process.env.CC_TERMUX_ALLOW_REMOTE !== '1') {
-  LOG('refusing non-loopback listen host ' + listenHost + ' (set CC_TERMUX_ALLOW_REMOTE=1 to override)');
+if (!/^(127\.0\.0\.1|::1|localhost)$/.test(listenHost) && process.env.MODELMESH_ALLOW_REMOTE !== '1') {
+  LOG('refusing non-loopback listen host ' + listenHost + ' (set MODELMESH_ALLOW_REMOTE=1 to override)');
   listenHost = '127.0.0.1';
 }
 server.on('error', (e) => { LOG('gateway server error', e.code || e.message); process.exit(1); });
@@ -676,9 +676,9 @@ server.listen(port, listenHost, () => {
 // WebFetch's domain check, patched to this loopback helper so it answers can_fetch:true.
 // The port is fixed because the patch bakes it into an equal-length URL string.
 const DOMAIN_CHECK_PORT = 8799;
-const DOMAIN_CHECK_ENV = process.env.CC_TERMUX_DOMAIN_CHECK_PORT;
+const DOMAIN_CHECK_ENV = process.env.MODELMESH_DOMAIN_CHECK_PORT;
 if (DOMAIN_CHECK_ENV != null && DOMAIN_CHECK_ENV !== '' && Number(DOMAIN_CHECK_ENV) !== DOMAIN_CHECK_PORT) {
-  LOG('ignoring CC_TERMUX_DOMAIN_CHECK_PORT=' + DOMAIN_CHECK_ENV +
+  LOG('ignoring MODELMESH_DOMAIN_CHECK_PORT=' + DOMAIN_CHECK_ENV +
     ': the patched WebFetch URL is fixed to 127.0.0.1:' + DOMAIN_CHECK_PORT + ', overriding it would break WebFetch');
 }
 {
@@ -689,7 +689,7 @@ if (DOMAIN_CHECK_ENV != null && DOMAIN_CHECK_ENV !== '' && Number(DOMAIN_CHECK_E
     res.end(JSON.stringify({ can_fetch: true, domain }));
   });
   helper.on('error', (e) => {
-    // Another cc-termux gateway already owns the helper port: nothing to do.
+    // Another modelmesh gateway already owns the helper port: nothing to do.
     if (e.code !== 'EADDRINUSE') LOG('domain-check helper error', e.code || e.message);
   });
   helper.listen(DOMAIN_CHECK_PORT, '127.0.0.1', () => LOG('domain-check helper listening on', DOMAIN_CHECK_PORT));

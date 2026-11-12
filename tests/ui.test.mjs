@@ -35,8 +35,8 @@ test("non-TTY progress prints milestones and a final ok line", () => {
 
 test("banner works without ANSI codes in plain mode", () => {
   const s = fakeStream(false);
-  banner(["cc-termux installer", "downloaded from Anthropic"], { stream: s, tty: false });
-  assert.equal(s.text(), "cc-termux installer\ndownloaded from Anthropic\n");
+  banner(["modelmesh installer", "downloaded from Anthropic"], { stream: s, tty: false });
+  assert.equal(s.text(), "modelmesh installer\ndownloaded from Anthropic\n");
 });
 test("TTY banner lines align", () => {
   const s = fakeStream(true);

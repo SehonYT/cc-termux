@@ -59,7 +59,7 @@
           "contextTokens": 131072
         }
       ],
-      "notes": "Google account OAuth (Antigravity / Google One AI). Requires access to Antigravity; run cc-termux antigravity login"
+      "notes": "Google account OAuth (Antigravity / Google One AI). Requires access to Antigravity; run modelmesh antigravity login"
     },
     {
       "id": "groq",

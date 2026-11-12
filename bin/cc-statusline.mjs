@@ -91,7 +91,7 @@ export async function refreshStatusLine({ force = false, modelId = null, provide
   refreshInFlight = (async () => {
   const cfg = readJson(configPath());
   const model = activeModel(cfg, modelId, provider);
-  if (!model) { writeStatusLine("cc-termux"); return "cc-termux"; }
+  if (!model) { writeStatusLine("modelmesh"); return "modelmesh"; }
   if (model.type !== "antigravity") {
     const line = model.provider + " · " + model.name;
     if (readStatusLine() !== line) writeStatusLine(line);
@@ -121,13 +121,13 @@ export function installStatusLine() {
   const settingsFile = path.join(claudeDir(), "settings.json");
   const settings = readJson(settingsFile);
   const current = settings.statusLine;
-  const ours = current && typeof current.command === "string" && /cc-termux\s+statusline|antigravity-status\.txt/.test(current.command);
+  const ours = current && typeof current.command === "string" && /modelmesh\s+statusline|antigravity-status\.txt/.test(current.command);
   let installed = true;
   if (!current || ours) {
     // POSIX shells can cat the pre-rendered line in ~1ms; Windows falls back to the shim.
     const command = process.platform === "win32"
-      ? "cc-termux statusline --print"
-      : "sh -c 'f=\"${CC_TERMUX_CACHE:-$HOME/.cache/cc-termux}/antigravity-status.txt\"; cat \"$f\" 2>/dev/null || printf cc-termux'";
+      ? "modelmesh statusline --print"
+      : "sh -c 'f=\"${MODELMESH_CACHE:-$HOME/.cache/modelmesh}/antigravity-status.txt\"; cat \"$f\" 2>/dev/null || printf modelmesh'";
     settings.statusLine = { type: "command", command };
     installed = writeJson(settingsFile, settings);
   }
@@ -137,9 +137,9 @@ export function installStatusLine() {
     fs.writeFileSync(cmdFile, [
       "---",
       "description: Show Google Antigravity usage, quota windows and reset times",
-      "allowed-tools: Bash(cc-termux antigravity usage)",
+      "allowed-tools: Bash(modelmesh antigravity usage)",
       "---",
-      "!\`cc-termux antigravity usage\`",
+      "!\`modelmesh antigravity usage\`",
       "",
     ].join("\n"), { mode: 0o644 });
   } catch (e) { }
@@ -166,7 +166,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     else {
       const cfg = readJson(configPath());
       const m = activeModel(cfg);
-      console.log(m ? m.provider + " · " + m.name : "cc-termux");
+      console.log(m ? m.provider + " · " + m.name : "modelmesh");
     }
   }
 }

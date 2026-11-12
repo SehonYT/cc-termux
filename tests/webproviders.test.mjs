@@ -12,13 +12,13 @@ const antigravity = await import("../proxy/antigravity.mjs");
 // Every test that touches web.json gets its own config dir.
 function withConfig(cfg, fn) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cc-web-"));
-  const prev = process.env.CC_TERMUX_CONFIG;
-  process.env.CC_TERMUX_CONFIG = path.join(tmp, "config.json");
+  const prev = process.env.MODELMESH_CONFIG;
+  process.env.MODELMESH_CONFIG = path.join(tmp, "config.json");
   try {
     if (cfg) wp.writeWebConfig(cfg);
     return fn();
   } finally {
-    if (prev === undefined) delete process.env.CC_TERMUX_CONFIG; else process.env.CC_TERMUX_CONFIG = prev;
+    if (prev === undefined) delete process.env.MODELMESH_CONFIG; else process.env.MODELMESH_CONFIG = prev;
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 }
@@ -185,12 +185,12 @@ test("Antigravity uses Google Search grounding only when no tools are declared",
   assert.equal(withTools[0].functionDeclarations.length, 1);
   assert.deepEqual(req(tools).toolConfig, { functionCallingConfig: { mode: "VALIDATED" } });
 
-  process.env.CC_TERMUX_ANTIGRAVITY_SEARCH = "0";
+  process.env.MODELMESH_ANTIGRAVITY_SEARCH = "0";
   try {
     assert.equal(req(base).tools, undefined, "search can be turned off entirely");
     assert.equal(req(base).toolConfig, undefined);
     assert.equal(req(tools).tools[0].functionDeclarations.length, 1, "tool calling still works with search off");
-  } finally { delete process.env.CC_TERMUX_ANTIGRAVITY_SEARCH; }
+  } finally { delete process.env.MODELMESH_ANTIGRAVITY_SEARCH; }
 });
 
 test("an Antigravity request never sends both built-in and declared tools", () => {
@@ -323,9 +323,9 @@ test("the installer and setup both offer the web providers", () => {
 });
 
 test("the CLI exposes web status, key, clear and test", () => {
-  const cli = fs.readFileSync(path.join(root, "bin", "cc-termux"), "utf8");
+  const cli = fs.readFileSync(path.join(root, "bin", "modelmesh"), "utf8");
   assert.match(cli, /case "web": \{/);
-  assert.match(cli, /cc-termux web key <tavily\|brave\|jina> <key>/);
+  assert.match(cli, /modelmesh web key <tavily\|brave\|jina> <key>/);
   assert.match(cli, /if \(sub === "clear"\)/);
   assert.match(cli, /if \(sub === "test"\)/);
 });

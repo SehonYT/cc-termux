@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// Update checking and self-update for cc-termux itself, not the Claude Code binary.
-// Installed state: <root>/cc-termux.json; remote state: latest commit sha on main.
+// Update checking and self-update for modelmesh itself, not the Claude Code binary.
+// Installed state: <root>/modelmesh.json; remote state: latest commit sha on main.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -11,11 +11,11 @@ import { buildVersion, labelVersion } from "../scripts/version.mjs";
 import { installRoot } from "./cc-paths.mjs";
 import { createProgress, banner, step, info } from "./cc-ui.mjs";
 
-const DEFAULT_REPO = process.env.CC_TERMUX_REPO || "SehonYT/cc-termux";
+const DEFAULT_REPO = process.env.MODELMESH_REPO || "SehonYT/modelmesh";
 const DEFAULT_ROOT = installRoot();
 
 export function localInfo(root = DEFAULT_ROOT) {
-  try { return JSON.parse(fs.readFileSync(path.join(root, "cc-termux.json"), "utf8")); }
+  try { return JSON.parse(fs.readFileSync(path.join(root, "modelmesh.json"), "utf8")); }
   catch (e) { return { version: "0.0.0", sha: null }; }
 }
 
@@ -66,7 +66,7 @@ async function fetchTextRetry(url, opts = {}, fetchImpl = globalThis.fetch, atte
 }
 
 async function remoteInfo({ repo = DEFAULT_REPO, fetchImpl = fetch } = {}) {
-  const headers = { "user-agent": "cc-termux" };
+  const headers = { "user-agent": "modelmesh" };
   let sha = null;
   let version = null;
   let updatedAt = null;
@@ -163,8 +163,8 @@ export async function claudeCodeUpToDate({ root = DEFAULT_ROOT, fetchImpl = fetc
 }
 
 export async function selfUpdate({ root = DEFAULT_ROOT, repo = DEFAULT_REPO, archivePath = null, redownload = false, fetchImpl = fetch } = {}) {
-  if (!process.env.CC_TERMUX_NO_BANNER) {
-    banner(["cc-termux updater", "Code is fetched from GitHub; Claude Code itself is installed", "from Anthropic's official npm registry when a new version is needed."]);
+  if (!process.env.MODELMESH_NO_BANNER) {
+    banner(["modelmesh updater", "Code is fetched from GitHub; Claude Code itself is installed", "from Anthropic's official npm registry when a new version is needed."]);
   }
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cc-update-"));
   const tgz = path.join(tmp, "src.tgz");
@@ -194,7 +194,7 @@ export async function selfUpdate({ root = DEFAULT_ROOT, repo = DEFAULT_REPO, arc
       }
       if (!r || !r.ok) throw new Error("download failed");
       const total = Number(r.headers.get("content-length")) || 0;
-      const prog = createProgress("cc-termux source archive from GitHub", { stream: process.stderr });
+      const prog = createProgress("modelmesh source archive from GitHub", { stream: process.stderr });
       const chunks = [];
       let received = 0;
       for await (const chunk of r.body) { chunks.push(Buffer.from(chunk)); received += chunk.length; prog.update(received, total); }
@@ -218,15 +218,15 @@ export async function selfUpdate({ root = DEFAULT_ROOT, repo = DEFAULT_REPO, arc
         const state = await claudeCodeUpToDate({ root });
         codeOnly = state.upToDate;
         step("Claude Code " + (state.localVersion || "?") + " - " + state.reason);
-        if (codeOnly) info("Only cc-termux files and UI patches will be updated; the Claude Code binary stays as is.");
+        if (codeOnly) info("Only modelmesh files and UI patches will be updated; the Claude Code binary stays as is.");
         else info("A newer Claude Code will be downloaded from registry.npmjs.org.");
       } catch (e) { }
     }
     const args = [installer, "--root", root, "--no-setup"];
     if (codeOnly) args.push("--code-only");
-    const env = { ...process.env, CC_TERMUX_NO_BANNER: codeOnly ? "1" : "" };
-    if (targetSha) env.CC_TERMUX_COMMIT_SHA = targetSha;
-    if (typeof targetDate !== "undefined" && targetDate) env.CC_TERMUX_COMMIT_DATE = targetDate;
+    const env = { ...process.env, MODELMESH_NO_BANNER: codeOnly ? "1" : "" };
+    if (targetSha) env.MODELMESH_COMMIT_SHA = targetSha;
+    if (typeof targetDate !== "undefined" && targetDate) env.MODELMESH_COMMIT_DATE = targetDate;
     const res = spawnSync(process.execPath, args, { stdio: "inherit", env });
     if (res.status !== 0) throw new Error("installer exited with " + res.status);
     let sha = targetSha;
@@ -235,9 +235,9 @@ export async function selfUpdate({ root = DEFAULT_ROOT, repo = DEFAULT_REPO, arc
     const pkg = fs.existsSync(pkgPath) ? JSON.parse(fs.readFileSync(pkgPath, "utf8")) : { version: "unknown" };
     const stamp = { version: buildVersion(pkg.version, sha || ""), baseVersion: pkg.version, sha, installedAt: new Date().toISOString() };
     if (typeof targetDate !== "undefined" && targetDate) stamp.updatedAt = targetDate;
-    fs.writeFileSync(path.join(root, "cc-termux.json"), JSON.stringify(stamp, null, 2) + "\n");
+    fs.writeFileSync(path.join(root, "modelmesh.json"), JSON.stringify(stamp, null, 2) + "\n");
     try { fs.rmSync(path.join(root, "update-check.json"), { force: true }); } catch (e) { }
-    step("cc-termux updated to " + buildVersion(pkg.version, sha || "") + (codeOnly ? " (Claude Code binary kept)" : " (Claude Code binary reinstalled)"));
+    step("modelmesh updated to " + buildVersion(pkg.version, sha || "") + (codeOnly ? " (Claude Code binary kept)" : " (Claude Code binary reinstalled)"));
     return true;
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
@@ -250,11 +250,11 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const root = rootIdx > 0 ? process.argv[rootIdx + 1] : DEFAULT_ROOT;
   if (arg === "--check") {
     check({ root, cacheTtlMs: 0 }).then((r) => {
-      if (r.available) console.log("cc-termux update available: " + labelVersion(r.local.version, r.local.sha) + " -> " + labelVersion(r.remote.version, r.remote.sha) + "  (run: cc-termux update)");
-      else console.log("cc-termux is up to date (" + labelVersion(r.local.version, r.local.sha) + ")");
-    }).catch((e) => { console.error("cc-termux: update check failed: " + e.message); process.exit(1); });
+      if (r.available) console.log("modelmesh update available: " + labelVersion(r.local.version, r.local.sha) + " -> " + labelVersion(r.remote.version, r.remote.sha) + "  (run: modelmesh update)");
+      else console.log("modelmesh is up to date (" + labelVersion(r.local.version, r.local.sha) + ")");
+    }).catch((e) => { console.error("modelmesh: update check failed: " + e.message); process.exit(1); });
   } else if (arg === "--self-update") {
-    selfUpdate({ root, redownload: process.argv.includes("--redownload") }).catch((e) => { console.error("cc-termux: update failed: " + e.message); process.exit(1); });
+    selfUpdate({ root, redownload: process.argv.includes("--redownload") }).catch((e) => { console.error("modelmesh: update failed: " + e.message); process.exit(1); });
   } else {
     console.log("usage: cc-update [--check|--self-update]");
   }

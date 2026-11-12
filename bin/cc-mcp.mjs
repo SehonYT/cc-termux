@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// cc-termux web tools (stdio MCP server): Web Fetch and Web Search for Claude Code.
+// modelmesh web tools (stdio MCP server): Web Fetch and Web Search for Claude Code.
 // Every hop is SSRF-checked and pinned; fetched text is fenced as untrusted data.
 import fs from "node:fs";
 import http from "node:http";
@@ -26,11 +26,11 @@ import {
 } from "./cc-search.mjs";
 
 const VERSION = "2.1.0";
-const TIMEOUT_MS = Number(process.env.CC_TERMUX_WEB_TIMEOUT_MS || 20000);
-const MAX_BYTES = Number(process.env.CC_TERMUX_WEB_MAX_BYTES || 4_000_000);
+const TIMEOUT_MS = Number(process.env.MODELMESH_WEB_TIMEOUT_MS || 20000);
+const MAX_BYTES = Number(process.env.MODELMESH_WEB_MAX_BYTES || 4_000_000);
 const MAX_REDIRECTS = 5;
-const ALLOW_PRIVATE = process.env.CC_TERMUX_WEB_ALLOW_PRIVATE === "1";
-const READER_PROXY = process.env.CC_TERMUX_WEB_READER_PROXY === "1";
+const ALLOW_PRIVATE = process.env.MODELMESH_WEB_ALLOW_PRIVATE === "1";
+const READER_PROXY = process.env.MODELMESH_WEB_READER_PROXY === "1";
 
 const UAS = [
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
@@ -496,7 +496,7 @@ export async function webFetch(url, { maxChars = 15000, offset = 0 } = {}) {
       }
       if (isChallengePage(res.status, raw)) {
         throw new Error("blocked by a bot check/WAF at " + url +
-          " (HTTP " + res.status + "). The site requires a real browser, cookies or a challenge it will not issue to an automated client; try another source, or set CC_TERMUX_WEB_READER_PROXY=1 to read through r.jina.ai.");
+          " (HTTP " + res.status + "). The site requires a real browser, cookies or a challenge it will not issue to an automated client; try another source, or set MODELMESH_WEB_READER_PROXY=1 to read through r.jina.ai.");
       }
     }
   }
@@ -549,9 +549,9 @@ import { configFile } from "./cc-paths.mjs";
 // The local scrapers are the final link of the provider chain: remote APIs are tried
 // first when keys are configured, and this always exists as a fallback.
 async function localScrapers(query, maxResults) {
-  const searxUrl = process.env.CC_TERMUX_SEARX_URL || "";
-  const googleApi = process.env.CC_TERMUX_GOOGLE_KEY && process.env.CC_TERMUX_GOOGLE_CX
-    ? { key: process.env.CC_TERMUX_GOOGLE_KEY, cx: process.env.CC_TERMUX_GOOGLE_CX }
+  const searxUrl = process.env.MODELMESH_SEARX_URL || "";
+  const googleApi = process.env.MODELMESH_GOOGLE_KEY && process.env.MODELMESH_GOOGLE_CX
+    ? { key: process.env.MODELMESH_GOOGLE_KEY, cx: process.env.MODELMESH_GOOGLE_CX }
     : null;
   const outcome = await runSearchWeb(query, { maxResults, fetchPage, decodeBody, searxUrl, googleApi });
   if (outcome.results.length) outcome.results.forEach((r) => { r.provider = "local"; });
@@ -610,7 +610,7 @@ export async function webSearch(query, { maxResults = 8, engines } = {}) {
 }
 
 export async function readViaProxy(url) {
-  if (!READER_PROXY) throw new Error("reader proxy disabled (set CC_TERMUX_WEB_READER_PROXY=1)");
+  if (!READER_PROXY) throw new Error("reader proxy disabled (set MODELMESH_WEB_READER_PROXY=1)");
   const res = await fetchPage("https://r.jina.ai/" + url);
   return decodeBody(res.body, res.headers["content-type"]);
 }

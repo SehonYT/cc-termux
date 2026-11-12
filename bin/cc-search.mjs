@@ -488,7 +488,7 @@ export async function searchWeb(query, { maxResults = 8, engines, fetchPage, dec
       }
 
       if (engine === "searxng" && !searxUrl) {
-        return { engine, rows: [], attempts: [{ engine, status: "empty", message: "not configured (set CC_TERMUX_SEARX_URL)" }] };
+        return { engine, rows: [], attempts: [{ engine, status: "empty", message: "not configured (set MODELMESH_SEARX_URL)" }] };
       }
 
       if (engine === "searxng" && searxUrl) {

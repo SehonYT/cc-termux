@@ -13,7 +13,7 @@ const hasSetsid = (() => { try { return spawnSync("setsid", ["true"], { stdio: "
 test("get.sh works without a controlling terminal (CI/pipe)", { skip: process.platform === "win32" || !hasSetsid }, () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cc-get-"));
   try {
-    const src = path.join(tmp, "src", "cc-termux-main");
+    const src = path.join(tmp, "src", "modelmesh-main");
     fs.mkdirSync(path.join(src, "scripts"), { recursive: true });
     fs.writeFileSync(path.join(src, "scripts", "ensure-node.sh"), "ensure_node() { NODE=node; export NODE; }\n");
     fs.writeFileSync(path.join(src, "install.mjs"), [
@@ -22,11 +22,11 @@ test("get.sh works without a controlling terminal (CI/pipe)", { skip: process.pl
       "fs.writeFileSync((i > 0 ? process.argv[i + 1] : \".\") + \"/marker\", \"ran\");",
     ].join("\n"));
     const archive = path.join(tmp, "src.tgz");
-    const packed = spawnSync("tar", ["-czf", archive, "-C", path.join(tmp, "src"), "cc-termux-main"]);
+    const packed = spawnSync("tar", ["-czf", archive, "-C", path.join(tmp, "src"), "modelmesh-main"]);
     if (packed.status !== 0) { fs.rmSync(tmp, { recursive: true, force: true }); return; }
     const root = path.join(tmp, "root");
     fs.mkdirSync(root, { recursive: true });
-    const env = { ...process.env, CC_TERMUX_ARCHIVE: archive, HOME: tmp };
+    const env = { ...process.env, MODELMESH_ARCHIVE: archive, HOME: tmp };
     const r = spawnSync("setsid", ["sh", path.join(repo, "get.sh"), "--root", root], { env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
     assert.equal(r.status, 0, "stderr: " + r.stderr);
     assert.ok(fs.existsSync(path.join(root, "marker")), "installer did not run");

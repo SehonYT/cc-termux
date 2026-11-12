@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
-const TOKEN = "cc-termux-local";
+const TOKEN = "modelmesh-local";
 const AUTH = "Bearer " + TOKEN;
 
 function freePort() {
@@ -28,14 +28,14 @@ async function startGateway(config) {
   const port = await freePort();
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cc-gw-edge-"));
   const home = path.join(tmp, "home");
-  const cache = path.join(home, ".cache", "cc-termux");
+  const cache = path.join(home, ".cache", "modelmesh");
   fs.mkdirSync(cache, { recursive: true });
   const cfg = path.join(tmp, "config.json");
   fs.writeFileSync(cfg, JSON.stringify({ ...config, listen: { host: "127.0.0.1", port } }));
   const child = spawn(process.execPath, [path.join(root, "proxy", "server.mjs")], {
-    // CC_TERMUX_CACHE is always explicit: on Windows the resolver would otherwise use
+    // MODELMESH_CACHE is always explicit: on Windows the resolver would otherwise use
     // LOCALAPPDATA and the isolated home directory below would not be exercised.
-    env: { ...process.env, HOME: home, USERPROFILE: home, CC_TERMUX_CONFIG: cfg, CC_TERMUX_CACHE: cache },
+    env: { ...process.env, HOME: home, USERPROFILE: home, MODELMESH_CONFIG: cfg, MODELMESH_CACHE: cache },
     stdio: ["ignore", "pipe", "pipe"],
   });
   let stderr = "";

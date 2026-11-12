@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Installs the cc-termux skill pack into Claude Code's skills directory.
+// Installs the modelmesh skill pack into Claude Code's skills directory.
 // Skills become the user's files, so an update records hashes and never overwrites an edit.
 import fs from "node:fs";
 import path from "node:path";
@@ -9,7 +9,7 @@ import { installRoot, claudeDir } from "./cc-paths.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PACK_DIR = path.join(installRoot(), "skills");
-const MANIFEST = ".cc-termux-pack.json";
+const MANIFEST = ".modelmesh-pack.json";
 
 function catalogDir() {
   // Installed layout first, then the repo layout (tests and local runs).
@@ -149,7 +149,7 @@ export async function installSkills({ only = null, force = false, record = true 
     // Keep the generated provider line in step with the code that implements the chain.
     try {
       const line = await providerChainSummary();
-      if (line) await refreshGenerated("cc-termux-web", "SKILL.md", "chain:generated", line);
+      if (line) await refreshGenerated("modelmesh-web", "SKILL.md", "chain:generated", line);
     } catch (e) { }
     recordManifest();
   }
@@ -159,7 +159,7 @@ export async function installSkills({ only = null, force = false, record = true 
 // Records what this pack wrote, so a later update can tell an edit from an upgrade.
 export function recordManifest() {
   const catalog = loadCatalog();
-  const manifest = { version: catalog.version || 1, pack: "cc-termux", at: new Date().toISOString(), skills: {} };
+  const manifest = { version: catalog.version || 1, pack: "modelmesh", at: new Date().toISOString(), skills: {} };
   for (const skill of catalog.skills) {
     const dir = path.join(skillsTarget(), skill.name);
     if (!isValidSkill(dir)) continue;
@@ -208,11 +208,11 @@ export function skillStatus() {
 // Skills whose shipped text describes a provider chain that has since changed.
 export function staleContent() {
   const out = [];
-  const chainFile = path.join(skillsTarget(), "cc-termux-web", "SKILL.md");
+  const chainFile = path.join(skillsTarget(), "modelmesh-web", "SKILL.md");
   try {
     const text = fs.readFileSync(chainFile, "utf8");
     const expected = providerChainSummary();
-    if (!text.includes(expected)) out.push({ id: "cc-termux-web", reason: "provider chain changed since it was installed" });
+    if (!text.includes(expected)) out.push({ id: "modelmesh-web", reason: "provider chain changed since it was installed" });
   } catch (e) { }
   return out;
 }

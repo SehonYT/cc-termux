@@ -14,8 +14,8 @@ test("manual choice works on every OS", () => {
   assert.equal(resolvePerf({ mode: "on", platform: "darwin", env: {} }).enabled, true);
   assert.equal(resolvePerf({ mode: "mobile", platform: "android", env: {} }).enabled, true, "legacy mobile still on");
   assert.equal(resolvePerf({ mode: "off", platform: "android", env: {} }).enabled, false);
-  assert.equal(resolvePerf({ mode: "auto", platform: "android", env: { CC_TERMUX_PERF: "0" } }).enabled, false);
-  assert.equal(resolvePerf({ mode: "auto", platform: "linux", env: { CC_TERMUX_PERF: "1" } }).enabled, true);
+  assert.equal(resolvePerf({ mode: "auto", platform: "android", env: { MODELMESH_PERF: "0" } }).enabled, false);
+  assert.equal(resolvePerf({ mode: "auto", platform: "linux", env: { MODELMESH_PERF: "1" } }).enabled, true);
 });
 
 test("perf env disables heavy UI/IO features only when enabled", () => {

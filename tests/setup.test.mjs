@@ -15,6 +15,6 @@ test("setup --help works even when stdin looks like a terminal", () => {
       encoding: "utf8", env: { ...process.env, HOME: home, CC_SETUP_NONINTERACTIVE: "1" },
     });
     assert.equal(r.status, 0, r.stderr);
-    assert.match(r.stdout, /usage: cc-termux setup/);
+    assert.match(r.stdout, /usage: modelmesh setup/);
   } finally { fs.rmSync(home, { recursive: true, force: true }); }
 });

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Environment self-heal: repairs settings, PATH shims, config, picker and stale sessions.
-// Run by install.mjs after every install/update, and on demand as `cc-termux heal`.
+// Run by install.mjs after every install/update, and on demand as `modelmesh heal`.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -16,7 +16,7 @@ const HOMEBREW_ARM_PREFIX = "/opt/homebrew";
 // Shell rc files that make ~/.local/bin visible: bash reads .bashrc/.profile,
 // zsh reads .zprofile (login shells) and .zshrc (interactive shells).
 const SHELL_RC_FILES = [".bashrc", ".profile", ".zprofile", ".zshrc"];
-const PATH_MARKER = "# cc-termux PATH";
+const PATH_MARKER = "# modelmesh PATH";
 const PATH_LINE = 'export PATH="$HOME/.local/bin:$PATH"';
 
 export function shellRcFiles(home) {
@@ -71,7 +71,7 @@ function isOurShim(p) {
     const b = Buffer.alloc(4096);
     const n = fs.readSync(fd, b, 0, b.length, 0);
     fs.closeSync(fd);
-    return /(cc-launcher\.mjs|bin\/cc-termux|ccp\.mjs)/.test(b.subarray(0, n).toString("utf8"));
+    return /(cc-launcher\.mjs|bin\/modelmesh|mm\.mjs)/.test(b.subarray(0, n).toString("utf8"));
   } catch { return false; }
 }
 function writeShim(file, root) {
@@ -110,11 +110,11 @@ export function healEnvironment({ root, home = os.homedir(), prefix, killGateway
   // Production passes the real home, so the shared resolver decides config/cache paths.
   // Tests passing an explicit home keep the home-relative layout and stay self-contained.
   const nativeHome = home === os.homedir();
-  const cfgDefault = nativeHome ? configFile() : path.join(home, ".config", "cc-termux", "config.json");
-  const cfgPath = process.env.CC_TERMUX_CONFIG || cfgDefault;
+  const cfgDefault = nativeHome ? configFile() : path.join(home, ".config", "modelmesh", "config.json");
+  const cfgPath = process.env.MODELMESH_CONFIG || cfgDefault;
   const keysPath = path.join(path.dirname(cfgPath), "keys.json");
   const settingsPath = nativeHome ? path.join(claudeDir(), "settings.json") : path.join(home, ".claude", "settings.json");
-  const cache = nativeHome ? cacheDir() : path.join(home, ".cache", "cc-termux");
+  const cache = nativeHome ? cacheDir() : path.join(home, ".cache", "modelmesh");
   const cfg = loadJson(cfgPath, null);
   const keys = loadJson(keysPath, {});
 
@@ -195,11 +195,11 @@ export function healEnvironment({ root, home = os.homedir(), prefix, killGateway
       if (JSON.stringify(settings.modelPicker) !== JSON.stringify(picker)) { settings.modelPicker = picker; changed = true; }
     }
     const DENY = [
-      "Read(~/.config/cc-termux/keys.json)",
-      "Read(~/.config/cc-termux/config.json)",
+      "Read(~/.config/modelmesh/keys.json)",
+      "Read(~/.config/modelmesh/config.json)",
       "Read(~/.claude.json)",
       "Read(~/.claude/settings.json)",
-      "Read(~/.cache/cc-termux/errors.log)",
+      "Read(~/.cache/modelmesh/errors.log)",
       "Read(~/.ssh/*)",
     ];
     settings.permissions = settings.permissions || {};
@@ -210,7 +210,7 @@ export function healEnvironment({ root, home = os.homedir(), prefix, killGateway
     if (changed) {
       try {
         fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
-        if (fs.existsSync(settingsPath)) fs.copyFileSync(settingsPath, settingsPath + ".cc-termux-backup");
+        if (fs.existsSync(settingsPath)) fs.copyFileSync(settingsPath, settingsPath + ".modelmesh-backup");
         saveJson(settingsPath, settings);
         changes.push("settings.json: repaired");
       } catch (e) { changes.push("settings.json: could not write (" + e.code + ")"); }
@@ -224,19 +224,19 @@ export function healEnvironment({ root, home = os.homedir(), prefix, killGateway
     catch (e) { changes.push("claude binary: could not replace " + p + " (" + e.code + ")"); }
   }
 
-  // 4. launcher layout: native-style ~/.local/bin/claude + cc-termux/ccp in the prefix.
-  // Canonical means the platform default root, so a CC_TERMUX_ROOT override is ignored here.
-  const canonicalRoot = nativeHome ? installRoot({ ...process.env, CC_TERMUX_ROOT: "" }) : path.join(home, ".local", "share", "cc-termux");
+  // 4. launcher layout: native-style ~/.local/bin/claude + modelmesh/mm in the prefix.
+  // Canonical means the platform default root, so a MODELMESH_ROOT override is ignored here.
+  const canonicalRoot = nativeHome ? installRoot({ ...process.env, MODELMESH_ROOT: "" }) : path.join(home, ".local", "share", "modelmesh");
   const isCanonical = path.resolve(root) === path.resolve(canonicalRoot);
   if (isCanonical && installPrefix !== false && process.platform === "win32") {
     // Windows has no ~/.local/bin: install .cmd shims next to the other user tools so a
-    // fresh PowerShell/cmd can find claude and cc-termux.
+    // fresh PowerShell/cmd can find claude and modelmesh.
     const dirs = [
       path.join(process.env.APPDATA || path.join(home, "AppData", "Roaming"), "npm"),
       path.join(home, "AppData", "Local", "Microsoft", "WindowsApps"),
     ];
     const node = process.execPath;
-    const scripts = { claude: path.join(root, "bin", "cc-launcher.mjs"), "cc-termux": path.join(root, "bin", "cc-termux"), ccp: path.join(root, "bin", "ccp.mjs") };
+    const scripts = { claude: path.join(root, "bin", "cc-launcher.mjs"), "modelmesh": path.join(root, "bin", "modelmesh"), mm: path.join(root, "bin", "mm.mjs") };
     for (const dir of dirs) {
       try {
         fs.mkdirSync(dir, { recursive: true });
@@ -266,13 +266,13 @@ export function healEnvironment({ root, home = os.homedir(), prefix, killGateway
     };
     try {
       // Native-style layout: ~/.local/bin/claude -> ~/.local/share/claude/versions/<version>
-      let ver = "cc-termux";
-      try { ver = fs.readFileSync(path.join(root, "VERSION"), "utf8").trim().split("-")[0] || "cc-termux"; } catch (e) { }
+      let ver = "modelmesh";
+      try { ver = fs.readFileSync(path.join(root, "VERSION"), "utf8").trim().split("-")[0] || "modelmesh"; } catch (e) { }
       const versionsDir = path.join(home, ".local", "share", "claude", "versions");
       fs.mkdirSync(versionsDir, { recursive: true });
       let targetFile = path.join(versionsDir, ver);
       // Never overwrite a real Claude native binary with our shim.
-      try { if (fs.existsSync(targetFile) && !isOurShim(targetFile)) targetFile = path.join(versionsDir, "cc-termux-" + ver); } catch (e) { }
+      try { if (fs.existsSync(targetFile) && !isOurShim(targetFile)) targetFile = path.join(versionsDir, "modelmesh-" + ver); } catch (e) { }
       if (writeLauncherShim(targetFile, path.join(root, "bin", "cc-launcher.mjs"))) changes.push("shim: " + targetFile);
       const link = path.join(homeBin, "claude");
       let linkOk = false;
@@ -286,9 +286,9 @@ export function healEnvironment({ root, home = os.homedir(), prefix, killGateway
     } catch (e) { changes.push("shim: could not write ~/.local/bin/claude (" + e.code + ")"); }
     // /usr/local/bin is not writable for a normal user on Linux/macOS; never abort heal.
     try { fs.mkdirSync(prefixBin, { recursive: true }); } catch (e) { changes.push("shims: cannot write " + prefixBin + " (" + e.code + ")"); }
-    for (const name of ["cc-termux", "ccp"]) {
+    for (const name of ["modelmesh", "mm"]) {
       const target = path.join(prefixBin, name);
-      const script = path.join(root, "bin", name === "ccp" ? "ccp.mjs" : "cc-termux");
+      const script = path.join(root, "bin", name === "mm" ? "mm.mjs" : "modelmesh");
       try {
         const body = shimBody(script);
         let same = false;
@@ -356,7 +356,7 @@ export function healEnvironment({ root, home = os.homedir(), prefix, killGateway
       if (pids.length && killGateways) {
         for (const pid of pids) { try { process.kill(pid, "SIGTERM"); } catch { } }
         changes.push("gateway: stopped " + pids.length + " idle instance(s)");
-      } else if (pids.length > 1) changes.push("gateway: " + pids.length + " instances running (cc-termux restart)");
+      } else if (pids.length > 1) changes.push("gateway: " + pids.length + " instances running (modelmesh restart)");
     }
   } catch (e) { }
   for (const f of ["gateway.log", "errors.log"]) {

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// Removes cc-termux and restores Claude Code to how it was before. Everything is either
-// owned by cc-termux (deleted) or shared (restored); nothing runs without --yes.
+// Removes modelmesh and restores Claude Code to how it was before. Everything is either
+// owned by modelmesh (deleted) or shared (restored); nothing runs without --yes.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -28,17 +28,17 @@ export function removalPlan() {
   const items = [];
   const add = (kind, label, target, detail) => items.push({ kind, label, target, detail, exists: fs.existsSync(target) });
 
-  // cc-termux owns these outright.
-  add("owned", "cc-termux install", root, "code, patches, bundled Claude Code copy");
+  // modelmesh owns these outright.
+  add("owned", "modelmesh install", root, "code, patches, bundled Claude Code copy");
   add("owned", "config and keys", configDir(), "provider keys, web search keys, antigravity login");
   add("owned", "cache and logs", cacheDir(), "errors.log, model cache, session state");
   add("owned", "launcher shim", shimPath(), "the script that starts the gateway");
 
   // Shared with Claude Code: restore, never blanket-delete.
   add("restore", "web search permission", path.join(claude, "settings.json"), "remove the two mcp__web__ allow entries");
-  add("restore", "MCP server entry", path.join(home, ".claude.json"), "remove cc-termux's mcp server");
+  add("restore", "MCP server entry", path.join(home, ".claude.json"), "remove modelmesh's mcp server");
   add("restore", "gateway env vars", path.join(claude, "settings.json"), "ANTHROPIC_BASE_URL and friends");
-  for (const c of ["provider.md", "antigravity-usage.md"]) add("restore", "slash command " + c, path.join(claude, "commands", c), "installed by cc-termux");
+  for (const c of ["provider.md", "antigravity-usage.md"]) add("restore", "slash command " + c, path.join(claude, "commands", c), "installed by modelmesh");
   add("restore", "agent skills", path.join(claude, "skills"), "the skills this pack installed, plus its manifest");
   return items;
 }
@@ -75,7 +75,7 @@ function stripSettings(file, mutate) {
   } catch (e) { return false; }
 }
 
-// Removes only the keys cc-termux added, leaving every other setting exactly as found.
+// Removes only the keys modelmesh added, leaving every other setting exactly as found.
 export function restoreClaudeCode({ log = () => {} } = {}) {
   const home = os.homedir();
   const claude = claudeDir();
@@ -89,13 +89,13 @@ export function restoreClaudeCode({ log = () => {} } = {}) {
       if (!Object.keys(cfg.permissions).length) delete cfg.permissions;
     }
     if (cfg.env) {
-      // Only the gateway pointers cc-termux sets; a user's own keys stay.
+      // Only the gateway pointers modelmesh sets; a user's own keys stay.
       const ours = ["ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY", "ANTHROPIC_MODEL",
         "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "ANTHROPIC_SMALL_FAST_MODEL"];
       for (const k of ours) delete cfg.env[k];
       if (!Object.keys(cfg.env).length) delete cfg.env;
     }
-    if (cfg.statusLine && JSON.stringify(cfg.statusLine).includes("cc-termux")) delete cfg.statusLine;
+    if (cfg.statusLine && JSON.stringify(cfg.statusLine).includes("modelmesh")) delete cfg.statusLine;
   });
   done.push({ what: "settings.json", changed: changedSettings });
 
@@ -103,7 +103,7 @@ export function restoreClaudeCode({ log = () => {} } = {}) {
   const changedMcp = stripSettings(claudeJson, (cfg) => {
     if (cfg.mcpServers) {
       for (const name of Object.keys(cfg.mcpServers)) {
-        if (/^(web|cc-termux)/.test(name)) delete cfg.mcpServers[name];
+        if (/^(web|modelmesh)/.test(name)) delete cfg.mcpServers[name];
       }
       if (!Object.keys(cfg.mcpServers).length) delete cfg.mcpServers;
     }
@@ -115,7 +115,7 @@ export function restoreClaudeCode({ log = () => {} } = {}) {
     try { if (fs.existsSync(f)) { fs.rmSync(f, { force: true }); done.push({ what: "command " + c, changed: true }); } } catch (e) { }
   }
   for (const m of ["web.json"]) {
-    // Not shared: this file only ever held cc-termux's provider keys.
+    // Not shared: this file only ever held modelmesh's provider keys.
     try { const f = path.join(claude, m); if (fs.existsSync(f)) fs.rmSync(f, { force: true }); } catch (e) { }
   }
   return done;
@@ -138,7 +138,7 @@ export async function removeSkillPack() {
       if (state === "modified") { kept.push(skill.name); continue; }
       try { fs.rmSync(dir, { recursive: true, force: true }); removed.push(skill.name); } catch (e) { }
     }
-    try { const m = path.join(target, ".cc-termux-pack.json"); if (fs.existsSync(m)) fs.rmSync(m, { force: true }); } catch (e) { }
+    try { const m = path.join(target, ".modelmesh-pack.json"); if (fs.existsSync(m)) fs.rmSync(m, { force: true }); } catch (e) { }
     return { removed, kept, target };
   } catch (e) {
     return { removed: [], kept: [], target: "" };
@@ -148,11 +148,11 @@ export async function removeSkillPack() {
 // Puts the original claude launcher back.
 export function restoreLauncher() {
   const shim = shimPath();
-  const backups = findOfficialBackup().filter((p) => !p.includes("cc-termux") && !/^claude(\.cmd)?$/.test(path.basename(p)));
+  const backups = findOfficialBackup().filter((p) => !p.includes("modelmesh") && !/^claude(\.cmd)?$/.test(path.basename(p)));
   try {
     if (fs.existsSync(shim)) {
       const body = fs.readFileSync(shim, "utf8");
-      if (!body.includes("cc-launcher.mjs")) return { restored: false, reason: "claude is not a cc-termux shim" };
+      if (!body.includes("cc-launcher.mjs")) return { restored: false, reason: "claude is not a modelmesh shim" };
       fs.rmSync(shim, { force: true });
     }
     if (backups.length) {
@@ -180,7 +180,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const plan = removalPlan();
   const { owned, restore } = summarize(plan);
 
-  console.log("cc-termux removal plan");
+  console.log("modelmesh removal plan");
   console.log();
   for (const p of plan) {
     const mark = p.exists ? (p.kind === "owned" ? "delete " : "restore") : "absent ";
@@ -193,7 +193,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
 
   if (dry) { console.log("dry run: nothing was changed. Re-run with --yes to remove."); process.exit(0); }
   if (!yes) {
-    console.log("This deletes cc-termux. Nothing else on your system is affected.");
+    console.log("This deletes modelmesh. Nothing else on your system is affected.");
     console.log("Re-run with --yes to confirm, or --dry-run to see the plan again.");
     process.exit(0);
   }
@@ -216,7 +216,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       catch (e) { console.log("  failed    " + t + ": " + e.message); }
     }
     console.log();
-    console.log("cc-termux removed. Open a new shell so PATH and the claude launcher are re-read.");
+    console.log("modelmesh removed. Open a new shell so PATH and the claude launcher are re-read.");
     if (keepConfig) console.log("Your provider keys are still in " + configDir() + ".");
   });
 }

@@ -25,9 +25,9 @@ const has = (f) => args.includes(f);
 const argVal = (f, d) => { const i = args.indexOf(f); return i >= 0 && args[i + 1] ? args[i + 1] : d; };
 const ROOT = argVal("--root", installRoot());
 const CFG = configFile();
-// Platform default root, ignoring a CC_TERMUX_ROOT override: only a canonical install may
+// Platform default root, ignoring a MODELMESH_ROOT override: only a canonical install may
 // write user-wide shims, and temp/custom roots (tests, parallel checkouts) must stay isolated.
-const DEFAULT_ROOT = installRoot({ ...process.env, CC_TERMUX_ROOT: "" });
+const DEFAULT_ROOT = installRoot({ ...process.env, MODELMESH_ROOT: "" });
 const CHECK = has("--check");
 const NO_SETUP = has("--no-setup");
 const NO_SHIMS = has("--no-shims");
@@ -36,7 +36,7 @@ const CODE_ONLY = has("--code-only");
 const TARBALL = argVal("--tarball", "");
 const VERSION_ARG = argVal("--version", "");
 
-const log = (m) => console.log("\x1b[36mcc-termux\x1b[0m " + m);
+const log = (m) => console.log("\x1b[36mmodelmesh\x1b[0m " + m);
 const fail = (m) => { console.error("\x1b[31merror\x1b[0m " + m); process.exit(1); };
 
 function detectHostTarget() {
@@ -45,7 +45,7 @@ function detectHostTarget() {
   let t = detectTarget({
     platform: process.platform, arch: process.arch, cpuinfo,
     hasFile: (p) => fs.existsSync(p),
-    forceJs: has("--force-js") || process.env.CC_TERMUX_FORCE_JS === "1",
+    forceJs: has("--force-js") || process.env.MODELMESH_FORCE_JS === "1",
   });
   if (process.platform === "linux" && t.pkg && !/-musl$/.test(t.pkg)) {
     const ldd = spawnSync("ldd", ["--version"], { encoding: "utf8" }).stdout || "";
@@ -136,7 +136,7 @@ function runtimeAssets() {
       else if (entry.isFile() && !/\.(bak|orig|log|tmp)$/.test(entry.name)) out.add(child);
     }
   };
-  for (const dir of ["bin", "proxy", "commands", "scripts", "docs", "skills"]) walk(dir);
+  for (const dir of ["bin", "proxy", "commands", "scripts", "docs", "skills", "assets"]) walk(dir);
   return [...out].sort();
 }
 
@@ -162,7 +162,7 @@ function copyAssets() {
   }
 }
 async function askPerformance() {
-  if (process.env.CC_TERMUX_NO_PROMPT === "1" || process.env.CC_TERMUX_NO_TUNE === "1") return;
+  if (process.env.MODELMESH_NO_PROMPT === "1" || process.env.MODELMESH_NO_TUNE === "1") return;
   if (!process.stdin.isTTY || !process.stdout.isTTY) return;
   const cfgPath = CFG;
   let mode = "";
@@ -179,7 +179,7 @@ async function askPerformance() {
     const a = (await rl.question("  Turn on performance mode? " + hint + " > ")).trim().toLowerCase();
     const yes = a === "" ? def === "yes" : a.startsWith("y");
     savePerfMode(cfgPath, yes ? "on" : "off");
-    step(yes ? "Performance mode is ON (change later: cc-termux tune off)" : "Performance mode is off (change later: cc-termux tune on)", { stream: process.stdout, tty: true });
+    step(yes ? "Performance mode is ON (change later: modelmesh tune off)" : "Performance mode is off (change later: modelmesh tune on)", { stream: process.stdout, tty: true });
   } finally {
     rl.close();
   }
@@ -188,7 +188,7 @@ async function askPerformance() {
 // Optional web-search keys. Everything is skippable: with no keys the built-in scrapers
 // handle search, and any provider added here becomes a faster first choice.
 async function askWebProviders() {
-  if (process.env.CC_TERMUX_NO_PROMPT === "1" || process.env.CC_TERMUX_NO_WEB_PROMPT === "1") return;
+  if (process.env.MODELMESH_NO_PROMPT === "1" || process.env.MODELMESH_NO_WEB_PROMPT === "1") return;
   if (!process.stdin.isTTY || !process.stdout.isTTY) return;
   const file = path.join(path.dirname(CFG), "web.json");
   let cfg = {};
@@ -203,14 +203,14 @@ async function askWebProviders() {
   try {
     console.log();
     banner(["Web search (optional)"], { stream: process.stdout, tty: true });
-    console.log("  cc-termux can search through a hosted API. Search tries the provider you add");
+    console.log("  modelmesh can search through a hosted API. Search tries the provider you add");
     console.log("  first and falls back to the next one on quota or failure, with the built-in");
     console.log("  scraper always last, so search works whether or not you add a key.");
     console.log();
     const a = (await rl.question("  Add a web search API? (y/N) > ")).trim().toLowerCase();
     if (!a.startsWith("y")) {
       write();
-      step("No web key added - the built-in scraper handles search (change later: cc-termux web)", { stream: process.stdout, tty: true });
+      step("No web key added - the built-in scraper handles search (change later: modelmesh web)", { stream: process.stdout, tty: true });
       return;
     }
 
@@ -248,7 +248,7 @@ async function askWebProviders() {
     }
     write();
     if (!cfg.keys || !Object.keys(cfg.keys).length) {
-      step("No web key added - the built-in scraper handles search (change later: cc-termux web)", { stream: process.stdout, tty: true });
+      step("No web key added - the built-in scraper handles search (change later: modelmesh web)", { stream: process.stdout, tty: true });
     }
   } finally {
     rl.close();
@@ -301,8 +301,8 @@ function installShims(t) {
   const node = process.execPath;
   const scripts = {
     claude: [path.join(ROOT, "bin", "cc-launcher.mjs")],
-    "cc-termux": [path.join(ROOT, "bin", "cc-termux")],
-    ccp: [path.join(ROOT, "bin", "ccp.mjs")],
+    "modelmesh": [path.join(ROOT, "bin", "modelmesh")],
+    mm: [path.join(ROOT, "bin", "mm.mjs")],
   };
   if (t.win) {
     // ROOT\bin is not on PATH, so a shim there is invisible to cmd/PowerShell. Write the
@@ -327,8 +327,8 @@ function installShims(t) {
             try {
               if (fs.existsSync(stale)) {
                 const body = fs.readFileSync(stale, "utf8");
-                if (!body.includes("cc-launcher.mjs") && !body.includes("cc-termux")) {
-                  fs.renameSync(stale, stale + ".cc-termux-backup");
+                if (!body.includes("cc-launcher.mjs") && !body.includes("modelmesh")) {
+                  fs.renameSync(stale, stale + ".modelmesh-backup");
                 }
               }
             } catch (e) { }
@@ -359,21 +359,21 @@ function installShims(t) {
     return p;
   };
   try {
-    let ver = "cc-termux";
-    try { ver = fs.readFileSync(path.join(ROOT, "VERSION"), "utf8").trim().split("-")[0] || "cc-termux"; } catch (e) { }
+    let ver = "modelmesh";
+    try { ver = fs.readFileSync(path.join(ROOT, "VERSION"), "utf8").trim().split("-")[0] || "modelmesh"; } catch (e) { }
     const versionsDir = path.join(os.homedir(), ".local", "share", "claude", "versions");
     fs.mkdirSync(versionsDir, { recursive: true });
     let targetFile = path.join(versionsDir, ver);
-    try { if (fs.existsSync(targetFile) && !looksLikeShim(targetFile)) targetFile = path.join(versionsDir, "cc-termux-" + ver); } catch (e) { }
+    try { if (fs.existsSync(targetFile) && !looksLikeShim(targetFile)) targetFile = path.join(versionsDir, "modelmesh-" + ver); } catch (e) { }
     writeShim(path.dirname(targetFile), path.basename(targetFile), scripts.claude[0]);
     fs.mkdirSync(homeBin, { recursive: true });
     const link = path.join(homeBin, "claude");
     try { if (fs.existsSync(link) && !looksLikeShim(link)) fs.renameSync(link, link + ".official-backup." + Date.now()); } catch (e) { }
     try { fs.rmSync(link, { force: true }); } catch (e) { }
     fs.symlinkSync(targetFile, link);
-    writeShim(binDir, "cc-termux", scripts["cc-termux"][0]);
-    writeShim(binDir, "ccp", scripts.ccp[0]);
-    log("linked " + path.join(homeBin, "claude") + " and " + binDir + "/{cc-termux,ccp}");
+    writeShim(binDir, "modelmesh", scripts["modelmesh"][0]);
+    writeShim(binDir, "mm", scripts.mm[0]);
+    log("linked " + path.join(homeBin, "claude") + " and " + binDir + "/{modelmesh,mm}");
   } catch (e) {
     try {
       for (const [name, argv] of Object.entries(scripts)) writeShim(path.join(ROOT, "bin"), name, argv[0]);
@@ -393,7 +393,7 @@ function installShims(t) {
       {
         let cfg = null;
         if (raw === null) cfg = {};
-        else { try { cfg = JSON.parse(raw); } catch (e) { console.error("cc-termux: ~/.claude.json is not valid JSON; leaving it untouched"); } }
+        else { try { cfg = JSON.parse(raw); } catch (e) { console.error("modelmesh: ~/.claude.json is not valid JSON; leaving it untouched"); } }
         if (cfg && cfg.installMethod !== "native") { cfg.installMethod = "native"; fs.writeFileSync(cj, JSON.stringify(cfg, null, 2) + "\n"); }
       }
     }
@@ -405,15 +405,15 @@ function installShims(t) {
   if (!nodeVersionOk(process.versions.node)) fail("Node.js 18+ is required (found " + process.versions.node + ")");
   process.on("exit", () => { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) { } });
   const t = detectHostTarget();
-  if (!CHECK && !process.env.CC_TERMUX_NO_BANNER) {
+  if (!CHECK && !process.env.MODELMESH_NO_BANNER) {
     banner([
-      "cc-termux installer",
+      "modelmesh installer",
       "Claude Code + any provider  \u00b7  Termux, Linux, macOS, Windows",
     ]);
-    info("Claude Code is downloaded from Anthropic's official npm registry (registry.npmjs.org); cc-termux does not redistribute it.");
+    info("Claude Code is downloaded from Anthropic's official npm registry (registry.npmjs.org); modelmesh does not redistribute it.");
   }
   if (CHECK) {
-    console.log("cc-termux install plan");
+    console.log("modelmesh install plan");
     let ver = "?";
     try { ver = JSON.parse(fs.readFileSync(path.join(SRC, "package.json"), "utf8")).version || "?"; } catch (e) { }
     console.log("  version  : " + ver);
@@ -426,7 +426,7 @@ function installShims(t) {
     console.log("  root     : " + ROOT);
     console.log("  config   : " + CFG);
     console.log("  cache    : " + cacheDir());
-    console.log("  shims    : " + (t.win ? ROOT + "\\bin\\*.cmd" : "~/.local/bin/claude and " + prefixBinDir() + "/{cc-termux,ccp}"));
+    console.log("  shims    : " + (t.win ? ROOT + "\\bin\\*.cmd" : "~/.local/bin/claude and " + prefixBinDir() + "/{modelmesh,mm}"));
     return;
   }
   fs.mkdirSync(ROOT, { recursive: true });
@@ -445,9 +445,9 @@ function installShims(t) {
   if (CODE_ONLY) {
     const existing = path.join(ROOT, "bin", t.bin);
     const existingJs = path.join(ROOT, "js", "cli.js");
-    if (!fs.existsSync(existing) && !fs.existsSync(existingJs)) fail("no installed Claude Code build at " + ROOT + " - run: cc-termux update --redownload");
+    if (!fs.existsSync(existing) && !fs.existsSync(existingJs)) fail("no installed Claude Code build at " + ROOT + " - run: modelmesh update --redownload");
     step("Claude Code is already installed in " + ROOT + " - keeping the binary");
-    info("Updating cc-termux files, picker and UI patches...");
+    info("Updating modelmesh files, picker and UI patches...");
   } else if (t.js) {
     log("no native target for " + process.platform + "/" + process.arch + ": installing JS fallback 2.1.112");
     const tgz = path.join(tmp, "cc.tgz");
@@ -528,7 +528,7 @@ function installShims(t) {
   }
 
   copyAssets();
-  if (!CHECK) step("cc-termux files updated");
+  if (!CHECK) step("modelmesh files updated");
 
   const cfgPath = CFG;
   if (!fs.existsSync(cfgPath) || RESET_CONFIG) {
@@ -543,12 +543,12 @@ function installShims(t) {
   }
 
   if (!CHECK) info("Applying optional UI patches to the Claude Code binary...");
-  try { spawnSync(process.execPath, [path.join(ROOT, "bin", "cc-patch.mjs"), "--apply"], { stdio: "inherit", env: { ...process.env, CC_TERMUX_ROOT: ROOT } }); } catch {}
+  try { spawnSync(process.execPath, [path.join(ROOT, "bin", "cc-patch.mjs"), "--apply"], { stdio: "inherit", env: { ...process.env, MODELMESH_ROOT: ROOT } }); } catch {}
   try { spawnSync(process.execPath, [path.join(ROOT, "bin", "cc-heal.mjs"), "--root", ROOT], { stdio: "inherit" }); } catch (e) { }
   try {
     const pkg = JSON.parse(fs.readFileSync(path.join(SRC, "package.json"), "utf8"));
-    let sha = process.env.CC_TERMUX_COMMIT_SHA || null;
-    let commitDate = process.env.CC_TERMUX_COMMIT_DATE || null;
+    let sha = process.env.MODELMESH_COMMIT_SHA || null;
+    let commitDate = process.env.MODELMESH_COMMIT_DATE || null;
     if (!sha) {
       const g = spawnSync("git", ["-C", SRC, "rev-parse", "HEAD"], { encoding: "utf8" });
       if (g.status === 0) sha = g.stdout.trim() || null;
@@ -561,7 +561,7 @@ function installShims(t) {
     const version = short ? pkg.version + "+" + short : pkg.version;
     const stamp = { version, baseVersion: pkg.version, sha, installedAt: new Date().toISOString() };
     if (commitDate) stamp.updatedAt = commitDate;
-    fs.writeFileSync(path.join(ROOT, "cc-termux.json"), JSON.stringify(stamp, null, 2) + "\n");
+    fs.writeFileSync(path.join(ROOT, "modelmesh.json"), JSON.stringify(stamp, null, 2) + "\n");
   } catch (e) { }
   stopManagedGateway();
   await askPerformance();
@@ -576,14 +576,14 @@ function installShims(t) {
     console.log("");
     if (setup.status === 0) {
       step("Ready. Start Claude Code with: claude");
-      info("Dashboard: cc-termux status   ·   repair: cc-termux doctor   ·   update: cc-termux update");
+      info("Dashboard: modelmesh status   ·   repair: modelmesh doctor   ·   update: modelmesh update");
     } else {
-      info("Setup was not completed. Run \"cc-termux setup\" when ready.");
+      info("Setup was not completed. Run \"modelmesh setup\" when ready.");
     }
   } else if (CODE_ONLY || NO_SETUP) {
     step("Update complete. Run \"claude\" when ready.");
-    info("Add a provider with: cc-termux setup");
+    info("Add a provider with: modelmesh setup");
   } else {
-    console.log("next: run \"cc-termux setup\" to add a provider, then \"claude\"");
+    console.log("next: run \"modelmesh setup\" to add a provider, then \"claude\"");
   }
 })().catch((e) => fail(e.message));

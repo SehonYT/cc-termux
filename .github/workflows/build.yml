@@ -50,10 +50,10 @@ jobs:
             --arg url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
             --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             '{
-              username: "cc-termux CI",
+              username: "modelmesh CI",
               avatar_url: $logo,
               embeds: [{
-                author: {name: "cc-termux", icon_url: $logo},
+                author: {name: "modelmesh", icon_url: $logo},
                 title: $title,
                 url: $url,
                 color: $color,
@@ -66,9 +66,9 @@ jobs:
                   {name: "Branch", value: ("`" + $branch + "`"), inline: true},
                   {name: "Commit", value: ("`" + $short + "`"), inline: true},
                   {name: "Run", value: ("[Open workflow run](" + $url + ")"), inline: false},
-                  {name: "Community", value: "[Join the cc-termux Discord](https://discord.gg/AF8zvEDcSG)", inline: false}
+                  {name: "Community", value: "[Join the modelmesh Discord](https://discord.gg/AF8zvEDcSG)", inline: false}
                 ],
-                footer: {text: "cc-termux · GitHub Actions", icon_url: $logo},
+                footer: {text: "modelmesh · GitHub Actions", icon_url: $logo},
                 timestamp: $ts
               }]
             }')

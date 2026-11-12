@@ -7,7 +7,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { installRoot } from "./cc-paths.mjs";
 
-// Resolve the install root the same way the rest of cc-termux does, so a custom
+// Resolve the install root the same way the rest of modelmesh does, so a custom
 // --root or a Windows layout is not silently read from the wrong place.
 const ROOT = installRoot();
 const BIN = path.join(ROOT, "bin", process.platform === "win32" ? "claude.exe" : "claude.bin");

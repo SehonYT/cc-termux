@@ -1,7 +1,7 @@
-# How cc-termux works
+# How modelmesh works
 
 This document is the deep dive: what runs, how requests are translated and how the
-platform-specific pieces fit together. The README covers what cc-termux does; this covers
+platform-specific pieces fit together. The README covers what modelmesh does; this covers
 how it does it.
 
 - [Gateway lifecycle](#gateway-lifecycle)
@@ -25,7 +25,7 @@ The gateway is not a daemon and does not listen on a public port.
 ```
 claude (shim)
   └─ bin/cc-launcher.mjs
-       ├─ registers a session file in ~/.cache/cc-termux/sessions/
+       ├─ registers a session file in ~/.cache/modelmesh/sessions/
        ├─ starts proxy/server.mjs on 127.0.0.1:8788 if it is not already running
        ├─ sets ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN for this process
        └─ execs the real Claude Code binary
@@ -34,7 +34,7 @@ claude (shim)
 - Concurrent sessions share one gateway. The last session to exit stops it.
 - The gateway self-exits after ~10 seconds without session files (managed mode).
 - `claude --version` and `claude --help` never start it.
-- Stale instances are killed before a new gateway starts; `cc-termux restart` stops all of them.
+- Stale instances are killed before a new gateway starts; `modelmesh restart` stops all of them.
 - The gateway reloads `config.json` on every request, so a provider switch applies to a
   running session without a restart.
 
@@ -91,8 +91,8 @@ signal:
 A body that lists both a per-minute and a per-day metric is terminal, because the day limit
 will not clear. Google's `Please retry in 21h15m47.838953365s.` hint is parsed, but a hint
 longer than a minute is discarded for bursts — sleeping for hours inside a request would
-hang the agent. Every observation is recorded in `~/.cache/cc-termux/quota.json` with its
-`kind` (`burst` or `daily`) and `classes`; `cc-termux doctor` only warns about a burst for
+hang the agent. Every observation is recorded in `~/.cache/modelmesh/quota.json` with its
+`kind` (`burst` or `daily`) and `classes`; `modelmesh doctor` only warns about a burst for
 ten minutes, while a daily limit stays visible for a day.
 
 ## NaraRouter plans and tiers
@@ -114,8 +114,8 @@ free but which charges is not. Free tier means the models reachable on that zero
 asks for the tier exactly as it does for OpenRouter, and `/v1/models` then narrows the
 result to the aliases the key itself is entitled to.
 
-`cc-termux nararouter usage` prints the plan table with its limits, the tier split and the
-free-tier model list; `cc-termux nararouter plans --json` emits the raw table.
+`modelmesh nararouter usage` prints the plan table with its limits, the tier split and the
+free-tier model list; `modelmesh nararouter plans --json` emits the raw table.
 
 Rate limits are reported through one 429 type (`rate_limited`): a per-minute breach is
 transient and retried, while a daily token quota is per model tier and terminal for the day.
@@ -137,13 +137,13 @@ Free detection reads `pricing` rather than trusting the `:free` id suffix, becau
 router aliases (`openrouter/free`) carry no suffix and a suffix alone would mislabel a
 priced model. A free model that does not advertise `tools` in `supported_parameters` is
 skipped: Claude Code cannot do anything with a model that cannot call tools. The choice is
-stored on the provider as `tier`, so `cc-termux sync` keeps refreshing the same list instead
+stored on the provider as `tier`, so `modelmesh sync` keeps refreshing the same list instead
 of quietly pulling 450+ paid models into a free-only setup.
 
 ## Google AI Studio model list
 
 `GET /v1beta/models` returns every model the key can see, and only some of them can answer
-a chat completion. The wizard (`bin/cc-setup.mjs`) and `cc-termux doctor` therefore share
+a chat completion. The wizard (`bin/cc-setup.mjs`) and `modelmesh doctor` therefore share
 one predicate and keep only ids that work through `/v1beta/openai/chat/completions`:
 
 - **Dropped**: image (`*-image`, `nano-banana*`), speech (`*-tts`), Live API (`*-live`),
@@ -187,7 +187,7 @@ before running a tool, and only proceeds when the answer is `<block>no</block>`.
   never by model name.
 - The gateway gives that turn a thinking-free budget, pins a Claude-capable classifier model
   when one is configured, and otherwise uses the active provider's model.
-- `CC_TERMUX_CLASSIFIER_ALLOW=1` (or `classifier.allow` in `config.json`) answers the
+- `MODELMESH_CLASSIFIER_ALLOW=1` (or `classifier.allow` in `config.json`) answers the
   classifier locally with an allow verdict. This disables Claude Code's tool-call safety
   check for the session — the same trust level as bypassing permissions — so it is off by
   default.
@@ -195,7 +195,7 @@ before running a tool, and only proceeds when the answer is `<block>no</block>`.
 ## Google Antigravity
 
 Antigravity authenticates with a Google account instead of an API key. Credentials live in
-`~/.config/cc-termux/antigravity.json` (mode 0600) and the gateway refreshes the access
+`~/.config/modelmesh/antigravity.json` (mode 0600) and the gateway refreshes the access
 token automatically.
 
 - Requests are sent to Cloud Code's `v1internal:streamGenerateContent?alt=sse` on
@@ -208,14 +208,14 @@ token automatically.
   refusal for 2–30 minutes so the same body is not resent.
 - The model list comes from Google's `agentModelSorts`, so models appear and disappear with
   the account's entitlements (Argon on paid plans, for example).
-- Quota percentages shown by `cc-termux antigravity usage` and the status line are
+- Quota percentages shown by `modelmesh antigravity usage` and the status line are
   **remaining** budget and are labelled `left`.
 
 ## Web search and page fetch
 
 Claude Code's built-in WebFetch and WebSearch use Anthropic's servers. On Android the
 bundled musl build cannot resolve DNS at all (there is no `/etc/resolv.conf`), so those
-tools cannot work behind cc-termux.
+tools cannot work behind modelmesh.
 
 The launcher registers an MCP server named `web` (`bin/cc-mcp.mjs`) in `~/.claude.json`,
 which exposes two tools to the model:
@@ -247,8 +247,26 @@ loop is untouched.
 | last | Built-in scraper | always |
 
 If grounding fails (expired login, quota, 404) the chain continues to the next provider.
-`CC_TERMUX_ANTIGRAVITY_SEARCH=0` disables grounding, and the gateway-side flag only affects
+`MODELMESH_ANTIGRAVITY_SEARCH=0` disables grounding, and the gateway-side flag only affects
 tool-free calls that do not come from Claude Code.
+
+### Renamed from cc-termux
+
+The project is now ModelMesh: the old name claimed Claude Code and Termux, and neither is
+true any more. Paths, env vars and the CLI all moved.
+
+| Before | After |
+|---|---|
+| `cc-termux` | `modelmesh`, with `mm` as the short form |
+| `~/.config/cc-termux` | `~/.config/modelmesh` |
+| `~/.local/share/cc-termux` | `~/.local/share/modelmesh` |
+| `~/.cache/cc-termux` | `~/.cache/modelmesh` |
+| `CC_TERMUX_*` | `MODELMESH_*` |
+| `ccp` | `mm` |
+
+An install from before the rename keeps working: every resolver reads the old env var as a
+fallback, and the old directories are moved to the new names on first use, keys included.
+The GitHub remote keeps its URL until the repository itself is renamed.
 
 ### Provider chain
 
@@ -264,12 +282,12 @@ is always last, so search never depends on a key existing.
 | 4 | Built-in scraper | no | Bing, DuckDuckGo, Google, Brave and Startpage, merged and ranked |
 
 `bin/cc-webproviders.mjs` holds the providers, the config and the runner. Keys live in
-`~/.config/cc-termux/web.json` (mode 0600) or in `TAVILY_API_KEY`, `BRAVE_API_KEY` and
+`~/.config/modelmesh/web.json` (mode 0600) or in `TAVILY_API_KEY`, `BRAVE_API_KEY` and
 `JINA_API_KEY`; the file wins. A provider that requires a key is skipped when it has none,
 and an empty result set falls through rather than winning.
 
 The installer asks for the three keys once and every one can be skipped, and
-`cc-termux setup` has a **web fetch providers** entry (`w`). `cc-termux web status` shows the
+`modelmesh setup` has a **web fetch providers** entry (`w`). `modelmesh web status` shows the
 active chain, `web key`/`web clear` manage keys and `web test` reports which provider
 answered and why the others did not.
 
@@ -298,8 +316,8 @@ engine is decoded rather than scraped blindly:
   check; bing: irrelevant - engine returned results for a different query`. A search never
   silently returns nothing without saying why.
 - **Google fallback**: when google.com serves its JavaScript wall, the same index is requested
-  from Startpage. A configured SearXNG instance (`CC_TERMUX_SEARX_URL`, JSON API) or Google
-  Custom Search (`CC_TERMUX_GOOGLE_KEY` + `CC_TERMUX_GOOGLE_CX`) is used when available.
+  from Startpage. A configured SearXNG instance (`MODELMESH_SEARX_URL`, JSON API) or Google
+  Custom Search (`MODELMESH_GOOGLE_KEY` + `MODELMESH_GOOGLE_CX`) is used when available.
 - Requests use browser headers, a shared cookie jar and up to five redirects. Each engine
   gets a short per-request timeout so one slow engine cannot hold the whole search up.
 
@@ -325,15 +343,15 @@ engine is decoded rather than scraped blindly:
 - **SSRF protection**: only `http(s)`, no credentials in the URL, every redirect hop is
   validated, private/loopback/link-local/CGNAT/ULA/metadata addresses are refused, and the
   connection is pinned to the vetted IP so a second DNS answer cannot rebind it.
-  `CC_TERMUX_WEB_ALLOW_PRIVATE=1` allows private addresses for local development.
+  `MODELMESH_WEB_ALLOW_PRIVATE=1` allows private addresses for local development.
 - **Prompt-injection guard rails**: control and zero-width characters are stripped, the text
   is fenced as `<<<UNTRUSTED WEB CONTENT ... >>>` with a "data, not instructions" banner, and
   instruction-smuggling phrases are flagged in a warning banner.
 
-Environment: `CC_TERMUX_WEB_TIMEOUT_MS` (20000), `CC_TERMUX_WEB_MAX_BYTES` (4000000),
-`CC_TERMUX_WEB_ALLOW_PRIVATE`, `CC_TERMUX_WEB_READER_PROXY=1` (read blocked pages through
-`r.jina.ai`), `CC_TERMUX_SEARX_URL` (SearXNG base URL with JSON enabled),
-`CC_TERMUX_GOOGLE_KEY` + `CC_TERMUX_GOOGLE_CX` (Google Custom Search API).
+Environment: `MODELMESH_WEB_TIMEOUT_MS` (20000), `MODELMESH_WEB_MAX_BYTES` (4000000),
+`MODELMESH_WEB_ALLOW_PRIVATE`, `MODELMESH_WEB_READER_PROXY=1` (read blocked pages through
+`r.jina.ai`), `MODELMESH_SEARX_URL` (SearXNG base URL with JSON enabled),
+`MODELMESH_GOOGLE_KEY` + `MODELMESH_GOOGLE_CX` (Google Custom Search API).
 
 ## WebFetch domain check
 
@@ -342,8 +360,8 @@ domain is safe. With no Anthropic account that check fails and every WebFetch is
 
 A binary patch rewrites that URL to a loopback helper served by the gateway on
 `127.0.0.1:8799`, which answers `{"can_fetch":true}`. The port is fixed because the patch
-replaces the URL with an equal-length string; `CC_TERMUX_DOMAIN_CHECK_PORT` is ignored (and
-logged) rather than letting WebFetch fail silently. `cc-termux doctor` checks that the helper
+replaces the URL with an equal-length string; `MODELMESH_DOMAIN_CHECK_PORT` is ignored (and
+logged) rather than letting WebFetch fail silently. `modelmesh doctor` checks that the helper
 answers and that the installed binary is patched.
 
 ## Shell shims
@@ -364,13 +382,13 @@ missing anchors are skipped with a message, and the unpatched binary is kept as
 `claude.bin.orig`. Apply/status/revert:
 
 ```bash
-cc-termux patch status
-cc-termux patch revert
-CC_TERMUX_NO_UI_PATCH=1 bash install.sh   # skip during install
+modelmesh patch status
+modelmesh patch revert
+MODELMESH_NO_UI_PATCH=1 bash install.sh   # skip during install
 ```
 
 A `<binary>.patched` stamp records the applied state; the launcher re-applies patches when
-the binary is newer than the stamp, and `cc-termux doctor --fix` repairs them on demand.
+the binary is newer than the stamp, and `modelmesh doctor --fix` repairs them on demand.
 
 ## Install layout and self-repair
 
@@ -378,8 +396,8 @@ Claude Code's `/status` expects the native layout, so the installer reproduces i
 
 ```
 ~/.local/bin/claude                        -> ~/.local/share/claude/versions/<version>
-~/.local/share/claude/versions/<version>   the cc-termux launcher
-$PREFIX/bin/cc-termux, $PREFIX/bin/ccp     CLI shims
+~/.local/share/claude/versions/<version>   the modelmesh launcher
+$PREFIX/bin/modelmesh, $PREFIX/bin/mm     CLI shims
 ~/.claude.json                             {"installMethod":"native"}
 ```
 
@@ -387,28 +405,28 @@ $PREFIX/bin/cc-termux, $PREFIX/bin/ccp     CLI shims
 
 - removes `ANTHROPIC_*` and context override keys from Claude Code's `settings.json` env
 - replaces a stale `settings.model` with the active provider model
-- replaces a foreign `claude` binary earlier in `PATH` with the cc-termux shim
+- replaces a foreign `claude` binary earlier in `PATH` with the modelmesh shim
 - removes sample provider entries left by older releases
 - repairs config sanity (active provider, override, routing table, 0600 permissions)
 - regenerates the `/model` picker rows and `settings.model`
 - reinstalls missing launcher shims, restores `commands/provider.md`, rotates logs over 5 MB
 - clears stale session files and idle gateways
 
-Run it on demand with `cc-termux heal`.
+Run it on demand with `modelmesh heal`.
 
 ## Failures and diagnostics
 
 Every failure is persisted, not just printed:
 
-- `~/.cache/cc-termux/gateway.log` — gateway output (startup, requests, retries).
-- `~/.cache/cc-termux/errors.log` — one JSON line per failure:
+- `~/.cache/modelmesh/gateway.log` — gateway output (startup, requests, retries).
+- `~/.cache/modelmesh/errors.log` — one JSON line per failure:
   `{ at, kind, provider, model, status, message }`, where `kind` is `upstream`, `stream` or
   `gateway`. Secrets are redacted before writing.
 
 ```bash
-cc-termux errors [n]   # recent failures, formatted
-cc-termux logs         # gateway log tail
-cc-termux diagnose     # deep install + gateway + key checks
+modelmesh errors [n]   # recent failures, formatted
+modelmesh logs         # gateway log tail
+modelmesh diagnose     # deep install + gateway + key checks
 ```
 
 ## Platform mechanics
@@ -426,13 +444,13 @@ cc-termux diagnose     # deep install + gateway + key checks
 
 The installer refuses Node < 18, retries downloads three times, falls back to a built-in
 gzip+tar extractor when system `tar` is missing, switches to the musl build on glibc older
-than 2.27, and supports `--force-js` / `CC_TERMUX_FORCE_JS=1` to exercise the fallback.
+than 2.27, and supports `--force-js` / `MODELMESH_FORCE_JS=1` to exercise the fallback.
 
 The native binary is fetched fresh from Anthropic's official npm registry on every install;
-cc-termux never hosts or redistributes Claude Code.
+modelmesh never hosts or redistributes Claude Code.
 
 ## Performance mode
 
-Opt-in, off by default, and remembered per install (`cc-termux tune on|off`). It disables
+Opt-in, off by default, and remembered per install (`modelmesh tune on|off`). It disables
 mouse clicks, fancy window titles, undo checkpoints, background work, scheduled tasks, extra
-git prompt text and animations. One-off: `CC_TERMUX_PERF=1 claude`.
+git prompt text and animations. One-off: `MODELMESH_PERF=1 claude`.

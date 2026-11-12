@@ -144,7 +144,7 @@ test("cc-patch resolves its root through cc-paths", () => {
   assert.match(patch, /import \{ installRoot \} from "\.\/cc-paths\.mjs"/);
   assert.match(patch, /const ROOT = installRoot\(\)/);
   // A hardcoded home path would ignore a custom --root, exactly as the uninstaller once did.
-  assert.ok(!/path\.join\(os\.homedir\(\), "\.local", "share", "cc-termux"\)/.test(patch),
+  assert.ok(!/path\.join\(os\.homedir\(\), "\.local", "share", "modelmesh"\)/.test(patch),
     "no hardcoded install root");
 });
 
@@ -152,8 +152,8 @@ test("the installer moves an npm .ps1 aside so it cannot shadow our shim", () =>
   const inst = fs.readFileSync(path.join(root, "install.mjs"), "utf8");
   // PowerShell prefers .ps1 over .cmd in the same directory.
   assert.match(inst, /\.ps1/, "the windows shim block handles .ps1");
-  assert.match(inst, /cc-termux-backup/, "a leftover is moved aside, never deleted");
-  assert.match(inst, /cc-launcher\.mjs.*cc-termux|cc-termux.*cc-launcher\.mjs/s, "our own shim is recognised and kept");
+  assert.match(inst, /modelmesh-backup/, "a leftover is moved aside, never deleted");
+  assert.match(inst, /cc-launcher\.mjs.*modelmesh|modelmesh.*cc-launcher\.mjs/s, "our own shim is recognised and kept");
 });
 
 test("the AgentRouter slug and docs match the preset", () => {

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Google Antigravity OAuth (Cloud Code API) for cc-termux.
+// Google Antigravity OAuth (Cloud Code API) for modelmesh.
 // Public desktop OAuth client, loopback redirect, loadCodeAssist/onboardUser discovery.
 import fs from "node:fs";
 import os from "node:os";
@@ -11,15 +11,15 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { cacheDir, configFile, configDir as pathsConfigDir } from "./cc-paths.mjs";
 
-const MASK = "cc-termux-oauth-v1";
+const MASK = "modelmesh-oauth-v1";
 const ID_BYTES = [82,83,26,69,85,66,91,69,78,29,90,88,68,89,28,64,30,66,16,10,67,70,13,64,92,25,27,95,10,83,70,65,30,89,25,93,12,9,69,64,2,70,93,70,29,93,65,0,5,4,27,3,17,94,12,4,65,17,16,1,8,7,27,66,1,21,16,26,28,3,21,94,14];
 const SECRET_BYTES = [36,44,110,39,53,42,64,62,77,21,41,54,39,64,80,27,58,85,47,41,28,25,41,48,85,6,32,110,91,27,67,5,44,108,16];
 function unmask(bytes) { let out = ""; for (let i = 0; i < bytes.length; i++) out += String.fromCharCode(bytes[i] ^ MASK.charCodeAt(i % MASK.length)); return out; }
-export const CLIENT_ID = process.env.CC_TERMUX_ANTIGRAVITY_CLIENT_ID || unmask(ID_BYTES);
-export const CLIENT_SECRET = process.env.CC_TERMUX_ANTIGRAVITY_CLIENT_SECRET || unmask(SECRET_BYTES);
-export const AUTH_URL = process.env.CC_TERMUX_ANTIGRAVITY_AUTH_URL || "https://accounts.google.com/o/oauth2/v2/auth";
-export const TOKEN_URL = process.env.CC_TERMUX_ANTIGRAVITY_TOKEN_URL || "https://oauth2.googleapis.com/token";
-export const USERINFO_URL = process.env.CC_TERMUX_ANTIGRAVITY_USERINFO_URL || "https://www.googleapis.com/oauth2/v1/userinfo";
+export const CLIENT_ID = process.env.MODELMESH_ANTIGRAVITY_CLIENT_ID || unmask(ID_BYTES);
+export const CLIENT_SECRET = process.env.MODELMESH_ANTIGRAVITY_CLIENT_SECRET || unmask(SECRET_BYTES);
+export const AUTH_URL = process.env.MODELMESH_ANTIGRAVITY_AUTH_URL || "https://accounts.google.com/o/oauth2/v2/auth";
+export const TOKEN_URL = process.env.MODELMESH_ANTIGRAVITY_TOKEN_URL || "https://oauth2.googleapis.com/token";
+export const USERINFO_URL = process.env.MODELMESH_ANTIGRAVITY_USERINFO_URL || "https://www.googleapis.com/oauth2/v1/userinfo";
 export const SCOPES = [
   "https://www.googleapis.com/auth/cloud-platform",
   "https://www.googleapis.com/auth/userinfo.email",
@@ -27,12 +27,12 @@ export const SCOPES = [
   "https://www.googleapis.com/auth/cclog",
   "https://www.googleapis.com/auth/experimentsandconfigs",
 ];
-export const BOOTSTRAP_URL = process.env.CC_TERMUX_ANTIGRAVITY_BOOTSTRAP_URL || "https://cloudcode-pa.googleapis.com";
-export const GENERATE_URL = process.env.CC_TERMUX_ANTIGRAVITY_GENERATE_URL || "https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse";
+export const BOOTSTRAP_URL = process.env.MODELMESH_ANTIGRAVITY_BOOTSTRAP_URL || "https://cloudcode-pa.googleapis.com";
+export const GENERATE_URL = process.env.MODELMESH_ANTIGRAVITY_GENERATE_URL || "https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse";
 // Cloud Code answers 404/5xx on the daily host during rollouts; the plain host serves
 // the same API (same order as the upstream list).
-export const GENERATE_URLS = process.env.CC_TERMUX_ANTIGRAVITY_GENERATE_URL
-  ? [process.env.CC_TERMUX_ANTIGRAVITY_GENERATE_URL]
+export const GENERATE_URLS = process.env.MODELMESH_ANTIGRAVITY_GENERATE_URL
+  ? [process.env.MODELMESH_ANTIGRAVITY_GENERATE_URL]
   : [
       "https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse",
       "https://cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse",
@@ -202,10 +202,10 @@ export async function fetchUserInfo(accessToken, fetchImpl = fetch) {
 }
 
 export async function ensureAccessToken(creds, { fetchImpl = fetch, force = false } = {}) {
-  if (!creds) throw new Error("not logged in; run: cc-termux antigravity login");
+  if (!creds) throw new Error("not logged in; run: modelmesh antigravity login");
   const expiresAt = Number(creds.expires_at || 0);
   if (!force && creds.access_token && expiresAt > Date.now() + 60_000) return creds.access_token;
-  if (!creds.refresh_token) throw new Error("access token expired and no refresh token; run: cc-termux antigravity login");
+  if (!creds.refresh_token) throw new Error("access token expired and no refresh token; run: modelmesh antigravity login");
   const t = await refreshToken(creds.refresh_token, fetchImpl);
   const next = {
     ...creds,
@@ -268,7 +268,7 @@ export function parseAvailableModels(data) {
   } else {
     for (const [id, info] of Object.entries(src)) {
       const official = OFFICIAL_MODEL_RE.test(id) || ARGON_MODEL_RE.test(id);
-      if (!official && process.env.CC_TERMUX_ANTIGRAVITY_ALL_MODELS !== "1") continue;
+      if (!official && process.env.MODELMESH_ANTIGRAVITY_ALL_MODELS !== "1") continue;
       add(id, info);
     }
   }
@@ -351,7 +351,7 @@ export async function postCloud(urls, accessToken, body, { fetchImpl = fetch, ti
 
 export async function fetchAvailableModels({ fetchImpl = fetch, timeoutMs = 10000 } = {}) {
   const creds = loadCredentials();
-  if (!creds) throw new Error("not logged in; run: cc-termux antigravity login");
+  if (!creds) throw new Error("not logged in; run: modelmesh antigravity login");
   const token = await ensureAccessToken(creds, { fetchImpl });
   const data = await postCloud(FETCH_MODELS_URLS, token, creds.project_id ? { project: creds.project_id } : {}, { fetchImpl, timeoutMs });
   return parseAvailableModels(data);
@@ -359,7 +359,7 @@ export async function fetchAvailableModels({ fetchImpl = fetch, timeoutMs = 1000
 
 export async function fetchQuotaSummary({ fetchImpl = fetch, timeoutMs = 10000 } = {}) {
   const creds = loadCredentials();
-  if (!creds) throw new Error("not logged in; run: cc-termux antigravity login");
+  if (!creds) throw new Error("not logged in; run: modelmesh antigravity login");
   const token = await ensureAccessToken(creds, { fetchImpl });
   const data = await postCloud(QUOTA_SUMMARY_URLS, token, creds.project_id ? { project: creds.project_id } : {}, { fetchImpl, timeoutMs });
   return parseQuotaSummary(data);
@@ -367,7 +367,7 @@ export async function fetchQuotaSummary({ fetchImpl = fetch, timeoutMs = 10000 }
 
 export async function fetchQuotaBuckets({ fetchImpl = fetch, timeoutMs = 10000 } = {}) {
   const creds = loadCredentials();
-  if (!creds) throw new Error("not logged in; run: cc-termux antigravity login");
+  if (!creds) throw new Error("not logged in; run: modelmesh antigravity login");
   const token = await ensureAccessToken(creds, { fetchImpl });
   const data = await postCloud(QUOTA_URLS, token, creds.project_id ? { project: creds.project_id } : {}, { fetchImpl, timeoutMs });
   const byFamily = new Map();
@@ -392,7 +392,7 @@ export async function getAntigravityUsage({ force = false, fetchImpl = fetch, ti
     if (cached && cached.fetchedAt && Date.now() - cached.fetchedAt < 60_000) return cached;
   }
   const creds = loadCredentials();
-  if (!creds) throw new Error("not logged in; run: cc-termux antigravity login");
+  if (!creds) throw new Error("not logged in; run: modelmesh antigravity login");
   let groups = [];
   let source = "summary";
   try { groups = (await fetchQuotaSummary({ fetchImpl, timeoutMs })).groups; } catch (e) { groups = []; }
@@ -411,7 +411,7 @@ export async function updateProviderModels({ log = console.log, timeoutMs = 1500
   const cfg = JSON.parse(fs.readFileSync(cfgFile, "utf8"));
   const name = Object.keys(cfg.providers || {}).find((n) => cfg.providers[n].type === "antigravity") || "antigravity";
   const p = cfg.providers[name];
-  if (!p) throw new Error("no antigravity provider configured; run cc-termux setup");
+  if (!p) throw new Error("no antigravity provider configured; run modelmesh setup");
   const old = new Set(Object.keys(p.modelsById || {}));
   p.modelsById = {};
   for (const m of models) p.modelsById[m.id] = { name: m.name, contextTokens: m.contextTokens || 0, inUsd: null, outUsd: null };
@@ -500,7 +500,7 @@ export async function login({ log = console.log, timeoutMs = 300000, fetchImpl =
     });
   });
   // Accept a manually pasted callback URL / raw code too (headless/browser code screens).
-  let manualInput = process.env.CC_TERMUX_ANTIGRAVITY_CODE || process.env.CC_TERMUX_OAUTH_CALLBACK_URL || "";
+  let manualInput = process.env.MODELMESH_ANTIGRAVITY_CODE || process.env.MODELMESH_OAUTH_CALLBACK_URL || "";
   const manualPromise = (async () => {
     if (manualInput) return parseCallbackInput(manualInput, state);
     if (!process.stdin.isTTY) return await new Promise(() => { }); // headless: wait for callback/env code
@@ -548,7 +548,7 @@ export async function login({ log = console.log, timeoutMs = 300000, fetchImpl =
 
 export async function ensureProject({ log = console.log, fetchImpl = fetch } = {}) {
   const creds = loadCredentials();
-  if (!creds) throw new Error("not logged in; run: cc-termux antigravity login");
+  if (!creds) throw new Error("not logged in; run: modelmesh antigravity login");
   const token = await ensureAccessToken(creds, { fetchImpl });
   if (creds.project_id) return creds;
   const project = await discoverProject(token, { fetchImpl, log });

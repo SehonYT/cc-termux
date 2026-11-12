@@ -14,7 +14,7 @@ const composite = (p, id) => id ? "prov/" + p + "/" + id : id;
 
 const cfg = load();
 const list = Object.entries(cfg.providers || {}).filter(([, p]) => !p.hidden);
-if (!list.length) { console.log("no providers configured - run cc-termux setup"); process.exit(1); }
+if (!list.length) { console.log("no providers configured - run modelmesh setup"); process.exit(1); }
 
 if (!process.stdin.isTTY) {
   list.forEach(([n, p], i) => console.log((n === cfg.active ? "> " : "  ") + (i + 1) + ". " + n + "  " + (p.model || "")));
@@ -25,7 +25,7 @@ let sel = Math.max(0, list.findIndex(([n]) => n === cfg.active));
 const out = (s) => process.stdout.write(s);
 const draw = () => {
   out(ESC + "[2J" + ESC + "[H");
-  out("  cc-termux - provider picker\n\n");
+  out("  modelmesh - provider picker\n\n");
   list.forEach(([name, p], i) => {
     const mark = i === sel ? "\u276f" : " ";
     const active = name === cfg.active ? " \u2714" : "  ";

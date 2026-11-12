@@ -19,7 +19,7 @@ function setup(anchor) {
 
 function run(root, arg) {
   return spawnSync(process.execPath, [path.join(repo, "bin", "cc-patch.mjs"), arg], {
-    env: { ...process.env, CC_TERMUX_ROOT: root }, encoding: "utf8",
+    env: { ...process.env, MODELMESH_ROOT: root }, encoding: "utf8",
   });
 }
 

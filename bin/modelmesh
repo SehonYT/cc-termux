@@ -173,8 +173,8 @@ function antigravityState() {
     const f = path.join(path.dirname(CFG), "antigravity.json");
     const c = JSON.parse(fs.readFileSync(f, "utf8"));
     if (c && c.access_token) return { ok: true, detail: "OAuth" + (c.email ? " " + c.email : "") + (c.project_id ? " · project " + c.project_id : "") };
-    return { ok: false, detail: "not logged in (run: cc-termux antigravity login)" };
-  } catch (e) { return { ok: false, detail: "not logged in (run: cc-termux antigravity login)" }; }
+    return { ok: false, detail: "not logged in (run: modelmesh antigravity login)" };
+  } catch (e) { return { ok: false, detail: "not logged in (run: modelmesh antigravity login)" }; }
 }
 
 async function doctor(fix) {
@@ -187,16 +187,16 @@ async function doctor(fix) {
   const warn = (m) => { issues++; lines.push("  \u26a0 " + m); };
   const fail = (m) => { issues++; lines.push("  \u2716 " + m); };
 
-  lines.push("cc-termux doctor" + (fix ? "  (--fix)" : ""));
+  lines.push("modelmesh doctor" + (fix ? "  (--fix)" : ""));
   const vis = visibleProviders(c);
-  if (!vis.length) fail("no providers configured (run: cc-termux setup)"); else pass(vis.length + " provider(s): " + vis.map(([n]) => n).join(", "));
+  if (!vis.length) fail("no providers configured (run: modelmesh setup)"); else pass(vis.length + " provider(s): " + vis.map(([n]) => n).join(", "));
 
   for (const [name, p] of vis) {
     if (p.type === "antigravity") {
       const st = antigravityState();
       if (!st.ok) fail("provider " + name + ": " + st.detail); else pass("provider " + name + ": " + st.detail);
     } else if (!p.noKey && !ks[name] && !p.apiKeyEnv) {
-      fail("provider " + name + " has no API key (cc-termux key " + name + " <key>)");
+      fail("provider " + name + " has no API key (modelmesh key " + name + " <key>)");
     }
     const mc = Object.keys(p.modelsById || {}).length;
     let shownModel = p.model;
@@ -205,13 +205,13 @@ async function doctor(fix) {
       const mm = /^prov\/([^/]+)\/(.+)$/.exec(String(sm));
       if (mm && mm[1] === name) shownModel = mm[2];
     } catch (e) { }
-    if (!mc) warn("provider " + name + " has no cached models (run: cc-termux setup)");
+    if (!mc) warn("provider " + name + " has no cached models (run: modelmesh setup)");
     else pass("provider " + name + ": " + shownModel + "  (" + mc + " models, retries " + (p.retries || 5) + ")");
   }
 
   try {
     const pids = await gatewayPids();
-    if (pids.length > 1) warn(pids.length + " gateway processes running (run: cc-termux restart)");
+    if (pids.length > 1) warn(pids.length + " gateway processes running (run: modelmesh restart)");
   } catch (e) { }
   const portv = (c.listen && c.listen.port) || 8788;
   let health = null;
@@ -261,9 +261,9 @@ async function doctor(fix) {
             fixed++;
           } catch (e) { }
         }
-        pass("replaced foreign claude binary with the cc-termux shim (" + others.join(", ") + ")");
-      } else warn("claude resolves to " + rc + " (official install, not the cc-termux shim) - doctor --fix replaces it");
-    } else pass("claude resolves to the cc-termux shim");
+        pass("replaced foreign claude binary with the modelmesh shim (" + others.join(", ") + ")");
+      } else warn("claude resolves to " + rc + " (official install, not the modelmesh shim) - doctor --fix replaces it");
+    } else pass("claude resolves to the modelmesh shim");
   }
   const envKeys = Object.keys((settings.env) || {}).filter((k) => /^ANTHROPIC_/.test(k) || k === "CLAUDE_CODE_MAX_CONTEXT_TOKENS");
   if (envKeys.length) {
@@ -287,7 +287,7 @@ async function doctor(fix) {
   const have = ((settings.modelPicker || {}).options || []).length;
   if (have === expected) pass("model picker in sync (" + have + " rows)");
   else if (fix) { const r = writePicker(c); fixed++; pass("picker rebuilt: " + r.switchRows.length + " switch rows + " + r.options.length + " models"); }
-  else fail("picker out of sync: has " + have + " rows, expected " + expected + " (cc-termux sync-picker)");
+  else fail("picker out of sync: has " + have + " rows, expected " + expected + " (modelmesh sync-picker)");
 
   const ov = c.override;
   if (ov) {
@@ -303,7 +303,7 @@ async function doctor(fix) {
     const stale = Object.keys(gem[1].modelsById || {}).filter((id) => !isGeminiChatModel(id));
     if (!stale.length) pass("gemini catalog has only chat models (" + Object.keys(gem[1].modelsById || {}).length + ")");
     else if (fix) { for (const id of stale) delete gem[1].modelsById[id]; rebuild(c); save(c); writePicker(c); fixed++; pass("pruned " + stale.length + " non-chat gemini models"); }
-    else warn(stale.length + " non-chat gemini models in picker (cc-termux doctor --fix)");
+    else warn(stale.length + " non-chat gemini models in picker (modelmesh doctor --fix)");
   }
 
   // The skill pack is content the user may have edited; report it like the picker.
@@ -313,9 +313,9 @@ async function doctor(fix) {
     const stale = sk.filter((s) => s.state === "outdated" || s.state === "partial");
     const edited = sk.filter((s) => s.state === "modified");
     if (missing.length && fix) { await installSkills(); fixed++; pass("installed " + missing.length + " missing skill(s)"); }
-    else if (missing.length) warn(missing.length + " skill(s) not installed (cc-termux skills install)");
+    else if (missing.length) warn(missing.length + " skill(s) not installed (modelmesh skills install)");
     else if (stale.length && fix) { await installSkills(); fixed++; pass("updated " + stale.length + " skill(s)"); }
-    else if (stale.length) warn(stale.length + " skill(s) have an update (cc-termux skills install)");
+    else if (stale.length) warn(stale.length + " skill(s) have an update (modelmesh skills install)");
     else pass("agent skills installed (" + sk.length + ")" + (edited.length ? ", " + edited.length + " locally modified and kept" : ""));
   } catch (e) { }
 
@@ -334,7 +334,7 @@ async function doctor(fix) {
         if (!pending) fixed++;
       } catch (e) { }
     }
-    if (pending) warn(pending + " TUI patches pending (cc-termux patch)"); else pass("TUI patches applied (" + applied + ")");
+    if (pending) warn(pending + " TUI patches pending (modelmesh patch)"); else pass("TUI patches applied (" + applied + ")");
   } catch (e) { warn("could not read patch status"); }
 
   // WebFetch's domain-safety check only works when both halves agree: the gateway's helper
@@ -358,22 +358,22 @@ async function doctor(fix) {
     } else if (patchState === "applied") {
       warn("WebFetch domain check: binary is patched for 127.0.0.1:8799 but " + helperNote + " - WebFetch will fail (run: claude to start the gateway)");
     } else if (patchState === "pending") {
-      warn("WebFetch domain check: " + helperNote + ", but the installed binary is not patched to use it - WebFetch will ask api.anthropic.com (run: cc-termux patch)");
+      warn("WebFetch domain check: " + helperNote + ", but the installed binary is not patched to use it - WebFetch will ask api.anthropic.com (run: modelmesh patch)");
     } else if (patchState === "missing") {
-      warn("WebFetch domain check: this Claude Code build has no domain-check anchor, so the binary cannot be patched and " + helperNote + " (run: cc-termux update)");
+      warn("WebFetch domain check: this Claude Code build has no domain-check anchor, so the binary cannot be patched and " + helperNote + " (run: modelmesh update)");
     } else {
-      warn("WebFetch domain check: cannot verify the binary patch (" + helperNote + ") - run: cc-termux update, then cc-termux patch");
+      warn("WebFetch domain check: cannot verify the binary patch (" + helperNote + ") - run: modelmesh update, then modelmesh patch");
     }
   }
 
   // The picker shim lives in different places per platform (and per install style).
-  const ccpCandidates = [
-    path.join(ROOT, "bin", process.platform === "win32" ? "ccp.cmd" : "ccp"),
-    path.join(os.homedir(), ".local", "bin", process.platform === "win32" ? "ccp.cmd" : "ccp"),
-    path.join(process.env.PREFIX || "", "bin", process.platform === "win32" ? "ccp.cmd" : "ccp"),
+  const mmCandidates = [
+    path.join(ROOT, "bin", process.platform === "win32" ? "mm.cmd" : "mm"),
+    path.join(os.homedir(), ".local", "bin", process.platform === "win32" ? "mm.cmd" : "mm"),
+    path.join(process.env.PREFIX || "", "bin", process.platform === "win32" ? "mm.cmd" : "mm"),
   ].filter((p) => p && !p.startsWith(path.sep + "bin"));
-  const ccpPath = ccpCandidates.find((p) => { try { return fs.existsSync(p); } catch (e) { return false; } });
-  if (ccpPath) pass("ccp picker installed"); else warn("ccp not installed (run install.sh)");
+  const mmPath = mmCandidates.find((p) => { try { return fs.existsSync(p); } catch (e) { return false; } });
+  if (mmPath) pass("mm picker installed"); else warn("mm not installed (run install.sh)");
   try {
     const log = path.join(CACHE, "gateway.log");
     const tail = fs.readFileSync(log, "utf8").split("\n").slice(-300).join("\n");
@@ -400,7 +400,7 @@ async function doctor(fix) {
 
   console.log(lines.join("\n"));
   console.log("");
-  console.log(issues === 0 ? "all checks passed" : issues + " issue(s)" + (fix ? ", " + fixed + " fixed" : " (run: cc-termux doctor --fix)"));
+  console.log(issues === 0 ? "all checks passed" : issues + " issue(s)" + (fix ? ", " + fixed + " fixed" : " (run: modelmesh doctor --fix)"));
 }
 function claudeCandidates() {
   const dirs = String(process.env.PATH || '').split(path.delimiter).filter(Boolean);
@@ -445,7 +445,7 @@ async function checkProviderKey(name, p) {
 async function diagnose() {
   const c = (() => { try { return load(); } catch (e) { return null; } })();
   const hdr = (s) => console.log("\n" + s);
-  hdr("cc-termux diagnose");
+  hdr("modelmesh diagnose");
   console.log("  node      " + process.version + "  " + process.platform + "/" + process.arch);
   console.log("  root      " + ROOT + "  exists=" + fs.existsSync(ROOT));
   console.log("  config    " + CFG + "  exists=" + fs.existsSync(CFG));
@@ -478,7 +478,7 @@ async function diagnose() {
   let bstat = null; try { bstat = fs.statSync(bin); } catch (e) {}
   console.log("  binary    " + bin + (bstat ? "  " + (bstat.size / 1e6).toFixed(1) + " MB" : "  MISSING"));
   if (!bstat) {
-    console.log("  next      install Claude Code: cc-termux update");
+    console.log("  next      install Claude Code: modelmesh update");
     return;
   }
   console.log("  direct    " + fs.existsSync(path.join(ROOT, ".direct-exec")));
@@ -491,13 +491,13 @@ async function diagnose() {
   const pids = await gatewayPids();
   console.log("  gateway   " + (health ? "UP active=" + health.active : "DOWN") + "  pids=" + JSON.stringify(pids));
   if (!c || !c.active || !(c.providers && c.providers[c.active])) {
-    console.log("  next      run: cc-termux setup");
+    console.log("  next      run: modelmesh setup");
     return;
   }
   if (!health) {
     hdr("gateway start attempt");
     const { spawn } = await import("node:child_process");
-    const child = spawn(process.execPath, [path.join(ROOT, "proxy", "server.mjs")], { env: { ...process.env, CC_TERMUX_CONFIG: CFG }, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(process.execPath, [path.join(ROOT, "proxy", "server.mjs")], { env: { ...process.env, MODELMESH_CONFIG: CFG }, stdio: ["ignore", "pipe", "pipe"] });
     let buf = ""; child.stdout.on("data", (d) => buf += d); child.stderr.on("data", (d) => buf += d);
     let started = false;
     for (let i = 0; i < 30; i++) {
@@ -509,17 +509,17 @@ async function diagnose() {
     try { child.kill(); } catch (e) {}
   }
   hdr("hints");
-  if (!c || !Object.keys(c.providers || {}).length) console.log("  - no provider configured: run: cc-termux setup");
+  if (!c || !Object.keys(c.providers || {}).length) console.log("  - no provider configured: run: modelmesh setup");
   if (process.env.HTTP_PROXY || process.env.HTTPS_PROXY) console.log("  - proxy env is set; add 127.0.0.1 to NO_PROXY");
   if (!bstat) console.log("  - binary missing: re-run the installer");
-  if (pids.length > 1) console.log("  - duplicate gateways: cc-termux restart");
+  if (pids.length > 1) console.log("  - duplicate gateways: modelmesh restart");
 }
 
 const cmd = process.argv[2];
 const args = process.argv.slice(3);
 
 const HELP = [
-  "cc-termux \u2014 Claude Code with any provider",
+  "modelmesh \u2014 Claude Code with any provider",
   "",
   "Getting started",
   "  setup                 interactive provider wizard (OpenRouter, Gemini, Antigravity, local...)",
@@ -542,12 +542,12 @@ const HELP = [
   "  nararouter usage      NaraRouter plans, rate limits and model tiers",
   "  web [status|key|test] web search providers (Tavily, Brave, Jina) + built-in scraper",
   "  skills [install|status] agent skills (ponytail, agent-browser, security, design)",
-  "  uninstall [--yes]  remove cc-termux and restore Claude Code to normal",
+  "  uninstall [--yes]  remove modelmesh and restore Claude Code to normal",
   "  antigravity models --update   refresh models from Google",
   "  statusline [--install]        Claude Code status line (model + quota)",
   "",
   "Maintenance",
-  "  update [--check]      update cc-termux (and Claude Code when needed)",
+  "  update [--check]      update modelmesh (and Claude Code when needed)",
   "  update-claude         reinstall latest Claude Code binary",
   "  patch [status|revert] inspect or revert TUI patches",
   "  heal                  auto-repair PATH/settings",
@@ -557,7 +557,7 @@ const HELP = [
   "  tune [on|off]         performance mode for phones",
   "  path                  print install/config paths",
   "",
-  "Run cc-termux <command> --help where available.",
+  "Run modelmesh <command> --help where available.",
 ].join("\n");
 
 function decode(s) {
@@ -630,7 +630,7 @@ switch (cmd) {
     const strip = (s) => String(s).replace(/\x1b\[[0-9;]*m/g, "");
     const pad = (s, n) => strip(s).padEnd(n);
     let stamp = {};
-    try { stamp = JSON.parse(fs.readFileSync(path.join(ROOT, "cc-termux.json"), "utf8")); } catch (e) { }
+    try { stamp = JSON.parse(fs.readFileSync(path.join(ROOT, "modelmesh.json"), "utf8")); } catch (e) { }
     let activeName = c.active;
     let active = c.providers && c.providers[activeName];
     let activeId = active && active.model;
@@ -642,7 +642,7 @@ switch (cmd) {
     const activeModel = active && (active.modelsById && active.modelsById[activeId] ? active.modelsById[activeId].name : activeId || active.model || active.defaultModel || "-");
     const keyState = active ? (active.type === "antigravity" ? "OAuth" : active.noKey ? "no key" : ((loadKeys()[activeName] || active.apiKeyEnv) ? "key set" : "no key")) : "";
     console.log();
-    console.log(bold("  cc-termux") + dim("  " + (stamp.version || "dev") + "  " + process.platform + " " + process.arch));
+    console.log(bold("  modelmesh") + dim("  " + (stamp.version || "dev") + "  " + process.platform + " " + process.arch));
     console.log();
     console.log("  gateway   " + (h ? color("32", "● UP") + dim("  http://127.0.0.1:" + port(c)) : color("33", "○ DOWN") + dim("  starts automatically with claude")));
     console.log("  active    " + (activeName ? bold(activeName) + (active && active.type !== activeName ? dim("  " + active.type) : "") : dim("none")));
@@ -666,13 +666,13 @@ switch (cmd) {
       console.log("   " + marker + " " + pad(name, 15) + dim(pad(p.type, 12)) + pad(model, 32) + dim(key));
     }
     if (!Object.keys(c.providers || {}).filter((n) => !c.providers[n].hidden).length) {
-      console.log(dim("   no providers yet - run: cc-termux setup"));
+      console.log(dim("   no providers yet - run: modelmesh setup"));
     }
     console.log();
     if (Object.keys(c.providers || {}).filter((n) => !c.providers[n].hidden).length) {
-      console.log(dim("  next: ") + "claude" + dim("   |   /model to switch   |   /provider to switch provider   |   cc-termux doctor"));
+      console.log(dim("  next: ") + "claude" + dim("   |   /model to switch   |   /provider to switch provider   |   modelmesh doctor"));
     } else {
-      console.log(dim("  next: ") + "cc-termux setup" + dim("   adds a provider (OpenRouter, Gemini, Antigravity, local...) "));
+      console.log(dim("  next: ") + "modelmesh setup" + dim("   adds a provider (OpenRouter, Gemini, Antigravity, local...) "));
     }
     console.log();
     break;
@@ -706,7 +706,7 @@ switch (cmd) {
         console.log((name === c.active ? " \u2714 " : "   ") + name.padEnd(14) + String(p.type).padEnd(12) + " " + model + "  key=" + keyLabel);
         shown++;
       }
-      if (!shown) console.log("no providers configured - run: cc-termux setup");
+      if (!shown) console.log("no providers configured - run: modelmesh setup");
       if (c.override) console.log("override: " + c.override.provider + " -> " + (c.override.model || "default"));
       break;
     }
@@ -726,7 +726,7 @@ switch (cmd) {
   case "key": {
     const c = load();
     const [name, key] = args;
-    if (!name || !key) { console.error("usage: cc-termux key <provider> <key>"); process.exit(1); }
+    if (!name || !key) { console.error("usage: modelmesh key <provider> <key>"); process.exit(1); }
     if (!c.providers[name]) { console.error("unknown provider:", name); process.exit(1); }
     const ks = loadKeys(); ks[name] = key; saveKeys(ks);
     console.log("stored key for " + name + " in keys.json");
@@ -736,7 +736,7 @@ switch (cmd) {
   case "use": {
     const c = load();
     let id = args[0];
-    if (!id) { console.error("usage: cc-termux use <model-id>   (see: cc-termux models)"); process.exit(1); }
+    if (!id) { console.error("usage: modelmesh use <model-id>   (see: modelmesh models)"); process.exit(1); }
     const cat = await catalog(false);
     const entry = cat.models.find(m => m.id === id);
     if (!entry) { console.error("model not found in catalog: " + id); process.exit(1); }
@@ -777,7 +777,7 @@ switch (cmd) {
   case "map": {
     const c = load();
     const [name, from, to] = args;
-    if (!name || !from || !to) { console.error("usage: cc-termux map <provider> <claude-model> <upstream-model>"); process.exit(1); }
+    if (!name || !from || !to) { console.error("usage: modelmesh map <provider> <claude-model> <upstream-model>"); process.exit(1); }
     if (!c.providers[name]) { console.error("unknown provider:", name); process.exit(1); }
     c.providers[name].models = c.providers[name].models || {};
     c.providers[name].models[from] = to; save(c);
@@ -889,7 +889,7 @@ switch (cmd) {
       console.log(naraFormatUsage(plans, { active: args[1] || "free", observed: cache.observed || null }));
       break;
     }
-    console.log("usage: cc-termux nararouter [usage|plans] [plan] [--json]");
+    console.log("usage: modelmesh nararouter [usage|plans] [plan] [--json]");
     break;
   }
   case "uninstall": {
@@ -905,7 +905,7 @@ switch (cmd) {
       console.log("skill pack (" + status.filter((s) => s.installed).length + "/" + status.length + " installed):");
       console.log(formatSkills(status));
       console.log();
-      console.log("install: cc-termux skills install   ·   also in the setup wizard (s)");
+      console.log("install: modelmesh skills install   ·   also in the setup wizard (s)");
       break;
     }
     if (sub === "install") {
@@ -933,7 +933,7 @@ switch (cmd) {
       console.log("removed " + r.removed.length + " skill(s)" + (r.removed.length ? ": " + r.removed.join(", ") : ""));
       break;
     }
-    console.log("usage: cc-termux skills [status|install [id...] [--force]|sync [id...] [--apply]|remove [id...]]");
+    console.log("usage: modelmesh skills [status|install [id...] [--force]|sync [id...] [--apply]|remove [id...]]");
     break;
   }
   case "web": {
@@ -958,9 +958,9 @@ switch (cmd) {
         console.log("  " + String(i + 1).padStart(2) + ". " + info.label.padEnd(28) + state);
       });
       console.log();
-      console.log("set a key:  cc-termux web key <tavily|brave|jina> <key>");
-      console.log("clear one:  cc-termux web clear <tavily|brave|jina>");
-      console.log("test:       cc-termux web test [query]");
+      console.log("set a key:  modelmesh web key <tavily|brave|jina> <key>");
+      console.log("clear one:  modelmesh web clear <tavily|brave|jina>");
+      console.log("test:       modelmesh web test [query]");
       console.log("also in env: " + WEB_PROVIDERS.filter((id) => PROVIDER_INFO[id].env).map((id) => PROVIDER_INFO[id].env).join(", "));
       break;
     }
@@ -968,7 +968,7 @@ switch (cmd) {
       const id = String(args[1] || "").toLowerCase();
       const value = args.slice(2).join(" ").trim();
       if (!PROVIDER_INFO[id] || id === "local") { console.error("unknown provider: " + (args[1] || "(none)") + "  (use tavily, brave or jina)"); process.exit(1); }
-      if (!value) { console.error("usage: cc-termux web key " + id + " <key>"); process.exit(1); }
+      if (!value) { console.error("usage: modelmesh web key " + id + " <key>"); process.exit(1); }
       cfg.keys[id] = value;
       writeWebConfig(cfg);
       console.log("saved " + PROVIDER_INFO[id].label + " key");
@@ -992,7 +992,7 @@ switch (cmd) {
       if (out.rows.length) { console.log(); out.rows.slice(0, 3).forEach((r, i) => console.log("  " + (i + 1) + ". " + r.title + "\n     " + r.url)); }
       break;
     }
-    console.log("usage: cc-termux web [status|key <name> <key>|clear <name>|test [query]]");
+    console.log("usage: modelmesh web [status|key <name> <key>|clear <name>|test [query]]");
     break;
   }
   case "presets": {
@@ -1000,7 +1000,7 @@ switch (cmd) {
     const list = p.free || [];
     if (args.includes("--json")) { console.log(JSON.stringify(list, null, 2)); break; }
     for (const x of list) console.log(x.id.padEnd(16) + x.name.padEnd(34) + (x.local ? "(local) " : "") + (x.noKey ? "(no key)" : "") + "  " + x.baseUrl);
-    console.log("\nadd one: cc-termux setup -> 3   (or CC_SETUP_NONINTERACTIVE=1 CC_SETUP_PRESET=<id> for scripted)");
+    console.log("\nadd one: modelmesh setup -> 3   (or CC_SETUP_NONINTERACTIVE=1 CC_SETUP_PRESET=<id> for scripted)");
     break;
   }
   case "diagnose": {
@@ -1022,7 +1022,7 @@ switch (cmd) {
   }
   case "antigravity": {
     const sub = args[0] || "status";
-    if (!["login", "status", "logout", "refresh", "usage", "models"].includes(sub)) { console.log("usage: cc-termux antigravity [login|status|logout|usage|models]"); break; }
+    if (!["login", "status", "logout", "refresh", "usage", "models"].includes(sub)) { console.log("usage: modelmesh antigravity [login|status|logout|usage|models]"); break; }
     execFileSync(process.execPath, [path.join(ROOT, "bin", "cc-antigravity.mjs"), sub === "refresh" ? "status" : sub], { stdio: "inherit" });
     if ((sub === "login" || sub === "logout" || sub === "usage") || (sub === "models" && args.includes("--update"))) refreshStatusLineFile();
     break;
@@ -1038,13 +1038,13 @@ switch (cmd) {
   case "tune": {
     const mode = (args[0] || "status").toLowerCase();
     const allowed = { on: "on", mobile: "on", off: "off", normal: "off", auto: "off", status: "status" };
-    if (!(mode in allowed)) { console.log("usage: cc-termux tune [on|off|auto|status]"); break; }
+    if (!(mode in allowed)) { console.log("usage: modelmesh tune [on|off|auto|status]"); break; }
     const c = load();
     const prevPerf = { ...(c.performance || {}) };
     if (mode !== "status") c.performance = { ...prevPerf, mode: allowed[mode] };
     let perfMod;
     try { perfMod = await import("file://" + path.join(ROOT, "bin", "cc-perf.mjs")); }
-    catch (e) { console.log("performance module is missing - run: cc-termux update"); break; }
+    catch (e) { console.log("performance module is missing - run: modelmesh update"); break; }
     const r = perfMod.resolvePerf({ mode: (c.performance && c.performance.mode) || "off" });
     const cjPath = path.join(os.homedir(), ".claude.json");
     let cj = {};

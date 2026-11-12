@@ -11,15 +11,15 @@ const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
 function startGateway(tmp, port, config) {
   const home = path.join(tmp, "home");
-  fs.mkdirSync(path.join(home, ".cache", "cc-termux"), { recursive: true });
+  fs.mkdirSync(path.join(home, ".cache", "modelmesh"), { recursive: true });
   const cfg = path.join(tmp, "config.json");
   fs.writeFileSync(cfg, JSON.stringify(config));
-  const cache = path.join(home, ".cache", "cc-termux");
+  const cache = path.join(home, ".cache", "modelmesh");
   fs.mkdirSync(cache, { recursive: true });
   const child = spawn(process.execPath, [path.join(root, "proxy", "server.mjs")], {
     // Pin the cache explicitly: on Windows the resolver would otherwise use LOCALAPPDATA and
     // the assertions below read from this isolated home directory.
-    env: { ...process.env, HOME: home, USERPROFILE: home, CC_TERMUX_CONFIG: cfg, CC_TERMUX_CACHE: cache },
+    env: { ...process.env, HOME: home, USERPROFILE: home, MODELMESH_CONFIG: cfg, MODELMESH_CACHE: cache },
     stdio: ["ignore", "pipe", "pipe"],
   });
   return { child, home };
@@ -40,7 +40,7 @@ test("gateway reports a clear error when no provider is configured", async () =>
   try {
     assert.ok(await waitHealth(port), "gateway did not start");
     const res = await fetch("http://127.0.0.1:" + port + "/v1/messages", {
-      method: "POST", headers: { "content-type": "application/json", authorization: "Bearer cc-termux-local" },
+      method: "POST", headers: { "content-type": "application/json", authorization: "Bearer modelmesh-local" },
       body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 5, messages: [{ role: "user", content: "hi" }] }),
     });
     assert.equal(res.status, 400);
@@ -63,11 +63,11 @@ test("gateway logs upstream failures to errors.log", async () => {
   try {
     assert.ok(await waitHealth(port), "gateway did not start");
     const res = await fetch("http://127.0.0.1:" + port + "/v1/messages", {
-      method: "POST", headers: { "content-type": "application/json", authorization: "Bearer cc-termux-local" },
+      method: "POST", headers: { "content-type": "application/json", authorization: "Bearer modelmesh-local" },
       body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 5, messages: [{ role: "user", content: "hi" }] }),
     });
     assert.ok(res.status >= 500);
-    const log = path.join(home, ".cache", "cc-termux", "errors.log");
+    const log = path.join(home, ".cache", "modelmesh", "errors.log");
     assert.ok(fs.existsSync(log), "errors.log was not written");
     const entry = JSON.parse(fs.readFileSync(log, "utf8").trim().split("\n").pop());
     assert.equal(entry.kind, "gateway");
@@ -101,7 +101,7 @@ test("count_tokens ignores base64 image payloads", async () => {
     const image = "A".repeat(400000);
     const res = await fetch("http://127.0.0.1:" + port + "/v1/messages/count_tokens", {
       method: "POST",
-      headers: { "content-type": "application/json", authorization: "Bearer cc-termux-local" },
+      headers: { "content-type": "application/json", authorization: "Bearer modelmesh-local" },
       body: JSON.stringify({ model: "x", messages: [{ role: "user", content: [{ type: "image", source: { type: "base64", media_type: "image/png", data: image } }, { type: "text", text: "hi" }] }] }),
     });
     assert.equal(res.status, 200);
@@ -133,7 +133,7 @@ test("gateway translates upstream OpenAI tool calls into Anthropic tool_use bloc
   try {
     assert.ok(await waitHealth(port), "gateway did not start");
     const res = await fetch("http://127.0.0.1:" + port + "/v1/messages", {
-      method: "POST", headers: { "content-type": "application/json", authorization: "Bearer cc-termux-local" },
+      method: "POST", headers: { "content-type": "application/json", authorization: "Bearer modelmesh-local" },
       body: JSON.stringify({ model: "m", max_tokens: 50, stream: true, messages: [{ role: "user", content: "run" }], tools: [{ name: "bash", input_schema: { type: "object", properties: { command: { type: "string" } } } }] }),
     });
     assert.equal(res.status, 200);
@@ -156,13 +156,13 @@ test("discovery lists configured provider models and invalid JSON is rejected", 
   });
   try {
     assert.ok(await waitHealth(port), "gateway did not start");
-    const res = await fetch("http://127.0.0.1:" + port + "/v1/models", { headers: { authorization: "Bearer cc-termux-local" } });
+    const res = await fetch("http://127.0.0.1:" + port + "/v1/models", { headers: { authorization: "Bearer modelmesh-local" } });
     assert.equal(res.status, 200);
     const body = await res.json();
     const ids = body.data.map((m) => m.id).sort();
     assert.deepEqual(ids, ["prov/p/m", "prov/p/n"]);
     const bad = await fetch("http://127.0.0.1:" + port + "/v1/messages", {
-      method: "POST", headers: { "content-type": "application/json", authorization: "Bearer cc-termux-local" }, body: "{bad",
+      method: "POST", headers: { "content-type": "application/json", authorization: "Bearer modelmesh-local" }, body: "{bad",
     });
     assert.equal(bad.status, 400);
     assert.match((await bad.json()).error.message, /invalid JSON/);
@@ -182,10 +182,10 @@ test("explicit provider model ids are not remapped to the default model", async 
   try {
     assert.ok(await waitHealth(port), "gateway did not start");
     await fetch("http://127.0.0.1:" + port + "/v1/messages", {
-      method: "POST", headers: { "content-type": "application/json", authorization: "Bearer cc-termux-local" },
+      method: "POST", headers: { "content-type": "application/json", authorization: "Bearer modelmesh-local" },
       body: JSON.stringify({ model: "m2", max_tokens: 5, messages: [{ role: "user", content: "hi" }] }),
     }).catch(() => { });
-    const log = fs.readFileSync(path.join(home, ".cache", "cc-termux", "gateway.log"), "utf8");
+    const log = fs.readFileSync(path.join(home, ".cache", "modelmesh", "gateway.log"), "utf8");
     assert.match(log, /REQ p -> m2/);
     assert.doesNotMatch(log, /REQ p -> m1/);
   } finally {
@@ -207,10 +207,10 @@ test("a bare classifier model can route to another configured provider", async (
   try {
     assert.ok(await waitHealth(port), "gateway did not start");
     await fetch("http://127.0.0.1:" + port + "/v1/messages", {
-      method: "POST", headers: { "content-type": "application/json", authorization: "Bearer cc-termux-local" },
+      method: "POST", headers: { "content-type": "application/json", authorization: "Bearer modelmesh-local" },
       body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 5, messages: [{ role: "user", content: "hi" }] }),
     }).catch(() => { });
-    const log = fs.readFileSync(path.join(home, ".cache", "cc-termux", "gateway.log"), "utf8");
+    const log = fs.readFileSync(path.join(home, ".cache", "modelmesh", "gateway.log"), "utf8");
     assert.match(log, /REQ claude -> c/);
     assert.doesNotMatch(log, /REQ main -> c/);
   } finally {
@@ -228,14 +228,14 @@ test("auto-mode classifier turns are detected by their system marker and can be 
   try {
     assert.ok(await waitHealth(port), "gateway did not start");
     const res = await fetch("http://127.0.0.1:" + port + "/v1/messages", {
-      method: "POST", headers: { "content-type": "application/json", authorization: "Bearer cc-termux-local" },
+      method: "POST", headers: { "content-type": "application/json", authorization: "Bearer modelmesh-local" },
       body: JSON.stringify({ model: "m1", max_tokens: 512, system: "You are a security monitor for autonomous AI coding agents.\nDo the thing.", stop_sequences: ["</block>"], messages: [{ role: "user", content: "tool call" }] }),
     });
     assert.equal(res.status, 200);
     const body = await res.json();
     assert.match(body.content[0].text, /<block>no<\/block>/);
     const plain = await fetch("http://127.0.0.1:" + port + "/v1/messages", {
-      method: "POST", headers: { "content-type": "application/json", authorization: "Bearer cc-termux-local" },
+      method: "POST", headers: { "content-type": "application/json", authorization: "Bearer modelmesh-local" },
       body: JSON.stringify({ model: "m1", max_tokens: 16, system: "You are a helpful assistant.", messages: [{ role: "user", content: "hi" }] }),
     });
     assert.notEqual(plain.status, 200, "a normal turn must not get the synthetic verdict");

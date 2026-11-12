@@ -52,12 +52,12 @@ test("README keeps the showcase structure", () => {
 
 test("README has a logo, the badge set and the one-line installers", () => {
   assert.match(readme, /<img src="assets\/logo\.png"[^>]*>/, "logo must be shown");
-  assert.match(readme, /img\.shields\.io\/github\/actions\/workflow\/status\/SehonYT\/cc-termux\/ci\.yml/, "CI badge");
+  assert.match(readme, /img\.shields\.io\/github\/actions\/workflow\/status\/SehonYT\/modelmesh\/ci\.yml/, "CI badge");
   assert.match(readme, /img\.shields\.io\/badge\/license-MIT/, "license badge");
   assert.match(readme, /img\.shields\.io\/badge\/node-/, "node badge");
   assert.match(readme, /discord\.gg\/AF8zvEDcSG/, "Discord invite");
-  assert.match(readme, /https:\/\/raw\.githubusercontent\.com\/SehonYT\/cc-termux\/main\/get\.sh/, "POSIX installer");
-  assert.match(readme, /https:\/\/raw\.githubusercontent\.com\/SehonYT\/cc-termux\/main\/get\.ps1/, "Windows installer");
+  assert.match(readme, /https:\/\/raw\.githubusercontent\.com\/SehonYT\/modelmesh\/main\/get\.sh/, "POSIX installer");
+  assert.match(readme, /https:\/\/raw\.githubusercontent\.com\/SehonYT\/modelmesh\/main\/get\.ps1/, "Windows installer");
 });
 
 test("README links every detailed document and does not duplicate sections", () => {
@@ -80,7 +80,7 @@ test("docs are well formed and their links resolve", () => {
   for (const rel of docs) {
     const file = path.join(root, rel);
     const text = fs.readFileSync(file, "utf8");
-    if (rel === "README.md") assert.match(text, /<h1>cc-termux<\/h1>/);
+    if (rel === "README.md") assert.match(text, /<h1>ModelMesh<\/h1>/);
     else if (rel !== "NOTICE") assert.match(text, /^# /, rel + " must start with an H1 title");
     const fences = text.split("\n").filter((l) => /^\s*```/.test(l)).length;
     assert.equal(fences % 2, 0, rel + " has an unclosed code fence");

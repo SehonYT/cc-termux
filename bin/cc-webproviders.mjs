@@ -241,7 +241,7 @@ export async function antigravityGrounding(query, { fetchImpl = fetch, timeoutMs
 
   // Only Gemini models honour googleSearch; Claude and GPT-OSS on Antigravity accept the
   // request but silently drop it, so grounding always runs on a Gemini model.
-  const requested = model || process.env.CC_TERMUX_ANTIGRAVITY_GROUNDING_MODEL || "";
+  const requested = model || process.env.MODELMESH_ANTIGRAVITY_GROUNDING_MODEL || "";
   const chosen = /^gemini-/.test(requested) ? requested : await pickGeminiModel();
   const prompt = "Use Google Search to answer this query, then reply with a short factual summary "
     + "and the source titles you used.\n\nQuery: " + query;

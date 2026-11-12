@@ -31,9 +31,9 @@ test("every catalog entry ships a valid SKILL.md", () => {
 
 test("our own skill descriptions say when to use them, not just what they are", () => {
   // A vendored skill keeps its upstream wording verbatim; only the ones written for
-  // cc-termux are held to the trigger-word rule.
-  const ours = catalog.skills.filter((s) => s.source === "cc-termux");
-  assert.ok(ours.length >= 3, "cc-termux writes several of these");
+  // modelmesh are held to the trigger-word rule.
+  const ours = catalog.skills.filter((s) => s.source === "modelmesh");
+  assert.ok(ours.length >= 3, "modelmesh writes several of these");
   for (const skill of ours) {
     const text = fs.readFileSync(path.join(packDir, skill.dir, "SKILL.md"), "utf8");
     const fm = /^---\r?\n([\s\S]*?)\r?\n---\r?\n/.exec(text)[1];
@@ -57,9 +57,9 @@ test("vendored skills keep their upstream source and licence", () => {
     "frontend-design must ship its licence text");
 });
 
-test("the pack covers coding, browser, design and cc-termux's own tools", () => {
+test("the pack covers coding, browser, design and modelmesh's own tools", () => {
   const ids = catalog.skills.map((s) => s.id);
-  for (const needed of ["ponytail", "agent-browser", "frontend-design", "webapp-quality", "cc-termux-web", "ux-review", "security-audit", "secrets-and-keys", "dep-audit"]) {
+  for (const needed of ["ponytail", "agent-browser", "frontend-design", "webapp-quality", "modelmesh-web", "ux-review", "security-audit", "secrets-and-keys", "dep-audit"]) {
     assert.ok(ids.includes(needed), "pack is missing " + needed);
   }
   const browser = fs.readFileSync(path.join(packDir, "agent-browser", "SKILL.md"), "utf8");
@@ -80,8 +80,8 @@ test("the pack covers coding, browser, design and cc-termux's own tools", () => 
   assert.match(browser, /Never bypass a captcha or bot challenge/);
 });
 
-test("the cc-termux-web skill documents the real chain order", () => {
-  const text = fs.readFileSync(path.join(packDir, "cc-termux-web", "SKILL.md"), "utf8");
+test("the modelmesh-web skill documents the real chain order", () => {
+  const text = fs.readFileSync(path.join(packDir, "modelmesh-web", "SKILL.md"), "utf8");
   assert.match(text, /mcp__web__search/);
   assert.match(text, /mcp__web__fetch/);
   assert.match(text, /Antigravity/, "Google grounding is first when Antigravity is active");
@@ -122,14 +122,14 @@ test("the skills module installs, reports and removes without touching other ski
 function withTarget(fn) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cc-skillup-"));
   const prevDir = process.env.CLAUDE_CONFIG_DIR;
-  const prevRoot = process.env.CC_TERMUX_ROOT;
+  const prevRoot = process.env.MODELMESH_ROOT;
   process.env.CLAUDE_CONFIG_DIR = path.join(tmp, ".claude");
-  process.env.CC_TERMUX_ROOT = root;
+  process.env.MODELMESH_ROOT = root;
   return Promise.resolve()
     .then(() => fn(tmp))
     .finally(() => {
       if (prevDir === undefined) delete process.env.CLAUDE_CONFIG_DIR; else process.env.CLAUDE_CONFIG_DIR = prevDir;
-      if (prevRoot === undefined) delete process.env.CC_TERMUX_ROOT; else process.env.CC_TERMUX_ROOT = prevRoot;
+      if (prevRoot === undefined) delete process.env.MODELMESH_ROOT; else process.env.MODELMESH_ROOT = prevRoot;
       fs.rmSync(tmp, { recursive: true, force: true });
     });
 }
@@ -216,15 +216,15 @@ test("the generated provider line is built from the live provider table", async 
     assert.ok(line.includes(label), "the summary must name " + id);
   }
   // The skill carries the sentence, not a hardcoded copy of the order.
-  const text = fs.readFileSync(path.join(packDir, "cc-termux-web", "SKILL.md"), "utf8");
+  const text = fs.readFileSync(path.join(packDir, "modelmesh-web", "SKILL.md"), "utf8");
   assert.match(text, /chain:generated/, "the generated line needs its marker");
-  assert.match(text, /cc-termux web status/, "the skill must point at the live order");
+  assert.match(text, /modelmesh web status/, "the skill must point at the live order");
 });
 
 test("install refreshes the generated line in place", async () => {
   await withTarget(async () => {
     await skills.installSkills();
-    const file = path.join(skills.skillsTarget(), "cc-termux-web", "SKILL.md");
+    const file = path.join(skills.skillsTarget(), "modelmesh-web", "SKILL.md");
     // Simulate a stale order written by an older install.
     fs.writeFileSync(file, fs.readFileSync(file, "utf8").replace(/^1\. .*$/m, "1. DuckDuckGo, then Bing."));
     await skills.installSkills({ force: true });
@@ -395,7 +395,7 @@ test("the adapted skill says so instead of looking like a stale copy", () => {
 
 test("the CLI exposes sync with a dry run by default", () => {
   const src = fs.readFileSync(path.join(root, "bin", "cc-skills.mjs"), "utf8");
-  const cli = fs.readFileSync(path.join(root, "bin", "cc-termux"), "utf8");
+  const cli = fs.readFileSync(path.join(root, "bin", "modelmesh"), "utf8");
   assert.match(src, /cmd === "sync"/);
   assert.match(src, /--apply/);
   assert.match(src, /run again with --apply/);
@@ -405,9 +405,9 @@ test("the CLI exposes sync with a dry run by default", () => {
 test("the installer ships the pack and the launcher restores it", () => {
   const installer = fs.readFileSync(path.join(root, "install.mjs"), "utf8");
   const launcher = fs.readFileSync(path.join(root, "bin", "cc-launcher.mjs"), "utf8");
-  const cli = fs.readFileSync(path.join(root, "bin", "cc-termux"), "utf8");
+  const cli = fs.readFileSync(path.join(root, "bin", "modelmesh"), "utf8");
   const setup = fs.readFileSync(path.join(root, "bin", "cc-setup.mjs"), "utf8");
-  assert.match(installer, /"docs", "skills"\]/, "the installer must ship skills/");
+  assert.match(installer, /"docs", "skills", "assets"\]/, "the installer must ship skills/ and assets/");
   assert.match(installer, /installSkillsQuietly\(\)/);
   assert.match(installer, /installSkills\(\{ force: false \}\)/, "an existing skill must not be overwritten");
   assert.match(launcher, /installSkills\(\{ force: false \}\)/, "the launcher restores missing skills");

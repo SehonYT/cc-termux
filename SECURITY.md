@@ -6,7 +6,7 @@ Open a private security advisory on the repository instead of a public issue.
 
 ## Secrets
 
-- API keys are stored in `~/.config/cc-termux/keys.json` with mode 0600.
+- API keys are stored in `~/.config/modelmesh/keys.json` with mode 0600.
 - Keys are read by the local gateway only; they are not exported to Claude Code's
   environment and are never written to `config.json`, logs, or the model picker.
 - The installer adds `permissions.deny` entries to `~/.claude/settings.json` so the

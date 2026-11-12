@@ -76,7 +76,7 @@ test("web_fetch follows a redirect, keeps links and fences the page text", async
   });
   await new Promise((r) => srv.listen(0, "127.0.0.1", r));
   const port = srv.address().port;
-  process.env.CC_TERMUX_WEB_ALLOW_PRIVATE = "1";
+  process.env.MODELMESH_WEB_ALLOW_PRIVATE = "1";
   try {
     const mod = await import("../bin/cc-mcp.mjs?private=1");
     const out = await mod.webFetch("http://127.0.0.1:" + port + "/start", { maxChars: 500 });
@@ -87,7 +87,7 @@ test("web_fetch follows a redirect, keeps links and fences the page text", async
     assert.match(out.text, /UNTRUSTED WEB CONTENT/);
     assert.equal(out.injections.length, 0);
   } finally {
-    delete process.env.CC_TERMUX_WEB_ALLOW_PRIVATE;
+    delete process.env.MODELMESH_WEB_ALLOW_PRIVATE;
     await new Promise((r) => srv.close(r));
   }
 });

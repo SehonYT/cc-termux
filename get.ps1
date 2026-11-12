@@ -1,9 +1,9 @@
-# cc-termux bootstrap installer for Windows: irm .../get.ps1 | iex
-# Env: CC_TERMUX_REPO, CC_TERMUX_REF, CC_TERMUX_ARCHIVE (offline tarball).
+# modelmesh bootstrap installer for Windows: irm .../get.ps1 | iex
+# Env: MODELMESH_REPO, MODELMESH_REF, MODELMESH_ARCHIVE (offline tarball).
 $ErrorActionPreference = "Stop"
 
-$Repo = if ($env:CC_TERMUX_REPO) { $env:CC_TERMUX_REPO } else { "SehonYT/cc-termux" }
-$Ref = if ($env:CC_TERMUX_REF) { $env:CC_TERMUX_REF } else { "main" }
+$Repo = if ($env:MODELMESH_REPO) { $env:MODELMESH_REPO } else { "SehonYT/modelmesh" }
+$Ref = if ($env:MODELMESH_REF) { $env:MODELMESH_REF } else { "main" }
 
 function Ensure-Node {
   $Node = Get-Command node -ErrorAction SilentlyContinue
@@ -13,7 +13,7 @@ function Ensure-Node {
   }
   $arch = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "x64" }
   $ver = if ($env:CC_NODE_VERSION) { $env:CC_NODE_VERSION } else { "v22.14.0" }
-  $dir = Join-Path $HOME ".local\share\cc-termux\runtime"
+  $dir = Join-Path $HOME ".local\share\modelmesh\runtime"
   $cachedNode = Join-Path $dir "node-$ver-win-$arch\node.exe"
   if (Test-Path $cachedNode) {
     try { $cv = [int]((& $cachedNode -p "process.versions.node.split('.')[0]")); if ($cv -ge 18) { return $cachedNode } } catch { }
@@ -21,7 +21,7 @@ function Ensure-Node {
   New-Item -ItemType Directory -Path $dir -Force | Out-Null
   $zip = Join-Path $env:TEMP ("node-" + [guid]::NewGuid().ToString("N") + ".zip")
   $url = "https://nodejs.org/dist/$ver/node-$ver-win-$arch.zip"
-  Write-Host "cc-termux: downloading Node.js from $url" -ForegroundColor Cyan
+  Write-Host "modelmesh: downloading Node.js from $url" -ForegroundColor Cyan
   Invoke-WebRequest $url -OutFile $zip -UseBasicParsing -TimeoutSec 600
   Expand-Archive -Path $zip -DestinationPath $dir -Force
   Remove-Item $zip -Force
@@ -29,12 +29,12 @@ function Ensure-Node {
 }
 $Node = Ensure-Node
 
-$Tmp = Join-Path $env:TEMP ("cc-termux-" + [guid]::NewGuid().ToString("N"))
+$Tmp = Join-Path $env:TEMP ("modelmesh-" + [guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $Tmp | Out-Null
 try {
   $Archive = Join-Path $Tmp "src.tar.gz"
-  if ($env:CC_TERMUX_ARCHIVE) {
-    Copy-Item $env:CC_TERMUX_ARCHIVE $Archive
+  if ($env:MODELMESH_ARCHIVE) {
+    Copy-Item $env:MODELMESH_ARCHIVE $Archive
   } else {
     $Sha = ""
     $Date = ""
@@ -52,8 +52,8 @@ try {
         $Sha = $api.sha
         $Date = $api.commit.committer.date
       }
-      if ($Sha) { $env:CC_TERMUX_COMMIT_SHA = $Sha }
-      if ($Date) { $env:CC_TERMUX_COMMIT_DATE = $Date }
+      if ($Sha) { $env:MODELMESH_COMMIT_SHA = $Sha }
+      if ($Date) { $env:MODELMESH_COMMIT_DATE = $Date }
     } catch { }
     $archiveRef = if ($Sha) { $Sha } else { $Ref }
     for ($attempt = 1; $attempt -le 3; $attempt++) {

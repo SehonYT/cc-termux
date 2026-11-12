@@ -155,7 +155,7 @@ async function fetchOpenRouterModels(key, { tier = "free" } = {}) {
   const usable = arr.filter(m => m.tier !== "free" || m.tools);
   const skipped = arr.length - usable.length;
   try { fs.mkdirSync(CACHE_DIR, { recursive: true }); fs.writeFileSync(CATALOG, JSON.stringify({ fetchedAt: new Date().toISOString(), tier, freeCount, models: usable }, null, 1)); } catch (e) { }
-  if (tier === "paid") console.log(dim("  " + freeCount + " free model(s) available on this provider (run: cc-termux setup, choose the free option)"));
+  if (tier === "paid") console.log(dim("  " + freeCount + " free model(s) available on this provider (run: modelmesh setup, choose the free option)"));
   if (skipped) console.log(dim("  skipped " + skipped + " free model(s) that cannot call tools"));
   return usable;
 }
@@ -375,7 +375,7 @@ function writeSettings(c) {
   let settings = {};
   try { if (fs.existsSync(SETTINGS)) settings = JSON.parse(fs.readFileSync(SETTINGS, "utf8")); } catch (e) { settings = {}; }
   fs.mkdirSync(path.dirname(SETTINGS), { recursive: true });
-  if (fs.existsSync(SETTINGS)) fs.copyFileSync(SETTINGS, SETTINGS + ".cc-termux-backup");
+  if (fs.existsSync(SETTINGS)) fs.copyFileSync(SETTINGS, SETTINGS + ".modelmesh-backup");
   const options = [];
   for (const [name, p] of visible(c)) {
     for (const [id, info] of Object.entries(p.modelsById || {})) {
@@ -459,7 +459,7 @@ function summary(c, name) {
   console.log("  " + dim("picker") + "    " + total + " models from " + visible(c).length + " provider(s)");
   console.log();
   console.log("  " + bold("Next:") + " run " + cyan("claude"));
-  console.log("  " + dim("Switch later: /model or /provider inside Claude  ·  add another: cc-termux setup"));
+  console.log("  " + dim("Switch later: /model or /provider inside Claude  ·  add another: modelmesh setup"));
   console.log();
 }
 
@@ -603,7 +603,7 @@ async function presetFlow(c, presetOverride) {
   if (preset.auth === "antigravity") {
     let creds = antigravityCreds();
     if (!creds || !creds.access_token) {
-      if (!process.stdin.isTTY) { console.log(cyan("  Antigravity OAuth needs a terminal; run: cc-termux antigravity login")); return null; }
+      if (!process.stdin.isTTY) { console.log(cyan("  Antigravity OAuth needs a terminal; run: modelmesh antigravity login")); return null; }
       console.log(dim("  starting Google OAuth login..."));
       try { creds = await antigravityLogin({ log: (m) => console.log(m) }); }
       catch (e) { console.log(cyan("  login failed: " + e.message)); return null; }
@@ -665,7 +665,7 @@ function parseFlags() {
   const a = process.argv.slice(2);
   const val = (n) => { const i = a.indexOf(n); return i >= 0 && a[i + 1] && !a[i + 1].startsWith("-") ? a[i + 1] : ""; };
   if (a.includes("--help") || a.includes("-h")) {
-    console.log("usage: cc-termux setup [options]");
+    console.log("usage: modelmesh setup [options]");
     console.log("");
     console.log("Connect Claude Code to a provider (interactive wizard by default).");
     console.log("");
@@ -685,9 +685,9 @@ function parseFlags() {
     console.log("    --test               send a smoke-test request after setup");
     console.log("");
     console.log("  Examples:");
-    console.log("    cc-termux setup --preset antigravity");
-    console.log("    cc-termux setup --provider custom-openai --base-url http://127.0.0.1:8080/v1 --model local-model");
-    console.log("    cc-termux setup --preset groq --key gsk_... --test");
+    console.log("    modelmesh setup --preset antigravity");
+    console.log("    modelmesh setup --provider custom-openai --base-url http://127.0.0.1:8080/v1 --model local-model");
+    console.log("    modelmesh setup --preset groq --key gsk_... --test");
     process.exit(0);
   }
   const map = {
@@ -701,7 +701,7 @@ function parseFlags() {
 
 async function runSmokeTest() {
   console.log("\n  sending a small test request through the gateway...");
-  const r = spawnSync(process.execPath, [path.join(ROOT, "bin", "cc-termux"), "test", "Reply with exactly: OK"], { encoding: "utf8", timeout: 120000 });
+  const r = spawnSync(process.execPath, [path.join(ROOT, "bin", "modelmesh"), "test", "Reply with exactly: OK"], { encoding: "utf8", timeout: 120000 });
   const out = ((r.stdout || "") + (r.stderr || "")).trim();
   console.log("  " + (r.status === 0 ? "\u2714 " : "\u2716 ") + (out.split("\n").pop() || "no output"));
 }
@@ -713,7 +713,7 @@ async function envMode() {
     if (!preset) throw new Error("unknown preset " + process.env.CC_SETUP_PRESET);
     if (preset.auth === "antigravity") {
       let creds = antigravityCreds();
-      if (!creds) throw new Error("run: cc-termux antigravity login");
+      if (!creds) throw new Error("run: modelmesh antigravity login");
       creds = await antigravityEnsureProject({ log: () => { } });
       let amodels = [];
       try { amodels = await fetchAvailableModels({ timeoutMs: 12000 }); } catch (e) { }
@@ -911,7 +911,7 @@ async function addFlow(c) {
   const same = visible(c).find(([, p]) => p.baseUrl === f.baseUrl && p.type === f.type);
   const name = same ? same[0] : providerName(c, f.family);
   addProvider(c, name, { family: f.family, type: f.type, baseUrl: f.baseUrl, path: f.path, key, noKey: !key, models: f.models, main: main.id, contextWindow: ctx, aliases: aliasModels, tier: f.tier });
-  if (f.tier === "free") console.log(dim("  free tier only - no credits are spent; switch to paid with: cc-termux setup"));
+  if (f.tier === "free") console.log(dim("  free tier only - no credits are spent; switch to paid with: modelmesh setup"));
   summary(c, name);
   if ((await ask("\nSend a small test request now? (y/N) > ")).toLowerCase().startsWith("y")) await runSmokeTest();
   return name;
@@ -919,9 +919,9 @@ async function addFlow(c) {
 
 async function ttyMode() {
   let stamp = {};
-  try { stamp = JSON.parse(fs.readFileSync(path.join(ROOT, "cc-termux.json"), "utf8")); } catch (e) { }
+  try { stamp = JSON.parse(fs.readFileSync(path.join(ROOT, "modelmesh.json"), "utf8")); } catch (e) { }
   console.log();
-  console.log(bold("  cc-termux setup"));
+  console.log(bold("  modelmesh setup"));
   console.log(dim("  Claude Code + any provider  ·  " + (stamp.version || "dev") + "  ·  " + process.platform + " " + process.arch));
   let c = loadCfg();
   for (;;) {

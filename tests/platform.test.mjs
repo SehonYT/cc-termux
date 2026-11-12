@@ -97,9 +97,9 @@ test("config, cache and install roots resolve per platform", () => {
   const win = { LOCALAPPDATA: "C:\\Users\\x\\AppData\\Local", APPDATA: "C:\\Users\\x\\AppData\\Roaming" };
   const prev = { ...process.env };
   try {
-    delete process.env.CC_TERMUX_ROOT;
-    delete process.env.CC_TERMUX_CONFIG;
-    delete process.env.CC_TERMUX_CACHE;
+    delete process.env.MODELMESH_ROOT;
+    delete process.env.MODELMESH_CONFIG;
+    delete process.env.MODELMESH_CACHE;
     const root = installRoot();
     assert.ok(path.isAbsolute(root), "install root is absolute");
     assert.ok(path.isAbsolute(configFile()), "config path is absolute");

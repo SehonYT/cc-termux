@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Mobile / low-end performance profile, opt-in via `cc-termux tune on` or CC_TERMUX_PERF=1.
+// Mobile / low-end performance profile, opt-in via `modelmesh tune on` or MODELMESH_PERF=1.
 // Turns off expensive UI/IO features; never changes the model or provider.
 import fs from "node:fs";
 import os from "node:os";
@@ -20,9 +20,9 @@ export const PERF_ENV = {
 };
 
 export function resolvePerf({ mode = "off", platform = process.platform, env = process.env, prefix = process.env.PREFIX } = {}) {
-  const override = String(env.CC_TERMUX_PERF || "").toLowerCase();
-  if (override === "1" || override === "on" || override === "mobile") return { enabled: true, mode: "on", reason: "CC_TERMUX_PERF" };
-  if (override === "0" || override === "off" || override === "normal") return { enabled: false, mode: "off", reason: "CC_TERMUX_PERF" };
+  const override = String(env.MODELMESH_PERF || "").toLowerCase();
+  if (override === "1" || override === "on" || override === "mobile") return { enabled: true, mode: "on", reason: "MODELMESH_PERF" };
+  if (override === "0" || override === "off" || override === "normal") return { enabled: false, mode: "off", reason: "MODELMESH_PERF" };
   if (mode === "mobile" || mode === "on") return { enabled: true, mode: "on", reason: "chosen by you" };
   return { enabled: false, mode: "off", reason: "off" };
 }
@@ -44,7 +44,7 @@ export const PERF_PROMPT_LINES = [
   "  - extra git text added to prompts",
   "  - animations",
   "",
-  "You can change this anytime: cc-termux tune on / cc-termux tune off",
+  "You can change this anytime: modelmesh tune on / modelmesh tune off",
 ];
 
 export function perfDefaultAnswer({ mode } = {}) {
@@ -60,7 +60,7 @@ export async function savePerfMode(cfgPath, mode) {
   let cfg;
   try { cfg = JSON.parse(fs.readFileSync(cfgPath, "utf8")); }
   catch (e) {
-    if (fs.existsSync(cfgPath)) { console.error("cc-termux: config is not valid JSON; leaving it untouched: " + cfgPath); return false; }
+    if (fs.existsSync(cfgPath)) { console.error("modelmesh: config is not valid JSON; leaving it untouched: " + cfgPath); return false; }
     cfg = {};
   }
   cfg.performance = { ...(cfg.performance || {}), mode };

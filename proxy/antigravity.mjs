@@ -156,7 +156,7 @@ export function scrubIdentity(text) {
 // Cloud Code refuses googleSearch together with functionDeclarations, and the flag it asks
 // for does not exist in this API. Grounding is therefore limited to a tool-free call.
 export function antigravitySearchEnabled() {
-  const flag = process.env.CC_TERMUX_ANTIGRAVITY_SEARCH;
+  const flag = process.env.MODELMESH_ANTIGRAVITY_SEARCH;
   if (flag != null) return flag !== "0" && flag !== "false";
   return true;
 }
@@ -285,12 +285,12 @@ function partsFrom(payload) {
 export async function proxyAntigravity(req, res, route, body, { anthropicError }) {
   const creds = loadCredentials();
   if (!creds || !creds.access_token) {
-    return anthropicError(res, 401, "authentication_error", "Antigravity is not logged in on this device - run: cc-termux antigravity login");
+    return anthropicError(res, 401, "authentication_error", "Antigravity is not logged in on this device - run: modelmesh antigravity login");
   }
   let token = creds.access_token;
   try { token = await ensureAccessToken(creds); } catch (e) { return anthropicError(res, 401, "authentication_error", e.message); }
   const envelope = anthropicToGemini(body, upstreamModel(route.model), creds);
-  if (process.env.CC_TERMUX_ANTIGRAVITY_DEBUG === "1") {
+  if (process.env.MODELMESH_ANTIGRAVITY_DEBUG === "1") {
     try {
       const dir = cacheDir();
       fs.mkdirSync(dir, { recursive: true });
@@ -304,7 +304,7 @@ export async function proxyAntigravity(req, res, route, body, { anthropicError }
     const wait = Math.max(1, Math.round((blockedUntil - Date.now()) / 1000));
     try { res.setHeader("retry-after", String(wait)); } catch (e) { }
     return anthropicError(res, 429, "rate_limit_error",
-      "Antigravity refused this exact request moments ago; cc-termux is not resending it (retry in " + wait + "s, or use /model)");
+      "Antigravity refused this exact request moments ago; modelmesh is not resending it (retry in " + wait + "s, or use /model)");
   }
   const sendUpstream = async (accessToken, url) => fetch(url, {
     method: "POST",
@@ -323,7 +323,7 @@ export async function proxyAntigravity(req, res, route, body, { anthropicError }
   }
   // A 429 can mean real quota or a content-triggered refusal: retry with backoff, fall back
   // to the secondary host, then remember the refusal so retries do not hammer upstream.
-  const max429 = Number(process.env.CC_TERMUX_ANTIGRAVITY_429_RETRIES || 2);
+  const max429 = Number(process.env.MODELMESH_ANTIGRAVITY_429_RETRIES || 2);
   let last429Text = "";
   let lastDelay = 0;
   for (const url of GENERATE_URLS) {

@@ -1,7 +1,7 @@
 <div align="center">
-  <img src="assets/logo.png" alt="cc-termux" width="150">
+  <img src="assets/logo.png" alt="ModelMesh" width="150">
 
-  <h1>cc-termux</h1>
+  <h1>ModelMesh</h1>
 
   <p><strong>Claude Code, anywhere, on any model.</strong></p>
 
@@ -10,8 +10,8 @@
   or any other OpenAI- and Anthropic-compatible endpoint.</p>
 
   <p>
-    <a href="https://github.com/SehonYT/cc-termux/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/SehonYT/cc-termux/ci.yml?branch=main&style=flat-square" alt="CI"></a>
-    <a href="https://github.com/SehonYT/cc-termux/releases"><img src="https://img.shields.io/github/v/tag/SehonYT/cc-termux?style=flat-square&label=release" alt="Release"></a>
+    <a href="https://github.com/SehonYT/modelmesh/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/SehonYT/modelmesh/ci.yml?branch=main&style=flat-square" alt="CI"></a>
+    <a href="https://github.com/SehonYT/modelmesh/releases"><img src="https://img.shields.io/github/v/tag/SehonYT/modelmesh?style=flat-square&label=release" alt="Release"></a>
     <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="MIT"></a>
     <a href="https://nodejs.org"><img src="https://img.shields.io/badge/node-%3E%3D18-3c873a?style=flat-square" alt="Node 18+"></a>
     <img src="https://img.shields.io/badge/platforms-Termux%20%7C%20Linux%20%7C%20macOS%20%7C%20Windows-lightgrey?style=flat-square" alt="Platforms">
@@ -31,7 +31,7 @@
 
 ---
 
-**cc-termux** is a cross-platform installer and local gateway that makes Claude Code run
+**modelmesh** is a cross-platform installer and local gateway that makes Claude Code run
 where Anthropic does not ship a supported build, and makes it talk to whatever model you
 actually pay for.
 
@@ -47,13 +47,13 @@ actually pay for.
 macOS, Linux and Termux:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/SehonYT/cc-termux/main/get.sh | bash
+curl -fsSL https://raw.githubusercontent.com/SehonYT/modelmesh/main/get.sh | bash
 ```
 
 Windows (PowerShell):
 
 ```powershell
-irm https://raw.githubusercontent.com/SehonYT/cc-termux/main/get.ps1 | iex
+irm https://raw.githubusercontent.com/SehonYT/modelmesh/main/get.ps1 | iex
 ```
 
 The installer downloads the official Claude Code build for your platform from Anthropic's
@@ -65,7 +65,7 @@ npm registry, then starts a three-step setup:
    exposes them.
 
 That writes the gateway configuration and makes `claude` use it. Re-run the wizard at any
-time with `cc-termux setup`.
+time with `modelmesh setup`.
 
 > **Requirements:** Node.js 18+ (installed automatically if missing), `tar`, and a shell.
 > Termux optionally uses `patchelf`. Offline installs and custom roots are supported.
@@ -76,13 +76,13 @@ time with `cc-termux setup`.
 |---|---|
 | **Any provider** | 35 presets plus custom OpenAI- and Anthropic-compatible endpoints. No Anthropic login, no Claude subscription. |
 | **Model picker** | Every provider's models appear in Claude Code's `/model` picker with context window and price. Switch models mid-session. |
-| **Provider switching** | `/provider`, `cc-termux provider <name>`, or a `provswitch/` picker row. The gateway reloads config per request, so it applies to a running session. |
+| **Provider switching** | `/provider`, `modelmesh provider <name>`, or a `provswitch/` picker row. The gateway reloads config per request, so it applies to a running session. |
 | **No hidden fallback** | A request is only ever sent to the provider you selected. No cross-provider silent rerouting. |
 | **Tool calling** | Anthropic tools, tool choice and tool results are translated to the upstream schema, including streamed partial arguments. |
 | **Auto mode** | Claude Code's safety classifier works behind the gateway: the launcher forces the local classifier and the gateway gives it a fast verdict budget. |
 | **Web Search + Web Fetch** | A bundled MCP server searches Google, Brave, DuckDuckGo and Bing, merges and ranks what comes back, reports which engines answered, and fetches pages with SSRF protection and prompt-injection fencing. |
 | **Antigravity (OAuth)** | Google-account access to Cloud Code models, quota reporting in the status line, and model discovery from Google's own list. |
-| **Self-healing installs** | Install and update repair PATH, settings, picker, patches and stale config automatically. `cc-termux doctor --fix` on demand. |
+| **Self-healing installs** | Install and update repair PATH, settings, picker, patches and stale config automatically. `modelmesh doctor --fix` on demand. |
 | **Performance mode** | One opt-in switch that turns off animations, mouse, checkpoints, background work and more on phones and slow machines. |
 
 <details>
@@ -92,13 +92,13 @@ time with `cc-termux setup`.
   musl loader; devices with a 32-bit userland fall back to the last JavaScript build.
 - **Native install layout**: `claude` is installed the way Claude Code's own `/status`
   expects, so diagnostics stay clean.
-- **Self-update**: `cc-termux update` updates the tool and, only when needed, the Claude Code
+- **Self-update**: `modelmesh update` updates the tool and, only when needed, the Claude Code
   binary. A once-a-day notice appears in interactive sessions.
 - **Optional UI patches**: rename the model picker and add provider hints. Data-driven from
   `patches.json`, skipped automatically when an anchor is missing, revertible at any time.
 - **Failure logs**: every upstream, stream and gateway failure is persisted and shown by
-  `cc-termux errors`, with secrets redacted.
-- **Search backends**: a SearXNG endpoint (`CC_TERMUX_SEARX_URL`) or a Google Custom Search
+  `modelmesh errors`, with secrets redacted.
+- **Search backends**: a SearXNG endpoint (`MODELMESH_SEARX_URL`) or a Google Custom Search
   key is used automatically when configured, which is the reliable option on networks where
   Google and Brave answer with an anti-bot wall.
 
@@ -154,9 +154,9 @@ servers work without a key; a dummy key is accepted if the server requires an au
 header.
 
 ```bash
-cc-termux presets                                        # list every preset
-cc-termux setup --preset openrouter --key sk-or-...      # non-interactive setup
-cc-termux setup --provider custom --type openai --base-url https://host/v1 --key ...
+modelmesh presets                                        # list every preset
+modelmesh setup --preset openrouter --key sk-or-...      # non-interactive setup
+modelmesh setup --provider custom --type openai --base-url https://host/v1 --key ...
 ```
 
 ## Usage
@@ -171,45 +171,45 @@ Switch providers while working:
 ```
 /provider                    # in-session selector
 /model                       # picker: switch rows and every provider model
-!cc-termux provider tokens   # local command, works even with no credit
+!modelmesh provider tokens   # local command, works even with no credit
 ```
 
 ## Commands
 
 **Getting started**
 
-- `cc-termux setup` — interactive provider wizard
-- `cc-termux status` — gateway, active provider, model and quota dashboard
-- `cc-termux doctor [--fix]` — self-check and repair
-- `cc-termux test [prompt]` — headless request through the gateway
+- `modelmesh setup` — interactive provider wizard
+- `modelmesh status` — gateway, active provider, model and quota dashboard
+- `modelmesh doctor [--fix]` — self-check and repair
+- `modelmesh test [prompt]` — headless request through the gateway
 
 **Providers and models**
 
-- `cc-termux provider [name|list]` — list or switch provider
-- `cc-termux models [--all]` — model catalog with context window and price
-- `cc-termux use <model-id>` — switch model and aliases
-- `cc-termux key <provider> <key>` — store an API key
-- `cc-termux sync` / `sync-picker` — refresh catalog / rebuild the `/model` picker
-- `ccp` — standalone provider picker
+- `modelmesh provider [name|list]` — list or switch provider
+- `modelmesh models [--all]` — model catalog with context window and price
+- `modelmesh use <model-id>` — switch model and aliases
+- `modelmesh key <provider> <key>` — store an API key
+- `modelmesh sync` / `sync-picker` — refresh catalog / rebuild the `/model` picker
+- `mm` — standalone provider picker
 
 **Google Antigravity**
 
-- `cc-termux antigravity login` — Google OAuth login
-- `cc-termux antigravity usage` — live 5-hour and weekly quota
-- `cc-termux antigravity models --update` — refresh models from Google
-- `cc-termux statusline --install` — model and quota in Claude's status line
+- `modelmesh antigravity login` — Google OAuth login
+- `modelmesh antigravity usage` — live 5-hour and weekly quota
+- `modelmesh antigravity models --update` — refresh models from Google
+- `modelmesh statusline --install` — model and quota in Claude's status line
 
 **Maintenance**
 
-- `cc-termux update [--check]` — update cc-termux (and Claude Code when needed)
-- `cc-termux update-claude` — reinstall the Claude Code binary
-- `cc-termux patch [status|revert]` — optional TUI patches
-- `cc-termux heal` — auto-repair PATH, settings and picker
-- `cc-termux restart` — stop the gateway
-- `cc-termux logs` / `errors [n]` — gateway log / recent failures
-- `cc-termux diagnose` — deep install, gateway and key check
-- `cc-termux tune [on|off]` — performance mode
-- `cc-termux path` — print install and config paths
+- `modelmesh update [--check]` — update modelmesh (and Claude Code when needed)
+- `modelmesh update-claude` — reinstall the Claude Code binary
+- `modelmesh patch [status|revert]` — optional TUI patches
+- `modelmesh heal` — auto-repair PATH, settings and picker
+- `modelmesh restart` — stop the gateway
+- `modelmesh logs` / `errors [n]` — gateway log / recent failures
+- `modelmesh diagnose` — deep install, gateway and key check
+- `modelmesh tune [on|off]` — performance mode
+- `modelmesh path` — print install and config paths
 
 ## How it works
 
@@ -235,12 +235,12 @@ and records every failure. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for 
 
 | | Termux / Linux / macOS | Windows |
 |---|---|---|
-| Code, Claude Code binary, patches | `~/.local/share/cc-termux` | `%LOCALAPPDATA%\cc-termux` |
-| Config and API keys | `~/.config/cc-termux` | `%APPDATA%\cc-termux` |
-| Cache, logs, status line | `~/.cache/cc-termux` | `%LOCALAPPDATA%\cc-termux\cache` |
+| Code, Claude Code binary, patches | `~/.local/share/modelmesh` | `%LOCALAPPDATA%\modelmesh` |
+| Config and API keys | `~/.config/modelmesh` | `%APPDATA%\modelmesh` |
+| Cache, logs, status line | `~/.cache/modelmesh` | `%LOCALAPPDATA%\modelmesh\cache` |
 | Claude Code's own settings | `~/.claude` | `%USERPROFILE%\.claude` |
 
-`~/.config/cc-termux/config.json`:
+`~/.config/modelmesh/config.json`:
 
 ```json
 {
@@ -263,10 +263,10 @@ and records every failure. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for 
 }
 ```
 
-Keys are stored separately in `~/.config/cc-termux/keys.json` (mode 0600), never in
+Keys are stored separately in `~/.config/modelmesh/keys.json` (mode 0600), never in
 `config.json`, the environment passed to Claude Code, or the model picker.
 
-Overrides: `CC_TERMUX_ROOT`, `CC_TERMUX_CONFIG`, `CC_TERMUX_CACHE`, and Claude's own
+Overrides: `MODELMESH_ROOT`, `MODELMESH_CONFIG`, `MODELMESH_CACHE`, and Claude's own
 `CLAUDE_CONFIG_DIR`.
 ## Security
 
@@ -276,7 +276,7 @@ Overrides: `CC_TERMUX_ROOT`, `CC_TERMUX_CONFIG`, `CC_TERMUX_CACHE`, and Claude's
   file tools cannot read the config directory.
 - Web access from the agent goes through an SSRF-guarded MCP server; fetched content is
   fenced and treated as data, not instructions.
-- Claude Code is always downloaded from Anthropic's official npm registry. cc-termux never
+- Claude Code is always downloaded from Anthropic's official npm registry. modelmesh never
   hosts or redistributes it.
 
 This is a single-user tool: the gateway and the agent share an OS account, so file
@@ -297,15 +297,15 @@ permissions are a guardrail, not a security boundary. Run it on a device you con
 
 The installer refuses Node < 18, retries downloads three times with backoff, falls back to a
 built-in gzip+tar extractor when system `tar` is missing, switches to the musl build on glibc
-older than 2.27, and supports `--force-js` / `CC_TERMUX_FORCE_JS=1` to exercise the fallback.
+older than 2.27, and supports `--force-js` / `MODELMESH_FORCE_JS=1` to exercise the fallback.
 
 ## Updates and self-repair
 
 ```bash
-cc-termux update --check    # is a newer cc-termux available?
-cc-termux update            # self-update; skips the binary when it is current
-cc-termux update-claude     # reinstall the Claude Code binary + patches
-cc-termux heal              # run the repair pass on demand
+modelmesh update --check    # is a newer modelmesh available?
+modelmesh update            # self-update; skips the binary when it is current
+modelmesh update-claude     # reinstall the Claude Code binary + patches
+modelmesh heal              # run the repair pass on demand
 ```
 
 Install and update keep your configuration and keys, re-apply the optional UI patches, and
@@ -316,7 +316,7 @@ interactive sessions.
 ## Manual install
 
 ```bash
-git clone https://github.com/SehonYT/cc-termux && cd cc-termux
+git clone https://github.com/SehonYT/modelmesh && cd modelmesh
 bash install.sh                 # Linux, macOS, Termux
 powershell -File install.ps1    # Windows
 node install.mjs                # any platform, no shell wrapper
@@ -342,7 +342,7 @@ Ubuntu, macOS and Windows across Node 18, 20 and 22, plus an install smoke test.
 get.sh, get.ps1                        one-line bootstrap installers
 install.mjs, install.sh, install.ps1   local installers
 bin/cc-launcher.mjs                    cross-platform launcher + gateway supervisor
-bin/cc-termux                          control CLI
+bin/modelmesh                          control CLI
 bin/cc-setup.mjs                       provider wizard
 bin/cc-mcp.mjs                         web search/fetch MCP server
 proxy/server.mjs                       gateway, routing, retries
@@ -369,7 +369,7 @@ tagged by CI as `v<version>-<short sha>`.
 
 ## Community
 
-Setups, release notes and help: [join the cc-termux Discord](https://discord.gg/AF8zvEDcSG).
+Setups, release notes and help: [join the modelmesh Discord](https://discord.gg/AF8zvEDcSG).
 
 ## License
 

@@ -1,5 +1,5 @@
 ---
-name: cc-termux-web
+name: modelmesh-web
 description: >
   How to reach the web on this device. Use whenever a task needs current
   information, a page, docs, a release note or any fact you would otherwise
@@ -8,7 +8,7 @@ description: >
   backs them, and what to do when an engine is blocked.
 ---
 
-# Web access on cc-termux
+# Web access on modelmesh
 
 The built-in WebSearch and WebFetch cannot reach the network here. Two MCP tools do, and
 they are pre-approved.
@@ -28,7 +28,7 @@ Search runs a chain and stops at the first provider that answers:
 
 1. Google Search (Antigravity), then Tavily, Brave or Jina, then the built-in scrapers.
    <!-- chain:generated -->
-   The exact order is decided at request time: run `cc-termux web status` to see the chain
+   The exact order is decided at request time: run `modelmesh web status` to see the chain
    this device is using right now. Do not assume an order that the tool contradicts.
 
 Do not try to work around a provider: if the status line says an engine was blocked or

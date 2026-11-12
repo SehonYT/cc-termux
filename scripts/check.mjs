@@ -10,7 +10,7 @@ const files = [];
 for (const dir of ["bin", "proxy", "scripts", "tests"]) {
   const p = path.join(root, dir);
   if (!fs.existsSync(p)) continue;
-  for (const f of fs.readdirSync(p)) if (f.endsWith('.mjs') || f === 'cc-termux') files.push(path.join(p, f));
+  for (const f of fs.readdirSync(p)) if (f.endsWith('.mjs') || f === 'modelmesh') files.push(path.join(p, f));
 }
 files.push(path.join(root, 'install.mjs'));
 

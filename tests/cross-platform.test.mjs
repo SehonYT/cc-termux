@@ -27,15 +27,15 @@ function shippedModules() {
 const modules = shippedModules();
 
 test("no shipped module hardcodes a POSIX home path", () => {
-  // A hardcoded ~/.local/share/cc-termux ignores CC_TERMUX_ROOT and the Windows layout.
+  // A hardcoded ~/.local/share/modelmesh ignores MODELMESH_ROOT and the Windows layout.
   // This is the defect that broke doctor on Windows and cc-patch on a custom root.
   for (const file of modules) {
     const src = fs.readFileSync(file, "utf8");
     src.split("\n").forEach((line, i) => {
       if (/^\s*\/\//.test(line)) return; // a comment may quote a path to explain it
-      // Only cc-termux's own root must be resolved; ~/.local/share/claude is Claude Code's
+      // Only modelmesh's own root must be resolved; ~/.local/share/claude is Claude Code's
       // directory, which is a fixed POSIX layout by its own definition.
-      const isOurs = /"cc-termux"|"share",\s*"cc-termux"/.test(line);
+      const isOurs = /"modelmesh"|"share",\s*"modelmesh"/.test(line);
       assert.ok(!isOurs || !/homedir\(\)/.test(line),
         path.relative(root, file) + ":" + (i + 1) + " hardcodes a POSIX install root");
       // A tilde inside a printed message is documentation for the reader, not a path the
@@ -53,8 +53,8 @@ test("the install root is always resolved through cc-paths", () => {
   // Anything needing the root must import it rather than recompute it.
   for (const file of modules) {
     const src = fs.readFileSync(file, "utf8");
-    if (!/cc-termux/.test(src)) continue;
-    const recomputed = /path\.join\(os\.homedir\(\),\s*"\.local",\s*"share",\s*"cc-termux"\)/.test(src);
+    if (!/modelmesh/.test(src)) continue;
+    const recomputed = /path\.join\(os\.homedir\(\),\s*"\.local",\s*"share",\s*"modelmesh"\)/.test(src);
     if (recomputed) {
       const name = path.relative(root, file);
       assert.ok(/installRoot/.test(src), name + " recomputes the install root instead of importing installRoot");
@@ -149,9 +149,9 @@ test("the config, cache and root paths are absolute on every platform", () => {
   // Exercised through the real resolvers, so a change to them is caught here.
   const prev = { ...process.env };
   try {
-    delete process.env.CC_TERMUX_ROOT;
-    delete process.env.CC_TERMUX_CONFIG;
-    delete process.env.CC_TERMUX_CACHE;
+    delete process.env.MODELMESH_ROOT;
+    delete process.env.MODELMESH_CONFIG;
+    delete process.env.MODELMESH_CACHE;
     return import("../bin/cc-paths.mjs").then((p) => {
       for (const [name, value] of [["installRoot", p.installRoot()], ["configFile", p.configFile()], ["cacheDir", p.cacheDir()], ["claudeDir", p.claudeDir()]]) {
         assert.ok(path.isAbsolute(value), name + " must be absolute, got " + value);

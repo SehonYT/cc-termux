@@ -59,11 +59,11 @@ test.before(async () => {
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   port = server.address().port;
-  process.env.CC_TERMUX_CONFIG = path.join(cfgDir, "config.json");
-  process.env.CC_TERMUX_ANTIGRAVITY_TOKEN_URL = "http://127.0.0.1:" + port + "/token";
-  process.env.CC_TERMUX_ANTIGRAVITY_USERINFO_URL = "http://127.0.0.1:" + port + "/userinfo";
-  process.env.CC_TERMUX_ANTIGRAVITY_BOOTSTRAP_URL = "http://127.0.0.1:" + port;
-  process.env.CC_TERMUX_ANTIGRAVITY_GENERATE_URL = "http://127.0.0.1:" + port + "/generate";
+  process.env.MODELMESH_CONFIG = path.join(cfgDir, "config.json");
+  process.env.MODELMESH_ANTIGRAVITY_TOKEN_URL = "http://127.0.0.1:" + port + "/token";
+  process.env.MODELMESH_ANTIGRAVITY_USERINFO_URL = "http://127.0.0.1:" + port + "/userinfo";
+  process.env.MODELMESH_ANTIGRAVITY_BOOTSTRAP_URL = "http://127.0.0.1:" + port;
+  process.env.MODELMESH_ANTIGRAVITY_GENERATE_URL = "http://127.0.0.1:" + port + "/generate";
 });
 
 test.after(() => {
@@ -175,8 +175,8 @@ test("manual callback input accepts URL, raw code and code#state", async () => {
 });
 test("login completes from a pasted/authorization code with mocked Google endpoints", async () => {
   const ant = await import("../bin/cc-antigravity.mjs?t=" + Date.now());
-  const old = process.env.CC_TERMUX_ANTIGRAVITY_CODE;
-  process.env.CC_TERMUX_ANTIGRAVITY_CODE = "test-code";
+  const old = process.env.MODELMESH_ANTIGRAVITY_CODE;
+  process.env.MODELMESH_ANTIGRAVITY_CODE = "test-code";
   try {
     const creds = await ant.login({ browser: false, timeoutMs: 5000, log: () => { }, fetchImpl: fetch });
     assert.equal(creds.access_token, "access-new");
@@ -184,7 +184,7 @@ test("login completes from a pasted/authorization code with mocked Google endpoi
     assert.equal(creds.email, "user@example.com");
     assert.equal(ant.loadCredentials().project_id, "project-123");
   } finally {
-    if (old === undefined) delete process.env.CC_TERMUX_ANTIGRAVITY_CODE; else process.env.CC_TERMUX_ANTIGRAVITY_CODE = old;
+    if (old === undefined) delete process.env.MODELMESH_ANTIGRAVITY_CODE; else process.env.MODELMESH_ANTIGRAVITY_CODE = old;
   }
 });
 test("rate limiting is retried then reported as 429", async () => {
@@ -192,12 +192,12 @@ test("rate limiting is retried then reported as 429", async () => {
   ant.saveCredentials({ access_token: "access-new", refresh_token: "refresh-new", expires_at: Date.now() + 3600_000, project_id: "project-123" });
   const adapter = await import("../proxy/antigravity.mjs?t=" + Date.now());
   generateMode = "quota";
-  process.env.CC_TERMUX_ANTIGRAVITY_429_RETRIES = "0";
+  process.env.MODELMESH_ANTIGRAVITY_429_RETRIES = "0";
   const errors = [];
   const res = { writeHead() { }, flushHeaders() { }, write() { }, end() { }, destroy() { } };
   try {
     await adapter.proxyAntigravity({}, res, { name: "antigravity", model: "claude-sonnet-4-6", provider: { type: "antigravity" } }, { max_tokens: 10, messages: [{ role: "user", content: "hi" }] }, { anthropicError: (_r, status, type, message) => errors.push([status, type, message]) });
-  } finally { generateMode = "ok"; delete process.env.CC_TERMUX_ANTIGRAVITY_429_RETRIES; }
+  } finally { generateMode = "ok"; delete process.env.MODELMESH_ANTIGRAVITY_429_RETRIES; }
   assert.equal(errors.length, 1);
   assert.equal(errors[0][0], 429);
   assert.match(errors[0][2], /rate-limited|quota/i);

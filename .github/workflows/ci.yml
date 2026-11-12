@@ -101,14 +101,14 @@ jobs:
           rm -rf "$work"
           export HOME="$work/home"
           export PREFIX="$work/prefix"
-          root="$HOME/.local/share/cc-termux"
-          export CC_TERMUX_ROOT="$root"
-          export CC_TERMUX_CONFIG="$root/smoke/config.json"
-          export CC_TERMUX_CACHE="$root/smoke-cache"
-          export CC_TERMUX_NO_BANNER=1
-          export CC_TERMUX_NO_PROMPT=1
+          root="$HOME/.local/share/modelmesh"
+          export MODELMESH_ROOT="$root"
+          export MODELMESH_CONFIG="$root/smoke/config.json"
+          export MODELMESH_CACHE="$root/smoke-cache"
+          export MODELMESH_NO_BANNER=1
+          export MODELMESH_NO_PROMPT=1
           mkdir -p "$root/bin"
-          # Fake an installed Claude Code build: --code-only must refresh the cc-termux code
+          # Fake an installed Claude Code build: --code-only must refresh the modelmesh code
           # without downloading the ~150 MB Claude Code binary.
           : > "$root/bin/claude.bin"
           printf '9.9.9\n' > "$root/VERSION"
@@ -117,19 +117,19 @@ jobs:
           plan="$(node install.mjs --check)"
           printf '%s\n' "$plan"
           printf '%s\n' "$plan" | grep -F "root     : $root"
-          printf '%s\n' "$plan" | grep -F "config   : $CC_TERMUX_CONFIG"
-          printf '%s\n' "$plan" | grep -F "cache    : $CC_TERMUX_CACHE"
+          printf '%s\n' "$plan" | grep -F "config   : $MODELMESH_CONFIG"
+          printf '%s\n' "$plan" | grep -F "cache    : $MODELMESH_CACHE"
 
           node install.mjs --code-only --root "$root" --no-setup
 
           for f in bin/cc-launcher.mjs bin/cc-mcp.mjs proxy/server.mjs patches.json bin/cc-paths.mjs; do
             test -f "$root/$f" || { echo "missing installed file: $f"; exit 1; }
           done
-          test -f "$CC_TERMUX_CONFIG" || { echo "installer did not create the config"; exit 1; }
+          test -f "$MODELMESH_CONFIG" || { echo "installer did not create the config"; exit 1; }
           test -f "$HOME/.local/bin/claude" || { echo "missing ~/.local/bin/claude shim"; exit 1; }
           grep -q 'cc-launcher.mjs' "$HOME/.local/bin/claude"
-          test -f "$PREFIX/bin/cc-termux" || { echo "missing cc-termux shim in PREFIX"; exit 1; }
-          out="$(node "$root/bin/cc-termux" path)"
+          test -f "$PREFIX/bin/modelmesh" || { echo "missing modelmesh shim in PREFIX"; exit 1; }
+          out="$(node "$root/bin/modelmesh" path)"
           printf '%s\n' "$out"
           printf '%s\n' "$out" | grep -F "$root"
 
@@ -145,14 +145,14 @@ jobs:
           export LOCALAPPDATA="$(cygpath -m "$work/localappdata")"
           rm -rf "$HOME" "$(cygpath -u "$APPDATA")" "$(cygpath -u "$LOCALAPPDATA")"
           mkdir -p "$HOME" "$(cygpath -u "$APPDATA")" "$(cygpath -u "$LOCALAPPDATA")"
-          # No CC_TERMUX_CONFIG / CC_TERMUX_CACHE here: the real Windows layout must be
-          # exercised (APPDATA\cc-termux\config.json, LOCALAPPDATA\cc-termux\cache).
-          root="$LOCALAPPDATA/cc-termux"
-          export CC_TERMUX_ROOT="$root"
-          export CC_TERMUX_NO_BANNER=1
-          export CC_TERMUX_NO_PROMPT=1
+          # No MODELMESH_CONFIG / MODELMESH_CACHE here: the real Windows layout must be
+          # exercised (APPDATA\modelmesh\config.json, LOCALAPPDATA\modelmesh\cache).
+          root="$LOCALAPPDATA/modelmesh"
+          export MODELMESH_ROOT="$root"
+          export MODELMESH_NO_BANNER=1
+          export MODELMESH_NO_PROMPT=1
           mkdir -p "$(cygpath -u "$root/bin")"
-          # Fake an installed Claude Code build: --code-only must refresh the cc-termux code
+          # Fake an installed Claude Code build: --code-only must refresh the modelmesh code
           # without downloading the ~150 MB Claude Code binary.
           : > "$(cygpath -u "$root/bin/claude.exe")"
           printf '9.9.9\n' > "$(cygpath -u "$root/VERSION")"
@@ -174,11 +174,11 @@ jobs:
           for f in bin/cc-launcher.mjs bin/cc-mcp.mjs proxy/server.mjs patches.json bin/cc-paths.mjs; do
             test -f "$(cygpath -u "$root/$f")" || { echo "missing installed file: $f"; exit 1; }
           done
-          test -f "$(cygpath -u "$APPDATA/cc-termux/config.json")" || { echo "installer did not create the Windows config"; exit 1; }
-          test -d "$(cygpath -u "$LOCALAPPDATA/cc-termux/cache")" || { echo "installer did not create the Windows cache dir"; exit 1; }
+          test -f "$(cygpath -u "$APPDATA/modelmesh/config.json")" || { echo "installer did not create the Windows config"; exit 1; }
+          test -d "$(cygpath -u "$LOCALAPPDATA/modelmesh/cache")" || { echo "installer did not create the Windows cache dir"; exit 1; }
           shim="$APPDATA/npm/claude.cmd"
           test -f "$(cygpath -u "$shim")" || { echo "missing claude.cmd shim"; exit 1; }
           grep -q 'cc-launcher.mjs' "$(cygpath -u "$shim")"
-          out="$(node "$(cygpath -m "$root/bin/cc-termux")" path)"
+          out="$(node "$(cygpath -m "$root/bin/modelmesh")" path)"
           printf '%s\n' "$out"
           printf '%s\n' "$out" | grep -F "$root"

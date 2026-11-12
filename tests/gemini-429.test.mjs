@@ -81,7 +81,7 @@ test("the retry loop retries a burst and fails fast on a day limit", async () =>
   await new Promise((r) => upstream.listen(0, "127.0.0.1", r));
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cc-429-"));
   const home = path.join(tmp, "home");
-  const cache = path.join(home, ".cache", "cc-termux");
+  const cache = path.join(home, ".cache", "modelmesh");
   fs.mkdirSync(cache, { recursive: true });
   const cfg = path.join(tmp, "config.json");
   const port = 26000 + Math.floor(Math.random() * 400);
@@ -91,7 +91,7 @@ test("the retry loop retries a burst and fails fast on a day limit", async () =>
     routing: {},
   }));
   const child = spawn(process.execPath, [path.join(root, "proxy", "server.mjs")], {
-    env: { ...process.env, HOME: home, USERPROFILE: home, CC_TERMUX_CONFIG: cfg, CC_TERMUX_CACHE: cache },
+    env: { ...process.env, HOME: home, USERPROFILE: home, MODELMESH_CONFIG: cfg, MODELMESH_CACHE: cache },
     stdio: ["ignore", "pipe", "pipe"],
   });
   const logs = [];
@@ -103,7 +103,7 @@ test("the retry loop retries a burst and fails fast on a day limit", async () =>
     const call = async () => {
       const started = Date.now();
       const res = await fetch("http://127.0.0.1:" + port + "/v1/messages", {
-        method: "POST", headers: { "content-type": "application/json", authorization: "Bearer cc-termux-local" },
+        method: "POST", headers: { "content-type": "application/json", authorization: "Bearer modelmesh-local" },
         body: JSON.stringify({ model: "m", max_tokens: 20, messages: [{ role: "user", content: "hi" }] }),
       });
       return { status: res.status, ms: Date.now() - started, text: await res.text() };

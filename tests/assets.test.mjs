@@ -29,7 +29,7 @@ test("installer ships every runtime file (catches forgotten modules)", () => {
 });
 
 test("every relative import of a shipped file is shipped too", () => {
-  const shipped = [...assets].filter((f) => f.endsWith(".mjs") || f.endsWith(".js") || f === "bin/cc-termux");
+  const shipped = [...assets].filter((f) => f.endsWith(".mjs") || f.endsWith(".js") || f === "bin/modelmesh");
   const re = /(?:from\s+|import\s*\(\s*)["'](\.{1,2}\/[^"']+)["']/g;
   for (const rel of shipped) {
     const abs = path.join(repo, rel);

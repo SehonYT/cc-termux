@@ -1,5 +1,5 @@
 {
-  "name": "cc-termux",
+  "name": "modelmesh",
   "version": "0.2.0",
   "description": "Run Claude Code on any platform (Termux, Linux, macOS, Windows) with third-party model providers and a local gateway.",
   "type": "module",
@@ -8,8 +8,8 @@
     "node": ">=18"
   },
   "bin": {
-    "cc-termux": "bin/cc-termux",
-    "ccp": "bin/ccp.mjs"
+    "modelmesh": "bin/modelmesh",
+    "mm": "bin/mm.mjs"
   },
   "scripts": {
     "check": "node scripts/check.mjs",
@@ -26,10 +26,10 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/SehonYT/cc-termux.git"
+    "url": "https://github.com/SehonYT/modelmesh.git"
   },
-  "homepage": "https://github.com/SehonYT/cc-termux#readme",
+  "homepage": "https://github.com/SehonYT/modelmesh#readme",
   "bugs": {
-    "url": "https://github.com/SehonYT/cc-termux/issues"
+    "url": "https://github.com/SehonYT/modelmesh/issues"
   }
 }

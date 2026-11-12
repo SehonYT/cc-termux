@@ -11,7 +11,7 @@ const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 function runLauncher({ root: rt, home, cfgFile, cache }) {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [path.join(rt, "bin", "cc-launcher.mjs"), "-e", "0"], {
-      env: { ...process.env, HOME: home, USERPROFILE: home, CC_TERMUX_ROOT: rt, CC_TERMUX_CONFIG: cfgFile, CC_TERMUX_CACHE: cache },
+      env: { ...process.env, HOME: home, USERPROFILE: home, MODELMESH_ROOT: rt, MODELMESH_CONFIG: cfgFile, MODELMESH_CACHE: cache },
       stdio: "ignore",
     });
     const timer = setTimeout(() => { try { child.kill("SIGKILL"); } catch {} resolve(); }, 25000);
@@ -38,7 +38,7 @@ function makeRoot(tmp) {
 test("picking a model row switches the active provider so status line and quotas follow it", async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cc-launcher-"));
   const home = path.join(tmp, "home");
-  const cache = path.join(home, ".cache", "cc-termux");
+  const cache = path.join(home, ".cache", "modelmesh");
   fs.mkdirSync(path.join(home, ".claude"), { recursive: true });
   fs.mkdirSync(cache, { recursive: true });
   const rt = makeRoot(tmp);
@@ -69,7 +69,7 @@ test("picking a model row switches the active provider so status line and quotas
 test("the launcher forces the local auto-mode classifier and pins a Claude-capable model", async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cc-launcher-env-"));
   const home = path.join(tmp, "home");
-  const cache = path.join(home, ".cache", "cc-termux");
+  const cache = path.join(home, ".cache", "modelmesh");
   fs.mkdirSync(path.join(home, ".claude"), { recursive: true });
   fs.mkdirSync(cache, { recursive: true });
   const rt = makeRoot(tmp);
@@ -90,7 +90,7 @@ test("the launcher forces the local auto-mode classifier and pins a Claude-capab
     await new Promise((resolve) => {
       const child = spawn(process.execPath, [path.join(rt, "bin", "cc-launcher.mjs"), "-e",
         "require('fs').writeFileSync(process.env.CC_ENV_DUMP, JSON.stringify(process.env))"], {
-        env: { ...process.env, HOME: home, USERPROFILE: home, CC_TERMUX_ROOT: rt, CC_TERMUX_CONFIG: cfgFile, CC_TERMUX_CACHE: cache, CC_ENV_DUMP: dump, ANTHROPIC_AUTH_TOKEN: "inherited-should-be-dropped" },
+        env: { ...process.env, HOME: home, USERPROFILE: home, MODELMESH_ROOT: rt, MODELMESH_CONFIG: cfgFile, MODELMESH_CACHE: cache, CC_ENV_DUMP: dump, ANTHROPIC_AUTH_TOKEN: "inherited-should-be-dropped" },
         stdio: "ignore",
       });
       const timer = setTimeout(() => { try { child.kill("SIGKILL"); } catch {} resolve(); }, 25000);
@@ -100,7 +100,7 @@ test("the launcher forces the local auto-mode classifier and pins a Claude-capab
     assert.equal(env.CLAUDE_CODE_AUTO_MODE_SERVER, "0", "server-side classifier must be disabled behind the gateway");
     assert.match(env.CLAUDE_CODE_AUTO_MODE_MODEL || "", /^claude-/, "classifier must be a Claude-capable model");
     // Claude Code warns (and may pick the wrong header) when both are set.
-    assert.equal(env.ANTHROPIC_API_KEY, "cc-termux-local", "gateway token must be the API key");
+    assert.equal(env.ANTHROPIC_API_KEY, "modelmesh-local", "gateway token must be the API key");
     assert.equal(env.ANTHROPIC_AUTH_TOKEN, undefined, "ANTHROPIC_AUTH_TOKEN must not be set too");
   } finally {
     try { fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); } catch (e) { }

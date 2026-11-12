@@ -8,7 +8,7 @@ import zlib from "node:zlib";
 
 function tmpRoot(version, sha) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cc-upd-"));
-  fs.writeFileSync(path.join(root, "cc-termux.json"), JSON.stringify({ version, sha }));
+  fs.writeFileSync(path.join(root, "modelmesh.json"), JSON.stringify({ version, sha }));
   return root;
 }
 
@@ -54,7 +54,7 @@ test("localInfo falls back safely when the stamp is missing", () => {
 test("findInstaller handles GitHub-style archives with a top-level folder", () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cc-upd-arc-"));
   try {
-    const nested = path.join(tmp, "cc-termux-main");
+    const nested = path.join(tmp, "modelmesh-main");
     fs.mkdirSync(nested, { recursive: true });
     fs.writeFileSync(path.join(nested, "install.mjs"), "// installer");
     assert.equal(findInstaller(tmp), path.join(nested, "install.mjs"));
@@ -64,7 +64,7 @@ test("findInstaller handles GitHub-style archives with a top-level folder", () =
 test("selfUpdate runs an installer inside a GitHub-style archive", async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cc-upd-run-"));
   const tar = await import("node:child_process");
-  const stage = path.join(tmp, "stage", "cc-termux-main");
+  const stage = path.join(tmp, "stage", "modelmesh-main");
   fs.mkdirSync(stage, { recursive: true });
   const root = path.join(tmp, "root");
   fs.writeFileSync(path.join(stage, "package.json"), JSON.stringify({ version: "9.9.9" }));
@@ -76,12 +76,12 @@ test("selfUpdate runs an installer inside a GitHub-style archive", async () => {
     "fs.writeFileSync(root + \"/marker\", \"installed\");",
   ].join("\n"));
   const tgz = path.join(tmp, "src.tgz");
-  const r = tar.spawnSync("tar", ["-czf", tgz, "-C", path.join(tmp, "stage"), "cc-termux-main"]);
+  const r = tar.spawnSync("tar", ["-czf", tgz, "-C", path.join(tmp, "stage"), "modelmesh-main"]);
   if (r.status !== 0) { fs.rmSync(tmp, { recursive: true, force: true }); return; }
   try {
     await selfUpdate({ root, archivePath: tgz });
     assert.equal(fs.readFileSync(path.join(root, "marker"), "utf8"), "installed");
-    const stamp = JSON.parse(fs.readFileSync(path.join(root, "cc-termux.json"), "utf8"));
+    const stamp = JSON.parse(fs.readFileSync(path.join(root, "modelmesh.json"), "utf8"));
     assert.ok(String(stamp.version).startsWith("9.9.9"), "expected build version, got " + stamp.version);
   } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
 });
@@ -111,7 +111,7 @@ test("claudeCodeUpToDate compares the installed version with the registry", asyn
 test("selfUpdate pins the download to the resolved commit and stamps it", async () => {
   const os = await import("node:os");
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cc-upd-pin-"));
-  const stage = path.join(tmp, "stage", "cc-termux-main");
+  const stage = path.join(tmp, "stage", "modelmesh-main");
   fs.mkdirSync(stage, { recursive: true });
   fs.writeFileSync(path.join(stage, "package.json"), JSON.stringify({ version: "9.9.9" }));
   fs.writeFileSync(path.join(stage, "install.mjs"), [
@@ -119,11 +119,11 @@ test("selfUpdate pins the download to the resolved commit and stamps it", async 
     "const i = process.argv.indexOf(\"--root\");",
     "const root = i > 0 ? process.argv[i + 1] : \".\";",
     "fs.mkdirSync(root, { recursive: true });",
-    "fs.writeFileSync(root + \"/marker\", process.env.CC_TERMUX_COMMIT_SHA || \"none\");",
+    "fs.writeFileSync(root + \"/marker\", process.env.MODELMESH_COMMIT_SHA || \"none\");",
   ].join("\n"));
   const tgzPath = path.join(tmp, "src.tgz");
   const tar = await import("node:child_process");
-  const packed = tar.spawnSync("tar", ["-czf", tgzPath, "-C", path.join(tmp, "stage"), "cc-termux-main"]);
+  const packed = tar.spawnSync("tar", ["-czf", tgzPath, "-C", path.join(tmp, "stage"), "modelmesh-main"]);
   if (packed.status !== 0) { fs.rmSync(tmp, { recursive: true, force: true }); return; }
   const buf = fs.readFileSync(tgzPath);
   const sha = "c".repeat(40);
@@ -139,7 +139,7 @@ test("selfUpdate pins the download to the resolved commit and stamps it", async 
   try {
     await selfUpdate({ root, fetchImpl });
     assert.equal(fs.readFileSync(path.join(root, "marker"), "utf8"), sha, "installer got the pinned sha");
-    const stamp = JSON.parse(fs.readFileSync(path.join(root, "cc-termux.json"), "utf8"));
+    const stamp = JSON.parse(fs.readFileSync(path.join(root, "modelmesh.json"), "utf8"));
     assert.equal(stamp.sha, sha);
     assert.equal(stamp.version, "9.9.9+" + sha.slice(0, 7));
     assert.equal(stamp.updatedAt, "2026-01-02T00:00:00Z");
@@ -150,7 +150,7 @@ test("selfUpdate refuses an older remote feed instead of downgrading", async () 
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cc-upd-stale-"));
   const root = path.join(tmp, "root");
   fs.mkdirSync(root, { recursive: true });
-  fs.writeFileSync(path.join(root, "cc-termux.json"), JSON.stringify({ version: "9.9.9+newer", sha: "d".repeat(40), updatedAt: "2026-02-01T00:00:00Z" }));
+  fs.writeFileSync(path.join(root, "modelmesh.json"), JSON.stringify({ version: "9.9.9+newer", sha: "d".repeat(40), updatedAt: "2026-02-01T00:00:00Z" }));
   const staleSha = "e".repeat(40);
   const fetchImpl = async (url) => {
     if (url.includes("commits/main.atom")) return { ok: true, text: async () => "<entry><id>Grit::Commit/" + staleSha + "</id><updated>2026-01-01T00:00:00Z</updated></entry>", json: async () => ({}) };
@@ -160,13 +160,13 @@ test("selfUpdate refuses an older remote feed instead of downgrading", async () 
   try {
     const ok = await selfUpdate({ root, fetchImpl });
     assert.equal(ok, false);
-    assert.equal(JSON.parse(fs.readFileSync(path.join(root, "cc-termux.json"), "utf8")).sha, "d".repeat(40));
+    assert.equal(JSON.parse(fs.readFileSync(path.join(root, "modelmesh.json"), "utf8")).sha, "d".repeat(40));
   } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
 });
 test("check ignores caches without a commit date (legacy false positives)", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cc-upd-cache-"));
   try {
-    fs.writeFileSync(path.join(root, "cc-termux.json"), JSON.stringify({ version: "0.2.0+x", sha: "f".repeat(40), updatedAt: "2026-02-01T00:00:00Z" }));
+    fs.writeFileSync(path.join(root, "modelmesh.json"), JSON.stringify({ version: "0.2.0+x", sha: "f".repeat(40), updatedAt: "2026-02-01T00:00:00Z" }));
     fs.writeFileSync(path.join(root, "update-check.json"), JSON.stringify({ at: new Date().toISOString(), remote: { sha: "e".repeat(40), version: "0.1.0" } }));
     const fresh = "a".repeat(40);
     const fetchImpl = async (url) => {

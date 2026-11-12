@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const setup = fs.readFileSync(path.join(root, "bin", "cc-setup.mjs"), "utf8");
-const cli = fs.readFileSync(path.join(root, "bin", "cc-termux"), "utf8");
+const cli = fs.readFileSync(path.join(root, "bin", "modelmesh"), "utf8");
 
 // The predicate is duplicated in both entry points on purpose (the CLI must not import the
 // wizard), so the suite checks that they agree and that the lists stay in sync.

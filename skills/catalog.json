@@ -36,7 +36,7 @@
       "default": true,
       "description": "Drive a real browser from the agent: navigate, click, type, screenshot, extract and QA a page.",
       "adapted": true,
-      "adaptationNote": "Upstream ships a discovery stub that loads its guide from the installed CLI and is marked hidden. cc-termux ships a standalone skill that works with no agent-browser installed, detects what browser exists on the device, and routes to mcp__web__fetch otherwise. Syncing would delete that."
+      "adaptationNote": "Upstream ships a discovery stub that loads its guide from the installed CLI and is marked hidden. modelmesh ships a standalone skill that works with no agent-browser installed, detects what browser exists on the device, and routes to mcp__web__fetch otherwise. Syncing would delete that."
     },
     {
       "id": "frontend-design",
@@ -62,25 +62,25 @@
       "id": "webapp-quality",
       "name": "webapp-quality",
       "dir": "webapp-quality",
-      "source": "cc-termux",
+      "source": "modelmesh",
       "license": "MIT",
       "default": true,
       "description": "Build and review web apps that hold up: loading, empty, error and offline states, responsive layout, accessibility, performance budgets."
     },
     {
-      "id": "cc-termux-web",
-      "name": "cc-termux-web",
-      "dir": "cc-termux-web",
-      "source": "cc-termux",
+      "id": "modelmesh-web",
+      "name": "modelmesh-web",
+      "dir": "modelmesh-web",
+      "source": "modelmesh",
       "license": "MIT",
       "default": true,
-      "description": "Use cc-termux's own web tools correctly: web:search, web:fetch, the provider chain and the fallback order."
+      "description": "Use modelmesh's own web tools correctly: web:search, web:fetch, the provider chain and the fallback order."
     },
     {
       "id": "ux-review",
       "name": "ux-review",
       "dir": "ux-review",
-      "source": "cc-termux",
+      "source": "modelmesh",
       "license": "MIT",
       "default": true,
       "description": "Audit a UI for hierarchy, spacing, contrast, focus and copy, then fix the top findings in priority order."
@@ -127,7 +127,7 @@
       "id": "secrets-and-keys",
       "name": "secrets-and-keys",
       "dir": "secrets-and-keys",
-      "source": "cc-termux",
+      "source": "modelmesh",
       "license": "MIT",
       "default": true,
       "description": "Keep credentials out of code, logs and commits: safe reading, 0600 files, pre-commit checks and what to do when a key has already leaked."
@@ -136,7 +136,7 @@
       "id": "dep-audit",
       "name": "dep-audit",
       "dir": "dep-audit",
-      "source": "cc-termux",
+      "source": "modelmesh",
       "license": "MIT",
       "default": true,
       "description": "Review a dependency before adding it: real package, install scripts, version range, lockfile and licence, plus the smallest safe alternative."

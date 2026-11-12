@@ -10,9 +10,9 @@ npm run check            # syntax, JSON and shell checks (no tests run)
 node --test tests/translate.test.mjs   # a single file directly
 ```
 
-Tests must never write to `$PREFIX/bin` or the real `~/.local/share/cc-termux`. Every suite
-that touches config sets an isolated `HOME`, `CC_TERMUX_ROOT`, `CC_TERMUX_CONFIG` and
-`CC_TERMUX_CACHE` (or a temp prefix on Windows) and removes it afterwards.
+Tests must never write to `$PREFIX/bin` or the real `~/.local/share/modelmesh`. Every suite
+that touches config sets an isolated `HOME`, `MODELMESH_ROOT`, `MODELMESH_CONFIG` and
+`MODELMESH_CACHE` (or a temp prefix on Windows) and removes it afterwards.
 
 ## Unit suites
 
@@ -20,7 +20,7 @@ Pure or in-process: no network, no installed Claude Code, fast enough to run on 
 
 | File | Covers |
 |---|---|
-| `uninstall.test.mjs` | removal: the plan separates what cc-termux owns from what it shares with Claude Code, restoring `settings.json` and `~/.claude.json` removes only our keys and leaves every other setting byte for byte, a corrupt or missing settings file is left alone rather than destroyed, only a cc-termux shim is replaced by the original launcher, and the skill pack is removed without deleting a skill the user wrote |
+| `uninstall.test.mjs` | removal: the plan separates what modelmesh owns from what it shares with Claude Code, restoring `settings.json` and `~/.claude.json` removes only our keys and leaves every other setting byte for byte, a corrupt or missing settings file is left alone rather than destroyed, only a modelmesh shim is replaced by the original launcher, and the skill pack is removed without deleting a skill the user wrote |
 | `provider-headers.test.mjs` | provider URL joining (a baseUrl ending in /v1 must not become /v1/v1/responses, and no shipped preset may double a version segment), all three proxy paths resolving URLs and forwarding preset headers the same way, the AgentRouter client-identity headers its gateway requires, `cc-patch` resolving its root through cc-paths, and the installer moving an npm `.ps1` aside so PowerShell cannot prefer it over our shim |
 | `cross-platform.test.mjs` | guards that keep a Windows or custom-root regression from ever returning: no shipped module may hardcode a POSIX install, config or cache path, chmod must never be assumed to work, `/proc` and `/usr/local` must be probed rather than assumed, a runtime-written shell shim needs a Windows branch, POSIX signals must be guarded, and the resolved root, config, cache and claude paths must be absolute on every platform |
 | `platform.test.mjs` | the OS support contract: every platform and CPU we claim resolves to a usable target (Windows x64/arm64, macOS Intel and Apple Silicon, glibc and musl Linux, Android including 32-bit userland on an AArch64 kernel, and a JS fallback for anything unknown); musl detection across real Alpine layouts and never on glibc; every prefix is a real, platform-shaped path and Windows never resolves to `/usr/local`; an explicit `PREFIX` wins everywhere; and the CI matrix actually covers each OS it claims, including Intel macOS and a real Alpine container |

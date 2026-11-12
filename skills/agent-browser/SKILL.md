@@ -87,7 +87,7 @@ pretend you opened a page you did not render.
 - **Read the source**: if the project is local, read the components, styles and markup
   directly. For a layout bug that is usually faster and more reliable than a screenshot.
 - **Check the built output**: run the dev or build script and read what it emits.
-- **Blocked by a bot check**: cc-termux reports this instead of returning a challenge page.
+- **Blocked by a bot check**: modelmesh reports this instead of returning a challenge page.
   Try another source; do not attempt to defeat the challenge.
 - **Say what you could not check.** "Verified in the markup, not in a browser" is honest
   and useful. "Looks fine" when you did not render it is not.

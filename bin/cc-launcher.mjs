@@ -11,8 +11,8 @@ import { installRoot, configFile, configDir, cacheDir, claudeDir } from "./cc-pa
 const ROOT = installRoot();
 const CFG = configFile();
 const CACHE = cacheDir();
-// The platform default, ignoring a CC_TERMUX_CONFIG override in our own environment.
-const DEFAULT_CFG = configFile({ ...process.env, CC_TERMUX_CONFIG: "" });
+// The platform default, ignoring a MODELMESH_CONFIG override in our own environment.
+const DEFAULT_CFG = configFile({ ...process.env, MODELMESH_CONFIG: "" });
 fs.mkdirSync(CACHE, { recursive: true });
 
 function loadConfig() { try { return JSON.parse(fs.readFileSync(CFG, "utf8")); } catch { return { listen: { port: 8788 }, providers: {}, active: "" }; } }
@@ -20,7 +20,7 @@ const cfg = loadConfig();
 const port = (cfg.listen && cfg.listen.port) || 8788;
 const base = "http://127.0.0.1:" + port;
 const SESSIONS = path.join(CACHE, "sessions");
-const GATEWAY_TOKEN = process.env.CC_TERMUX_GATEWAY_TOKEN || "cc-termux-local";
+const GATEWAY_TOKEN = process.env.MODELMESH_GATEWAY_TOKEN || "modelmesh-local";
 fs.mkdirSync(SESSIONS, { recursive: true });
 const sessionFile = path.join(SESSIONS, process.pid + ".session");
 let sessionRegistered = false;
@@ -34,9 +34,9 @@ async function healthy() {
 function isOurGateway(pid) {
   try {
     const env = fs.readFileSync("/proc/" + pid + "/environ", "utf8").split("\0");
-    const want = "CC_TERMUX_CONFIG=" + path.resolve(CFG);
+    const want = "MODELMESH_CONFIG=" + path.resolve(CFG);
     if (env.includes(want)) return true;
-    if (!env.some((e) => e.startsWith("CC_TERMUX_CONFIG=")) && path.resolve(CFG) === path.resolve(DEFAULT_CFG)) return true;
+    if (!env.some((e) => e.startsWith("MODELMESH_CONFIG=")) && path.resolve(CFG) === path.resolve(DEFAULT_CFG)) return true;
     return false;
   } catch (e) { return false; }
 }
@@ -126,7 +126,7 @@ async function ensureGateway() {
   if (!fs.existsSync(server)) { console.error("cc-launcher: gateway missing at " + server); process.exit(1); }
   const child = spawn(process.execPath, [server], {
     detached: true, stdio: ["ignore", gwLog ?? "ignore", gwLog ?? "ignore"],
-    env: { ...process.env, CC_TERMUX_CONFIG: CFG, CC_TERMUX_MANAGED: "1", CC_TERMUX_GATEWAY_TOKEN: GATEWAY_TOKEN },
+    env: { ...process.env, MODELMESH_CONFIG: CFG, MODELMESH_MANAGED: "1", MODELMESH_GATEWAY_TOKEN: GATEWAY_TOKEN },
   });
   child.unref();
   try { fs.writeFileSync(path.join(CACHE, "gateway.pid"), String(child.pid)); } catch {}
@@ -138,7 +138,7 @@ async function ensureGateway() {
     const tail = fs.readFileSync(logFile, "utf8").trim().split("\n").slice(-15).join("\n");
     if (tail) console.error("--- gateway.log ---\n" + tail + "\n-----------------");
   } catch {}
-  console.error("check: cc-termux doctor | curl http://127.0.0.1:" + port + "/health");
+  console.error("check: modelmesh doctor | curl http://127.0.0.1:" + port + "/health");
   process.exit(1);
 }
 
@@ -163,7 +163,7 @@ function sanitizeSettings(p) {
   if (stale && target) { s.model = target; changed = true; }
   if (changed) {
     try {
-      fs.copyFileSync(file, file + ".cc-termux-backup");
+      fs.copyFileSync(file, file + ".modelmesh-backup");
       fs.writeFileSync(file, JSON.stringify(s, null, 2) + "\n");
       fs.appendFileSync(path.join(CACHE, "errors.log"), JSON.stringify({
         at: new Date().toISOString(), kind: "config", provider: p && p.name || null, model: target || null,
@@ -181,7 +181,7 @@ function ensureMcpServer() {
   try { cfg = JSON.parse(fs.readFileSync(file, "utf8")) || {}; } catch (e) { return; }
   const wanted = { command: process.execPath, args: [path.join(ROOT, "bin", "cc-mcp.mjs")] };
   cfg.mcpServers = cfg.mcpServers && typeof cfg.mcpServers === "object" ? cfg.mcpServers : {};
-  delete cfg.mcpServers["cc-termux"]; // legacy name, replaced by "web"
+  delete cfg.mcpServers["modelmesh"]; // legacy name, replaced by "web"
   const cur = cfg.mcpServers["web"];
   const same = cur && cur.command === wanted.command && Array.isArray(cur.args) && cur.args[0] === wanted.args[0];
   if (!same) {
@@ -200,8 +200,8 @@ function ensureMcpServer() {
     settings.permissions = settings.permissions && typeof settings.permissions === "object" ? settings.permissions : {};
     const allow = Array.isArray(settings.permissions.allow) ? settings.permissions.allow : [];
     const wantedTools = ["mcp__web__search", "mcp__web__fetch"];
-    const legacy = allow.filter((r) => /^mcp__cc-termux__/.test(r));
-    const keep = allow.filter((r) => !/^mcp__cc-termux__/.test(r));
+    const legacy = allow.filter((r) => /^mcp__modelmesh__/.test(r));
+    const keep = allow.filter((r) => !/^mcp__modelmesh__/.test(r));
     const missing = wantedTools.filter((r) => !keep.includes(r));
     if (missing.length || legacy.length) {
       settings.permissions.allow = [...keep, ...missing];
@@ -212,7 +212,7 @@ function ensureMcpServer() {
   } catch (e) { }
   try {
     const memoryFile = path.join(claudeDir(), "CLAUDE.md");
-    const marker = "cc-termux web tools";
+    const marker = "modelmesh web tools";
     const current = fs.existsSync(memoryFile) ? fs.readFileSync(memoryFile, "utf8") : "";
     const note = "<!-- " + marker + " -->\nFor web access use the MCP tools web:search and web:fetch " +
       "(they handle headers, retries and SSRF blocking); the built-in WebSearch/WebFetch tools cannot " +
@@ -221,7 +221,7 @@ function ensureMcpServer() {
       fs.mkdirSync(path.dirname(memoryFile), { recursive: true });
       fs.appendFileSync(memoryFile, (current && !current.endsWith("\n") ? "\n" : "") + "\n" + note);
     } else if (!current.includes("web:search and web:fetch")) {
-      fs.writeFileSync(memoryFile, current.replace(/<!-- cc-termux web tools -->[\s\S]*?(?=\n<!--|$)/, note.trimEnd()));
+      fs.writeFileSync(memoryFile, current.replace(/<!-- modelmesh web tools -->[\s\S]*?(?=\n<!--|$)/, note.trimEnd()));
     }
   } catch (e) { }
 }
@@ -242,7 +242,7 @@ async function envForChild() {
       env.CLAUDE_CODE_MESSAGING_SOCKET = path.join(messagingDir, "messaging.sock");
     } catch (e) { }
   }
-  env.CC_TERMUX_GATEWAY_TOKEN = GATEWAY_TOKEN;
+  env.MODELMESH_GATEWAY_TOKEN = GATEWAY_TOKEN;
   env.ANTHROPIC_API_KEY = GATEWAY_TOKEN;
   delete env.ANTHROPIC_AUTH_TOKEN;
   let p = (cfg.providers || {})[cfg.active] || {};
@@ -341,7 +341,7 @@ async function envForChild() {
     if (resolved.enabled) {
       Object.assign(env, perfMod.applyPerfEnv({}, resolved));
       try { perfMod.setReducedMotion(os.homedir(), true); } catch (e) { }
-      if (process.env.CC_TERMUX_PERF_VERBOSE === "1") process.stderr.write("cc-termux: performance profile: on\n");
+      if (process.env.MODELMESH_PERF_VERBOSE === "1") process.stderr.write("modelmesh: performance profile: on\n");
     }
   } catch (e) { }
   const ctx = selectedContext || p.contextWindow;
@@ -430,7 +430,7 @@ async function envForChild() {
       ]);
       if (info && info.available) {
         const { labelVersion } = await import("file://" + path.join(ROOT, "scripts", "version.mjs"));
-        console.error("cc-termux: update available (" + labelVersion(info.local.version, info.local.sha) + " -> " + labelVersion(info.remote.version, info.remote.sha) + ") - run: cc-termux update");
+        console.error("modelmesh: update available (" + labelVersion(info.local.version, info.local.sha) + " -> " + labelVersion(info.remote.version, info.remote.sha) + ") - run: modelmesh update");
       }
     } catch (e) { }
   }

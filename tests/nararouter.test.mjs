@@ -178,7 +178,7 @@ test("the nararouter preset points at the documented endpoint", () => {
 
 test("the wizard and the CLI both know about NaraRouter", () => {
   const setup = fs.readFileSync(path.join(root, "bin", "cc-setup.mjs"), "utf8");
-  const cli = fs.readFileSync(path.join(root, "bin", "cc-termux"), "utf8");
+  const cli = fs.readFileSync(path.join(root, "bin", "modelmesh"), "utf8");
   assert.match(setup, /if \(kind === "nararouter"\)/);
   assert.match(setup, /kind === "openrouter" \|\| kind === "nararouter"/, "the tier prompt must cover both routers");
   assert.match(cli, /case "nararouter":/);

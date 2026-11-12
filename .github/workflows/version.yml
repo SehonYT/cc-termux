@@ -45,7 +45,7 @@ jobs:
           if git rev-parse "$TAG" >/dev/null 2>&1; then
             echo "tag $TAG already exists"
           else
-            git tag -a "$TAG" "$TARGET_SHA" -m "cc-termux $TAG"
+            git tag -a "$TAG" "$TARGET_SHA" -m "modelmesh $TAG"
             git push origin "$TAG"
           fi
           gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "$TAG" --notes "Automated release for $TARGET_SHA" || true
