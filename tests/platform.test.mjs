@@ -156,17 +156,22 @@ test("every platform resolves to a usable, distinct prefix", () => {
   // path.isAbsolute is platform-bound: a Windows path looks relative to POSIX, so the
   // assertion checks the shape each platform must produce instead.
   const winEnv = { LOCALAPPDATA: "C:/Users/x/AppData/Local" };
+  // path.join uses the host separator, so the expectation must not assume one: on Windows
+  // every join produces backslashes even from a POSIX-looking home.
   const cases = [
     ["win32", winEnv, /AppData/],
-    ["darwin", {}, /^\//],
-    ["linux", {}, /^\//],
-    ["android", {}, /^\//],
+    ["darwin", {}, /(^|[\\/])\.local$/],
+    ["linux", {}, /(^|[\\/])\.local$/],
+    // Termux has its own prefix and must not be sent to $HOME.
+    ["android", {}, /(^|[\\/])usr$/],
   ];
   const byPlatform = {};
   for (const [platform, env, shape] of cases) {
     const root = resolvePrefix({ platform, env, home: "/home/x", exists: () => false });
     assert.ok(typeof root === "string" && root.length > 1, platform + " prefix must be a real path");
-    assert.match(root, shape, platform + " prefix must have the right shape, got " + root);
+    // Match on the tail so the host separator does not matter: on Windows every join
+    // produces backslashes even from a POSIX-looking home.
+    assert.match(root, shape, platform + " prefix has the wrong shape: " + root);
     const bin = prefixBinDir({ platform, env, home: "/home/x", exists: () => false });
     assert.ok(bin.endsWith("bin"), platform + " bin dir must end in bin");
     byPlatform[platform] = root;
@@ -174,6 +179,7 @@ test("every platform resolves to a usable, distinct prefix", () => {
   // POSIX platforms may share /usr/local legitimately; Windows must never.
   assert.notEqual(byPlatform.win32, byPlatform.linux, "windows must not resolve like linux");
   assert.notEqual(byPlatform.win32, byPlatform.darwin, "windows must not resolve like macOS");
+  assert.ok(!/^[\\/]usr[\\/]/.test(byPlatform.win32), "windows must never resolve under /usr");
   // An explicit PREFIX still wins everywhere, which custom roots and Alpine rely on.
   for (const platform of ["win32", "darwin", "linux", "android"]) {
     assert.equal(resolvePrefix({ platform, env: { PREFIX: "/custom" }, home: "/home/x", exists: () => false }), "/custom");
