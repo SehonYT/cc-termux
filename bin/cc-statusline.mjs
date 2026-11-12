@@ -162,7 +162,7 @@ export function installStatusLine() {
       "",
     ].join("\n"), { mode: 0o644 });
   } catch (e) { }
-  return { settingsFile, cmdFile, installed: installed && (!current || ours), pointsAtCurrentPath: Boolean(pointsAtCurrentPath) };
+  return { settingsFile, cmdFile, installed: installed && (!current || readsOurFile), pointsAtCurrentPath: Boolean(pointsAtCurrentPath) };
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   if (process.argv.includes("--install")) {

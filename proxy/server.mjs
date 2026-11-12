@@ -847,5 +847,8 @@ if (DOMAIN_CHECK_ENV != null && DOMAIN_CHECK_ENV !== '' && Number(DOMAIN_CHECK_E
     // Another modelmesh gateway already owns the helper port: nothing to do.
     if (e.code !== 'EADDRINUSE') LOG('domain-check helper error', e.code || e.message);
   });
+  // unref: importing the server must not hold the event loop open, or a test file that
+  // only imports it never exits and the runner kills it at the deadline with no reason.
+  helper.unref();
   helper.listen(DOMAIN_CHECK_PORT, '127.0.0.1', () => LOG('domain-check helper listening on', DOMAIN_CHECK_PORT));
 }

@@ -320,40 +320,13 @@ export async function proxyAntigravity(req, res, route, body, { anthropicError, 
     body: JSON.stringify(envelope),
     signal: AbortSignal.timeout(15 * 60 * 1000),
   });
-  // Open the stream before the upstream call. The model can take seconds to produce a first
-  // token, and until the headers were sent there was no stream to keep alive, so the client
-  // showed a frozen elapsed timer over dead air.
   const collected = { text: "", tools: [] };
-  // Claude Code's elapsed timer redraws on traffic. A model that reasons before answering
-  // sends nothing for a while, so the counter appeared frozen even though the request was
-  // healthy. A ping every few seconds keeps it moving, which is what the native API does.
   const wantStream = body.stream !== false;
-  let lastWrite = Date.now();
   const sse = (event, data) => {
     if (sink) { sink(event, data); return; }
     if (wantStream) res.write("event: " + event + "\ndata: " + JSON.stringify(data) + "\n\n");
-    lastWrite = Date.now();
   };
-  // Tick often, ping rarely: the interval must be shorter than the quiet window it covers.
-  const PING_AFTER_MS = Number(process.env.MODELMESH_PING_AFTER_MS || 2000);
-  const keepalive = setInterval(() => {
-    if (!wantStream || sink) return;
-    if (Date.now() - lastWrite < PING_AFTER_MS) return;
-    try { res.write("event: ping\ndata: " + JSON.stringify({ type: "ping" }) + "\n\n"); lastWrite = Date.now(); } catch (e) { }
-  }, Math.max(250, Math.floor(PING_AFTER_MS / 4)));
-  const stopKeepalive = () => clearInterval(keepalive);
-
-  // Declared before the early open below, which needs them.
   let started = false, blockIndex = -1, blockKind = null, textOpen = false, stop = "end_turn";
-  const wantStreamEarly = wantStream && !sink;
-  if (wantStreamEarly) {
-    try {
-      res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
-      res.flushHeaders();
-      started = true;
-      sse("message_start", { type: "message_start", message: { id: "msg_" + Date.now(), type: "message", role: "assistant", model: route.model, content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 0, output_tokens: 0 } } });
-    } catch (e) { }
-  }
   let upstream;
   try { upstream = await sendUpstream(token, GENERATE_URLS[0]); }
   catch (e) { return fail(502, "api_error", "Antigravity request failed: " + e.message); }
@@ -471,10 +444,9 @@ export async function proxyAntigravity(req, res, route, body, { anthropicError, 
       sawContent = true;
     }
     for (const part of parts) {
-      if (part.thought || part.thoughtSignature) {
-        // Thinking used to be dropped, so a model that reasons for a while sent nothing at
-        // all: Claude Code showed a frozen timer over dead air. Forward it as a thinking
-        // block, which is what the native API sends and what the client renders.
+      // Only thought:true is reasoning. Function calls also carry a thoughtSignature, and
+      // treating that as thinking dropped every tool call into an "empty response".
+      if (part.thought === true) {
         const thinking = typeof part.text === "string" ? part.text : "";
         if (!thinking) continue;
         start();
@@ -568,7 +540,6 @@ export async function proxyAntigravity(req, res, route, body, { anthropicError, 
       sse("message_stop", { type: "message_stop" });
     } catch (e2) { }
   } finally {
-    stopKeepalive();
     try { res.end(); } catch (e) { try { res.destroy(); } catch (e2) { } }
     refreshStatusLine({ modelId: route.model, provider: route.name }).catch(() => { });
   }
