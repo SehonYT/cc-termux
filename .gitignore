@@ -11,3 +11,9 @@ claude.exe
 Thumbs.db
 dist/
 .env
+
+# Local analysis tooling. Not shipped: the analyzers are for working on the code,
+# not part of what users install.
+py_scripts/
+py_tests/
+__pycache__/

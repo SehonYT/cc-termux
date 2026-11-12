@@ -194,16 +194,23 @@ export function fmtTokens(n) {
 
 // 429 from this gateway is always type "rate_limited": a per-minute breach resets in a
 // minute, a daily token breach only resets the next day, and the message says which.
+// The one classifier, shared with the gateway. The two copies had drifted: this one could
+// answer null while the server's always guessed "transient", so a message naming an
+// exhausted quota was retried instead of failing fast. Every case is matched explicitly and
+// an unrecognised body is reported as unknown rather than guessed at.
 export function classifyNara429(text) {
   const body = String(text || "");
-  if (!/rate_limited|rate limit|quota/i.test(body)) return null;
-  if (/daily|per day|token quota|quota is reached|quota exceeded for this model tier/i.test(body)) {
+  // Any of these words means the body is talking about capacity at all.
+  if (!/rate|quota|limit|exhaust|insufficient|too many/i.test(body)) return null;
+  // Exhausted for the day: retrying cannot help until it resets.
+  if (/daily|per day|per-day|token quota|quota is reached|quota exceeded|exceeded the quota|model tier|insufficient/i.test(body)) {
     return { verdict: "terminal", classes: ["daily"], retryAfterMs: null };
   }
-  if (/per minute|rate limit|too many requests/i.test(body)) {
+  if (/per minute|per-minute|rate limit|too many requests|rpm/i.test(body)) {
     return { verdict: "transient", classes: ["rpm"], retryAfterMs: null };
   }
-  return null;
+  // A 429 that names no metric: assume the cheap interpretation, a burst, but say so.
+  return { verdict: "transient", classes: ["unknown"], retryAfterMs: null };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

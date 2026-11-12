@@ -9,7 +9,7 @@ import crypto from "node:crypto";
 import readline from "node:readline";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { cacheDir, configFile, configDir as pathsConfigDir } from "./cc-paths.mjs";
+import { cacheDir, configFile, configDir as pathsConfigDir, atomicWrite } from "./cc-paths.mjs";
 
 // The XOR key the byte arrays below were encoded with. It is NOT branding: changing it
 // makes every decoded credential garbage. Keep it exactly as encoded.
@@ -77,13 +77,7 @@ export const X_GOOG_API_CLIENT = "gl-node/22.21.1";
 export function configDir() { return pathsConfigDir(); }
 export function credsPath() { return path.join(configDir(), "antigravity.json"); }
 
-function atomicWrite(file, data, mode = 0o600) {
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  const tmp = file + "." + process.pid + ".tmp";
-  fs.writeFileSync(tmp, data, { mode });
-  fs.renameSync(tmp, file);
-  try { fs.chmodSync(file, mode); } catch (e) { }
-}
+
 export function loadCredentials() {
   try { return JSON.parse(fs.readFileSync(credsPath(), "utf8")); } catch (e) { return null; }
 }

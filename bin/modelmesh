@@ -319,6 +319,17 @@ async function doctor(fix) {
     else pass("agent skills installed (" + sk.length + ")" + (edited.length ? ", " + edited.length + " locally modified and kept" : ""));
   } catch (e) { }
 
+  // Auto mode asks a model to judge each command. With no Anthropic account that call
+  // fails, so the gateway answers locally; a wrong setting stalls every Bash command.
+  try {
+    const cfgNow = JSON.parse(fs.readFileSync(configFile(), "utf8"));
+    const allow = cfgNow.classifier && cfgNow.classifier.allow != null
+      ? Boolean(cfgNow.classifier.allow)
+      : process.env.MODELMESH_CLASSIFIER_ALLOW !== "0";
+    if (allow) pass("auto-mode classifier answered locally");
+    else warn("auto-mode classifier is sent upstream; with no Anthropic account every Bash call will stall");
+  } catch (e) { }
+
   let patchOut = "";
   try {
     patchOut = execFileSync(process.execPath, [path.join(ROOT, "bin", "cc-patch.mjs"), "--status"], { encoding: "utf8" });

@@ -141,7 +141,7 @@ test("AgentRouter carries the documented windows for its models", () => {
 
 test("cc-patch resolves its root through cc-paths", () => {
   const patch = fs.readFileSync(path.join(root, "bin", "cc-patch.mjs"), "utf8");
-  assert.match(patch, /import \{ installRoot \} from "\.\/cc-paths\.mjs"/);
+  assert.match(patch, /import \{[^}]*installRoot[^}]*\} from "\.\/cc-paths\.mjs"/, "it imports installRoot from cc-paths");
   assert.match(patch, /const ROOT = installRoot\(\)/);
   // A hardcoded home path would ignore a custom --root, exactly as the uninstaller once did.
   assert.ok(!/path\.join\(os\.homedir\(\), "\.local", "share", "modelmesh"\)/.test(patch),

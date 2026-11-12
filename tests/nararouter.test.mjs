@@ -131,20 +131,11 @@ test("fetchNaraModels surfaces the gateway's own error message", async () => {
   }
 });
 
-test("the gateway classifies NaraRouter 429s: per-minute is transient, daily quota is terminal", () => {
-  const start = server.indexOf("function classifyNara429(");
-  const end = server.indexOf("// Google sometimes answers");
-  assert.ok(start > 0 && end > start, "classifier must stay in proxy/server.mjs");
-  const fn = new Function(server.slice(start, end) + "; return classifyNara429;")();
-  assert.equal(fn('{"error":{"type":"rate_limited","message":"Rate limit exceeded. Please retry later."}}').verdict, "transient");
-  assert.equal(fn('{"error":{"type":"rate_limited","message":"This model tier daily token quota is reached."}}').verdict, "terminal");
-  assert.equal(fn('{"error":{"type":"rate_limited","message":"Daily token quota exceeded for this model tier."}}').verdict, "terminal");
-  assert.equal(fn('{"error":{"type":"unauthorized","message":"A valid API key is required."}}'), null);
-  assert.equal(fn(""), null);
-  assert.equal(fn(null), null);
-  // The shared dispatcher must consult both providers.
-  assert.match(server, /function classifyRateLimit\(text\) \{\s*return classifyGemini429\(text\) \|\| classifyNara429\(text\);/);
-  assert.match(server, /const gemini = classifyRateLimit\(bodyText\);/);
+test("the gateway classifies NaraRouter 429s through the shared classifier", () => {
+  // The classifier used to be duplicated in the gateway, and the two copies disagreed on
+  // daily-quota messages. It now lives in one place and the gateway imports it.
+  assert.match(server, /import \{ classifyNara429 \} from "\.\.\/bin\/cc-nara\.mjs"/, "the gateway imports it");
+  assert.ok(!/function classifyNara429/.test(server), "the gateway must not define its own");
 });
 
 test("usage output mirrors the Antigravity quota view", () => {
@@ -183,4 +174,49 @@ test("the wizard and the CLI both know about NaraRouter", () => {
   assert.match(setup, /kind === "openrouter" \|\| kind === "nararouter"/, "the tier prompt must cover both routers");
   assert.match(cli, /case "nararouter":/);
   assert.match(cli, /router\\\.bynara\\\.id/, "usage must detect the provider by base URL");
+});
+
+test("the NaraRouter 429 classifier has one definition", async () => {
+  // It existed in both the CLI and the gateway, and they disagreed: a message naming an
+  // exhausted daily quota was classified transient by the gateway and retried ten times.
+  const srv = fs.readFileSync(path.join(root, "proxy", "server.mjs"), "utf8");
+  assert.ok(!/function classifyNara429/.test(srv), "the gateway must not define its own");
+  assert.match(srv, /import \{ classifyNara429 \} from "\.\.\/bin\/cc-nara\.mjs"/, "it imports the shared one");
+  const nara = fs.readFileSync(path.join(root, "bin", "cc-nara.mjs"), "utf8");
+  assert.equal((nara.match(/export function classifyNara429/g) || []).length, 1, "exactly one definition");
+});
+
+test("an exhausted quota is terminal and a burst is transient", async () => {
+  const { classifyNara429 } = await import("../bin/cc-nara.mjs");
+  const cases = [
+    ["you exceeded the quota for this model tier", "terminal"],
+    ["daily token limit reached", "terminal"],
+    ["insufficient quota", "terminal"],
+    ["quota is reached", "terminal"],
+    ["too many requests per minute", "transient"],
+    ["rate_limited: something new", "transient"],
+  ];
+  for (const [body, want] of cases) {
+    const got = classifyNara429(body);
+    assert.ok(got, body + " should be recognised");
+    assert.equal(got.verdict, want, body + " should be " + want);
+  }
+  assert.equal(classifyNara429("some unrelated error"), null, "an unrelated body is not a 429");
+});
+
+test("the auto-mode classifier is answered locally by default", () => {
+  // Its classifier is a Claude model call a third-party provider cannot serve, so a
+  // default of upstream would stall every Bash command.
+  const srv = fs.readFileSync(path.join(root, "proxy", "server.mjs"), "utf8");
+  const fn = /function classifierAllow\(\) \{[\s\S]*?\n\}/.exec(srv)[0];
+  assert.match(fn, /return true;/, "with no setting it answers locally");
+  assert.match(fn, /MODELMESH_CLASSIFIER_ALLOW/, "the env override still wins");
+  assert.match(fn, /CONFIG\.classifier/, "a config field still wins over the default");
+});
+
+test("the classifier state is reported and defaulted by the toolchain", () => {
+  const cli = fs.readFileSync(path.join(root, "bin", "modelmesh"), "utf8");
+  assert.match(cli, /auto-mode classifier/, "doctor reports it");
+  const inst = fs.readFileSync(path.join(root, "install.mjs"), "utf8");
+  assert.match(inst, /ensureClassifierDefault/, "the installer writes the default");
 });

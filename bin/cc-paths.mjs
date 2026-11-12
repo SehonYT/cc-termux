@@ -87,3 +87,15 @@ export function claudeDir(environment) {
 
 /** True when the install root uses the Windows layout (useful for messages). */
 export const isWindows = WIN;
+
+// Write a file so a reader never sees it half-written: write beside it, then rename.
+// Three copies of this had drifted and one was missing the mkdir, so a write into a
+// directory that did not exist yet threw instead of creating it.
+export function atomicWrite(file, data, mode = 0o600) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const tmp = file + "." + process.pid + ".tmp";
+  fs.writeFileSync(tmp, data, { mode });
+  fs.renameSync(tmp, file);
+  // Windows ignores the mode on create, and some filesystems refuse chmod entirely.
+  if (process.platform !== "win32") { try { fs.chmodSync(file, mode); } catch (e) { } }
+}

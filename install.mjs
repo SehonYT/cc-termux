@@ -281,6 +281,17 @@ async function askWebProviders() {
   }
 }
 
+// Auto mode cannot work without this: its classifier is a model call that a third-party
+// provider cannot serve. Written once so the default is explicit and discoverable.
+function ensureClassifierDefault() {
+  try {
+    const cfg = JSON.parse(fs.readFileSync(CFG, "utf8"));
+    if (cfg.classifier && cfg.classifier.allow != null) return;
+    cfg.classifier = { ...(cfg.classifier || {}), allow: true };
+    fs.writeFileSync(CFG, JSON.stringify(cfg, null, 2) + "\n", { mode: 0o600 });
+  } catch (e) { }
+}
+
 // The skill pack is content, not code: it is always installed so the agent has the
 // conventions available, and never overwrites a skill the user already has.
 async function installSkillsQuietly() {
@@ -592,6 +603,7 @@ function installShims(t) {
   stopManagedGateway();
   await askPerformance();
   await askWebProviders();
+  ensureClassifierDefault();
   await installSkillsQuietly();
   if (!NO_SHIMS) installShims(t);
   try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}

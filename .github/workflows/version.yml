@@ -23,7 +23,21 @@ jobs:
     runs-on: ubuntu-latest
     env:
       TARGET_SHA: ${{ github.event.workflow_run.head_sha }}
+      RUN_ID: ${{ github.event.workflow_run.id }}
     steps:
+      # A stalled run reports success with no jobs. Tagging there would publish a release
+      # whose tests never ran, so the job count is checked before anything else.
+      - name: Refuse to tag a run that produced no jobs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          jobs=$(gh api "repos/${{ github.repository }}/actions/runs/$RUN_ID/jobs?per_page=100" --jq '.jobs | length')
+          echo "ci produced $jobs job(s)"
+          if [ "$jobs" -eq 0 ]; then
+            echo "::error::the ci run produced no jobs, so nothing was verified; refusing to tag"
+            exit 1
+          fi
       # Always check out the trusted default branch, never untrusted PR code.
       - uses: actions/checkout@v4
         with:

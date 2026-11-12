@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { login as antigravityLogin, ensureProject as antigravityEnsureProject, loadCredentials as antigravityCreds, fetchAvailableModels, updateProviderModels } from "./cc-antigravity.mjs";
 import { installStatusLine, refreshStatusLine } from "./cc-statusline.mjs";
-import { installRoot, configFile, claudeDir, cacheDir } from "./cc-paths.mjs";
+import { installRoot, configFile, claudeDir, cacheDir, atomicWrite } from "./cc-paths.mjs";
 import { fetchPlans as naraPlans, fetchNaraModels as naraModels, splitByTier as naraSplit, readNaraCache, writeNaraCache } from "./cc-nara.mjs";
 import { WEB_PROVIDERS, PROVIDER_INFO, readWebConfig, writeWebConfig, providerKey as webProviderKey, resolveChain } from "./cc-webproviders.mjs";
 import { skillStatus, installSkills, removeSkills, formatSkills } from "./cc-skills.mjs";
@@ -297,13 +297,7 @@ async function fetchCustomModels(baseUrl, key, type) {
   }
   throw last || new Error("custom /models unavailable");
 }
-function atomicWrite(file, text, mode = 0o600) {
-  const tmp = file + "." + process.pid + ".tmp";
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(tmp, text, { mode });
-  fs.renameSync(tmp, file);
-  try { fs.chmodSync(file, mode); } catch (e) { }
-}
+
 function loadCfg() {
   try { return JSON.parse(fs.readFileSync(CFG, "utf8")); } catch (e) { return { listen: { host: "127.0.0.1", port: 8788 }, providers: {}, active: "", routing: {} }; }
 }

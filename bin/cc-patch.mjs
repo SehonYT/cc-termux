@@ -5,7 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import crypto from "node:crypto";
-import { installRoot } from "./cc-paths.mjs";
+import { installRoot, atomicWrite } from "./cc-paths.mjs";
 
 // Resolve the install root the same way the rest of modelmesh does, so a custom
 // --root or a Windows layout is not silently read from the wrong place.
@@ -79,11 +79,7 @@ function applyRegions(buf, patches, applied, skipped) {
   return changed;
 }
 
-function atomicWrite(file, data, mode) {
-  const tmp = file + "." + process.pid + ".tmp";
-  fs.writeFileSync(tmp, data, { mode });
-  fs.renameSync(tmp, file);
-}
+
 
 function writeBackup(buf, extra = {}) {
   atomicWrite(BACKUP, Buffer.from(buf), 0o755);

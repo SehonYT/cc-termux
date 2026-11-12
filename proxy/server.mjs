@@ -21,6 +21,7 @@ import {
 } from "./translate.mjs";
 import { refreshStatusLine } from "../bin/cc-statusline.mjs";
 import { configFile, configDir, cacheDir } from "../bin/cc-paths.mjs";
+import { classifyNara429 } from "../bin/cc-nara.mjs";
 
 const CONFIG_PATH = configFile();
 const LOG = (...a) => {
@@ -123,14 +124,8 @@ function classifyGemini429(text) {
 
 // NaraRouter answers one 429 type ("rate_limited") for both cases; the message says which.
 // A per-minute breach clears in a minute, a daily token quota only resets the next day.
-function classifyNara429(text) {
-  const body = String(text || '');
-  if (!/rate_limited|rate limit|daily token|token quota|quota is reached/i.test(body)) return null;
-  if (/daily|per day|token quota|quota is reached|quota exceeded for this model tier/i.test(body)) {
-    return { verdict: 'terminal', classes: ['daily'], retryAfterMs: null };
-  }
-  return { verdict: 'transient', classes: ['rpm'], retryAfterMs: null };
-}
+// Imported from cc-nara so the checkout and the gateway cannot disagree about what a
+// NaraRouter 429 means. Two copies had drifted and disagreed on daily-quota messages.
 
 function classifyRateLimit(text) {
   return classifyGemini429(text) || classifyNara429(text);
@@ -315,10 +310,15 @@ function isClassifierRequest(body) {
   const stops = Array.isArray(body.stop_sequences) ? body.stop_sequences.join(' ') : '';
   return /<\/block>|<\/severity>/.test(stops);
 }
+// Auto mode's safety check is itself a model call, and it is routed to a Claude model id
+// that a third-party provider cannot serve. Answering it locally is the only way auto mode
+// works without an Anthropic account, so that is the default; set the flag to 0 to send it
+// upstream instead.
 function classifierAllow() {
   const flag = process.env.MODELMESH_CLASSIFIER_ALLOW;
   if (flag != null) return flag === '1' || flag === 'true';
-  return Boolean(CONFIG.classifier && CONFIG.classifier.allow);
+  if (CONFIG.classifier && CONFIG.classifier.allow != null) return Boolean(CONFIG.classifier.allow);
+  return true;
 }
 function classifierVerdict(res, body, model) {
   const severity = Array.isArray(body.stop_sequences) && body.stop_sequences.join(' ').includes('</severity>');
