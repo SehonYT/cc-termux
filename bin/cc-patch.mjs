@@ -29,6 +29,30 @@ function loadDefs() {
 const padBytes = (s, n) => { const b = Buffer.from(String(s), "utf8"); if (b.length > n) throw new Error("replacement is longer than the anchor"); return Buffer.concat([b, Buffer.alloc(n - b.length, 0x20)]); };
 const asList = (v) => (Array.isArray(v) ? v : [v]);
 
+// A byte patch that lands at the wrong offset silently concatenates code. A region patch whose
+// anchor began after "var Oqr" produced "var Oqrvar Ukr=async()=>" and cc-patch still reported
+// success, so the result is now checked before anything is written. Only the edited window is
+// examined, so unrelated bytes elsewhere in a 300 MB binary cannot trip it.
+const isWordByte = (b) => b !== undefined && ((b >= 0x30 && b <= 0x39) || (b >= 0x41 && b <= 0x5a) || (b >= 0x61 && b <= 0x7a) || b === 0x5f || b === 0x24);
+// A replacement that starts with a word character, placed directly after one, glues two tokens
+// into an identifier: "var Oqr" + "var Ukr" became "var Oqrvar Ukr". Only the join is inspected -
+// scanning the whole window would flag ordinary code such as "if (x) async()=>" as corrupt.
+function checkWindow(before, after, from, to) {
+  if (from < 0 || to > after.length || to > before.length) return null;
+  const win = after.subarray(from, to);
+  if (win.includes(0)) return "the patched bytes contain a NUL, which is not valid in the source";
+  if (from > 0 && isWordByte(before[from - 1]) && isWordByte(win[0])) {
+    return "two tokens were glued together (" + String.fromCharCode(before[from - 1]) + " + " + String.fromCharCode(win[0]) + ")";
+  }
+  // Balanced braces over the window catches a replacement that ate a closing brace.
+  let depth = 0;
+  for (const ch of before.subarray(from, to).toString("utf8")) { if (ch === "{") depth++; else if (ch === "}") depth--; }
+  let now = 0;
+  for (const ch of win.toString("utf8")) { if (ch === "{") now++; else if (ch === "}") now--; }
+  if (now !== depth) return "brace count changed from " + depth + " to " + now;
+  return null;
+}
+
 function applyText(buf, patches, applied, skipped) {
   let changed = 0;
   for (const p of patches) {
@@ -43,9 +67,13 @@ function applyText(buf, patches, applied, skipped) {
     const find = Buffer.from(hit);
     let repl;
     try { repl = padBytes(p.replace, hit.length); } catch (e) { skipped.push(p.id + " (" + e.message + ")"); continue; }
+    // These replace a string literal in place, so only the inserted bytes are checked.
     let pos = buf.indexOf(find);
     let n = 0;
-    while (pos >= 0) { repl.copy(buf, pos); n++; pos = buf.indexOf(find, pos + find.length); }
+    while (pos >= 0) {
+      if (checkWindow(buf, repl, 0, repl.length)) { skipped.push(p.id + " (rejected: a NUL in the replacement)"); break; }
+      repl.copy(buf, pos); n++; pos = buf.indexOf(find, pos + find.length);
+    }
     changed += n;
     applied.push(p.id + (n > 1 ? " x" + n : ""));
   }
@@ -71,7 +99,15 @@ function applyRegions(buf, patches, applied, skipped) {
       const len = endAt - at;
       let repl;
       try { repl = padBytes(p.replace, len); } catch (e) { skipped.push(p.id + " (" + e.message + ")"); break; }
-      if (!buf.subarray(at, endAt).equals(repl)) { repl.copy(buf, at); n++; }
+      if (!buf.subarray(at, endAt).equals(repl)) {
+        // Check the edited window before keeping it: a bad anchor corrupts the file silently.
+        const keep = Buffer.from(buf.subarray(at, endAt));
+        const trial = Buffer.from(buf);
+        repl.copy(trial, at);
+        const bad = checkWindow(buf, trial, at, endAt);
+        if (bad) { skipped.push(p.id + " (rejected: " + bad + ")"); at = buf.indexOf(startBuf, at + len); continue; }
+        repl.copy(buf, at); n++;
+      }
       at = buf.indexOf(startBuf, at + len);
     }
     if (n) { changed += n; applied.push(p.id + (n > 1 ? " x" + n : "")); }

@@ -75,6 +75,54 @@ test("patcher refreshes a stale backup from an already-patched binary", () => {
     assert.equal(run(root, "--revert").status, 0);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
+// A region patch whose anchor starts mid-declaration used to glue two tokens together and
+// still report success, writing "var Oqrvar Ukr=..." into the binary.
+test("a patch that would glue two tokens together is rejected and the binary left alone", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cc-patch-guard-"));
+  fs.mkdirSync(path.join(root, "bin"), { recursive: true });
+  const bin = path.join(root, "bin", process.platform === "win32" ? "claude.exe" : "claude.bin");
+  // Geometry of the real bug: the anchor begins at "=" so the byte before it is the "r" of
+  // "var Oqr", and the replacement begins with "var" - the two join into one identifier.
+  const fixture = 'zzz};var Oqr=async()=>({type:"text",value:"removed"}),Iqr={type:"local",name:"agents"};vvv';
+  fs.writeFileSync(bin, fixture, { mode: 0o755 });
+  fs.writeFileSync(path.join(root, "patches.json"), JSON.stringify({
+    version: 1, note: "guard test", text: [], regions: [{
+      id: "glue-at-join", description: "would glue r + var",
+      start: ['=async()=>({type:"text",value:"removed"'],
+      end: [',Iqr={type:"local",name:"agents"'],
+      replace: 'var Ukr=async()=>"x"',
+    }],
+  }, null, 2));
+  try {
+    const r = run(root, "--apply");
+    assert.match(r.stdout, /rejected: two tokens were glued together/, "the glue must be reported");
+    assert.equal(fs.readFileSync(bin, "utf8"), fixture, "the binary must be left untouched");
+    assert.equal(fs.existsSync(bin + ".patched"), false, "nothing was applied, so there is no stamp");
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test("a legitimate region patch is still applied", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cc-patch-ok-"));
+  fs.mkdirSync(path.join(root, "bin"), { recursive: true });
+  const bin = path.join(root, "bin", process.platform === "win32" ? "claude.exe" : "claude.bin");
+  // The byte before the anchor is a separator, so the replacement joins cleanly.
+  const fixture = 'zzz;=async()=>({type:"text",value:"removed"}),Iqr={type:"local",name:"agents"};vvv';
+  fs.writeFileSync(bin, fixture, { mode: 0o755 });
+  fs.writeFileSync(path.join(root, "patches.json"), JSON.stringify({
+    version: 1, note: "clean test", text: [], regions: [{
+      id: "clean", description: "joins on a separator",
+      start: ['=async()=>({type:"text",value:"removed"'],
+      end: [',Iqr={type:"local",name:"agents"'],
+      replace: '=async()=>"new"',
+    }],
+  }, null, 2));
+  try {
+    const r = run(root, "--apply");
+    assert.match(r.stdout, /applied clean/, "a clean patch must still apply: " + r.stdout);
+    assert.match(fs.readFileSync(bin, "utf8"), /"new"/);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
 test("a successful apply leaves a stamp the launcher can check, revert removes it", () => {
   const root = setup("Switch between Claude models");
   const bin = path.join(root, "bin", process.platform === "win32" ? "claude.exe" : "claude.bin");
